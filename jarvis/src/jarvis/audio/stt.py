@@ -1,12 +1,15 @@
 """Speech-to-text (PR5, task 5.3).
 
 Design ADR-4: whisper-cli subprocess wrapper (list args, no shell) with
-`-l es -b 1 --vad --prompt <domain>`, 15s timeout, transcript read from stdout
-(-np -nt). The q5-medium decision gate (design gate 5.5) selects the model by
-estimated utterance duration: within the gate (<= gate_duration_s, default 4s)
-the bigger/medium model is used for accuracy, otherwise the small one for
-speed. Non-zero exit surfaces as STTError so the pipeline reports a spoken
-error (spec RNF/M latency scenarios).
+`-l es -bs 1 --prompt <domain>`, 15s timeout, transcript read from stdout
+(-np -nt). PR6 (integration): whisper.cpp 1.9.x renames beam size to `-bs`,
+and its `--vad` requires an explicit VAD model (`-vm`); without one the flag
+makes every invocation fail, so VAD is emitted only when `vad_model` is set —
+the app-level SilenceVAD still provides the spec's VAD gate. The q5-medium
+decision gate (design gate 5.5) selects the model by estimated utterance
+duration: within the gate (<= gate_duration_s, default 4s) the bigger/medium
+model is used for accuracy, otherwise the small one for speed. Non-zero exit
+surfaces as STTError so the pipeline reports a spoken error.
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ class WhisperSTT:
         language: str = LANGUAGE,
         gate_duration_s: float = GATE_DURATION_S,
         timeout_s: float = STT_TIMEOUT_S,
+        beam: int = 1,
+        vad_model: Path | None = None,
     ) -> None:
         self.whisper_cli = Path(whisper_cli)
         self.model_small = Path(model_small)
@@ -55,6 +60,8 @@ class WhisperSTT:
         self.language = language
         self.gate_duration_s = gate_duration_s
         self.timeout_s = timeout_s
+        self.beam = beam
+        self.vad_model = Path(vad_model) if vad_model else None
 
     def _command(self, wav_path: Path, duration_s: float) -> list[str]:
         model = select_model(
@@ -68,12 +75,13 @@ class WhisperSTT:
             str(wav_path),
             "-l",
             self.language,
-            "-b",
-            "1",
-            "--vad",
+            "-bs",
+            str(self.beam),
         ]
         if self.prompt:
             cmd += ["--prompt", self.prompt]
+        if self.vad_model is not None:
+            cmd += ["--vad", "-vm", str(self.vad_model)]
         cmd += ["-np", "-nt"]
         return cmd
 

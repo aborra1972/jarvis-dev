@@ -39,6 +39,7 @@ class Session:
     repos: dict[str, int] = field(default_factory=dict)
     reask_attempts: int = 0
     state_path: str = ""
+    switched_off: bool = False
     _allocated: dict[str, RepoSession] = field(default_factory=dict)
 
     def start(self, cwd: str, git_runner: GitRunner) -> str | None:
@@ -101,6 +102,7 @@ class Session:
             "active_project": self.active_project,
             "repos": self.repos,
             "reask_attempts": self.reask_attempts,
+            "switched_off": self.switched_off,
         }
         path = Path(self.state_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,4 +121,5 @@ def load_state(path: str) -> Session:
     session.active_project = payload.get("active_project")
     session.repos = payload.get("repos", {})
     session.reask_attempts = payload.get("reask_attempts", 0)
+    session.switched_off = payload.get("switched_off", False)
     return session

@@ -49,12 +49,14 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     session.active_project = "/repo/a"
     session.reask_attempts = 1
     session.repos = {"firefox": 0}
+    session.switched_off = True
     session.save()
 
     loaded = load_state(path)
     assert loaded.active_project == "/repo/a"
     assert loaded.reask_attempts == 1
     assert loaded.repos == {"firefox": 0}
+    assert loaded.switched_off is True
 
 
 def test_save_is_atomic_no_temp_left(tmp_path: Path) -> None:

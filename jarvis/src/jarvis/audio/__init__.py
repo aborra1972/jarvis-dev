@@ -22,6 +22,11 @@ from jarvis.audio.capture import (
     rms,
     write_wav,
 )
+from jarvis.audio.wake import (
+    DEFAULT_THRESHOLD as WAKE_DEFAULT_THRESHOLD,
+    OpenWakeWord,
+    triggered,
+)
 
 __all__ = [
     "BLOCK_MS",
@@ -34,4 +39,7 @@ __all__ = [
     "gather_utterance",
     "rms",
     "write_wav",
+    "WAKE_DEFAULT_THRESHOLD",
+    "OpenWakeWord",
+    "triggered",
 ]

@@ -22,6 +22,7 @@ SKELETON_MODULES = (
     "jarvis",
     "jarvis.audio",
     "jarvis.audio.capture",
+    "jarvis.audio.wake",
     "jarvis.cli",
     "jarvis.config",
     "jarvis.cli",

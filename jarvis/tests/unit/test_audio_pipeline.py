@@ -9,6 +9,8 @@ with fakes — the real hardware swap is E2E (PR6).
 
 from __future__ import annotations
 
+import threading
+import time
 from collections import deque
 from pathlib import Path
 
@@ -98,6 +100,52 @@ class FakePlayback:
         self.played.append(Path(wav_path))
 
 
+class _SlowTTS:
+    """TTS that signals when synthesis starts and blocks until released."""
+
+    def __init__(self, started: threading.Event) -> None:
+        self.started = started
+        self.texts: list[str] = []
+
+    def synthesize(self, text: str, out_path: Path) -> Path:
+        self.started.set()
+        time.sleep(0.2)
+        self.texts.append(text)
+        Path(out_path).write_bytes(b"RIFF")
+        return Path(out_path)
+
+
+class _FlakyTTS:
+    """TTS that fails exactly once, then succeeds."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.outs: list[Path] = []
+        self.fail_next = True
+
+    def synthesize(self, text: str, out_path: Path) -> Path:
+        if self.fail_next:
+            self.fail_next = False
+            raise TTSError("boom")
+        self.texts.append(text)
+        out = Path(out_path)
+        out.write_bytes(b"RIFF")
+        self.outs.append(out)
+        return out
+
+
+class _StuckSpeaker:
+    """Speaker that never finishes playing (for the IDLE drop-wake gate)."""
+
+    spoken: list[str] = []
+
+    def speak(self, text: str) -> None:
+        self.spoken.append(text)
+
+    def is_playing(self) -> bool:
+        return True
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.t = 0.0
@@ -178,27 +226,106 @@ def test_utterance_capture_raises_on_stt_error(tmp_path: Path) -> None:
         capture.capture()
 
 
-# --- PiperSpeaker (contracts.Speaker) -----------------------------------------
+# --- PiperSpeaker (contracts.Speaker, PR6 async queue) -------------------------
 def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
     tts = FakeTTS()
     playback = FakePlayback()
     speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
 
     speaker.speak("hecho")
+    speaker.flush()
 
     assert tts.texts == ["hecho"]
     assert playback.played == tts.outs
     assert tts.outs[0].is_file()
 
 
+def test_piper_speaker_preserves_order_and_delivers_all(tmp_path: Path) -> None:
+    tts = FakeTTS()
+    playback = FakePlayback()
+    speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
+
+    speaker.speak("uno")
+    speaker.speak("dos")
+    speaker.speak("tres")
+    speaker.flush()
+
+    assert tts.texts == ["uno", "dos", "tres"]
+    assert playback.played == tts.outs
+
+
 def test_piper_speaker_survives_tts_failure(tmp_path: Path) -> None:
     speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
     speaker.speak("hecho")  # must not raise
+    speaker.flush()
 
 
 def test_piper_speaker_survives_playback_failure(tmp_path: Path) -> None:
     speaker = PiperSpeaker(FakeTTS(), FakePlayback(error=True), out_dir=tmp_path)
     speaker.speak("hecho")  # must not raise
+    speaker.flush()
+
+
+def test_piper_speaker_is_playing_reports_true_until_drained(tmp_path: Path) -> None:
+    started = threading.Event()
+    tts = _SlowTTS(started)
+    speaker = PiperSpeaker(tts, FakePlayback(), out_dir=tmp_path)
+
+    assert speaker.is_playing() is False
+    speaker.speak("hola")
+    assert started.wait(timeout=2), "worker must start synthesizing"
+    assert speaker.is_playing() is True
+
+    speaker.flush()
+    assert speaker.is_playing() is False
+    assert tts.texts == ["hola"]
+
+
+def test_piper_speaker_worker_survives_error_and_continues(tmp_path: Path) -> None:
+    tts = _FlakyTTS()
+    playback = FakePlayback()
+    speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
+
+    speaker.speak("falla")
+    speaker.speak("sigue")
+    speaker.flush()
+
+    assert tts.texts == ["sigue"]
+    assert playback.played == tts.outs
+    assert speaker.is_playing() is False
+
+
+def test_piper_speaker_close_stops_worker_and_speak_after_is_safe(tmp_path: Path) -> None:
+    tts = FakeTTS()
+    speaker = PiperSpeaker(tts, FakePlayback(), out_dir=tmp_path)
+
+    speaker.speak("a")
+    speaker.flush()
+    speaker.close()
+    speaker.speak("b")  # must not raise after close
+    assert tts.texts == ["a"]
+
+
+def test_loop_drops_wake_while_speaker_is_playing(tmp_path: Path) -> None:
+    # PR6 (item 6): while a reply is still being spoken, the loop must not
+    # listen (no self-trigger on jarvis's own voice).
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True, True]),  # would fire if consulted
+        capture=lambda: "abrí firefox",
+        interpreter=FakeInterpreter([_interp()]),
+        speaker=_StuckSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+
+    outcome = run(pipeline, iterations=2)
+
+    assert outcome == "speaking"
+    assert pipeline.wake.calls == 0
+    assert _StuckSpeaker.spoken == []
 
 
 # --- MicSwitch (RF-11: off releases the mic) ----------------------------------

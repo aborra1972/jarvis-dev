@@ -13,7 +13,10 @@ config at E2E (PR6); these adapters only depend on the audio interfaces.
 from __future__ import annotations
 
 import os
+import queue
 import tempfile
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -67,7 +70,14 @@ class UtteranceCapture:
 
 
 class PiperSpeaker:
-    """Synthesizes and plays a spoken reply (contracts.Speaker)."""
+    """Synthesizes and plays spoken replies on a worker thread (contracts.Speaker).
+
+    PR6 (item 6): piper is slow (seconds per reply), so ``speak()`` enqueues
+    and returns immediately — the loop never blocks on TTS and replies play in
+    order. ``is_playing()`` feeds the loop's IDLE gate (no self-trigger on
+    jarvis's own voice); ``flush()`` waits until the queue drains (used by the
+    loop on exit and by tests); ``close()`` stops the worker.
+    """
 
     def __init__(
         self,
@@ -79,17 +89,59 @@ class PiperSpeaker:
         self.tts = tts
         self.playback = playback
         self.out_dir = Path(out_dir) if out_dir else Path(tempfile.gettempdir())
+        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._closed = False
+        self._playing = False
+        self._thread = threading.Thread(target=self._worker, name="jarvis-piper", daemon=True)
+        self._thread.start()
 
     def _next_wav(self) -> Path:
         return self.out_dir / f"jarvis-reply-{uuid.uuid4().hex}.wav"
 
-    def speak(self, text: str) -> None:
+    def _worker(self) -> None:
+        while True:
+            text = self._queue.get()
+            if text is None:  # stop sentinel
+                return
+            self._playing = True
+            try:
+                self._play(text)
+            finally:
+                self._playing = False
+                self._queue.task_done()
+
+    def _play(self, text: str) -> None:
         wav_path = self._next_wav()
         try:
             wav_path = self.tts.synthesize(text, wav_path)
             self.playback.play(wav_path)
         except (TTSError, PlaybackError):
             pass  # loop keeps running; the human can retry
+
+    def speak(self, text: str) -> None:
+        if self._closed:
+            return
+        self._queue.put(text)
+
+    def is_playing(self) -> bool:
+        return self._queue.unfinished_tasks > 0 or self._playing
+
+    def flush(self, timeout: float = 10.0) -> None:
+        if self._closed:
+            return
+        deadline = time.monotonic() + timeout
+        while self._queue.unfinished_tasks > 0:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.005)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self.flush()
+        self._closed = True
+        self._queue.put(None)
+        self._thread.join(timeout=5.0)
 
 
 class MicSwitch:

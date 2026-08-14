@@ -61,16 +61,22 @@ class _Context:
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
     """Run the FSM loop until stopped, iterations are exhausted, or (with no
-    voice pipeline yet) the first idle. Persists session state before exit."""
+    voice pipeline yet) the first idle. Persists session state and flushes any
+    pending spoken reply before exit."""
     session = pipeline.session
     session.start(pipeline.cwd, pipeline.git_runner or (lambda cwd: None))
     state = State.IDLE
     context = _Context()
     count = 0
-    while state is not State.STOPPED and (iterations is None or count < iterations):
-        count += 1
-        state, context = _tick(state, pipeline, context)
-    session.save()
+    try:
+        while state is not State.STOPPED and (iterations is None or count < iterations):
+            count += 1
+            state, context = _tick(state, pipeline, context)
+    finally:
+        session.save()
+        flush = getattr(pipeline.speaker, "flush", None)
+        if callable(flush):
+            flush()
     return context.outcome
 
 
@@ -79,6 +85,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if _is_switched_off(pipeline):
             context.outcome = "switched_off"
             return State.OFF, context
+        if _speaker_is_playing(pipeline.speaker):
+            # PR6 (item 6): never listen over jarvis's own voice.
+            context.outcome = "speaking"
+            return State.IDLE, context
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
             context.outcome = "no_wake"
             return State.IDLE, context
@@ -203,6 +213,11 @@ def _is_switched_off(pipeline: Pipeline) -> bool:
     if pipeline.switch_state is not None:
         return pipeline.switch_state()
     return pipeline.session.switched_off
+
+
+def _speaker_is_playing(speaker: object) -> bool:
+    is_playing = getattr(speaker, "is_playing", None)
+    return bool(is_playing()) if callable(is_playing) else False
 
 
 # --- CLI wiring (task 3.6) ----------------------------------------------------

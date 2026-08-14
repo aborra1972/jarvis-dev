@@ -1,13 +1,99 @@
-"""Golden rule gate (bootstrap skeleton).
+"""Deterministic golden gate (PR2, tasks 2.1/2.3).
 
-Design: deterministic regex gate, authoritative over the LLM, for destructive
-intents — shutdown/reboot/power_off_self (spec: golden rejection wins over LLM
-suggestion). Real implementation lands in PR2 (interpreter).
+Runs FIRST, before the LLM (ADR-2): the destructive patterns are the hard gate
+— a match emits the destructive intent with ``confirm_required=True`` and the
+LLM is NEVER consulted (spec: "never depends on the LLM"). Canonical
+non-destructive fast-path patterns return a direct intent (latency win, design
+open question resolved in this slice). No match → ``gate`` returns ``None`` and
+the interpreter delegates to the LLM — and any destructive intent the LLM
+suggests without a golden match is rejected upstream.
+
+All patterns are full-string anchored and match the NORMALIZED transcript
+(canonical infinitive forms produced by normalize.py): minimal surface, no
+trailing words, no shell.
 """
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 
-def gate() -> None:
-    """Bootstrap stub — real implementation lands in PR2 (interpreter)."""
-    raise NotImplementedError("jarvis.interpreter.golden.gate: implemented in PR2 (interpreter)")
+from jarvis.interpreter.schema import Intent
+
+# (intent, regex) — destructive hard gate, checked in order.
+DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (
+        "shutdown",
+        r"^(?:cerrar|apagar) (?:linux|la maquina|el equipo|el sistema|la pc|la compu|la computadora)(?: ya| ahora)?$",
+    ),
+    (
+        "reboot",
+        r"^reiniciar (?:linux|la maquina|el equipo|el sistema|la pc|la compu|la computadora)(?: ya| ahora)?$",
+    ),
+    ("power_off_self", r"^(?:apagarse|dormirse)(?: ya| ahora)?$"),
+)
+
+# --- canonical non-destructive fast-path patterns ---------------------------
+_OPEN_REPO_PROJECT = re.compile(
+    r"^abrir (?:el |la |este |mi |nuestro |ese )?(?:proyecto|repo|repositorio)(?: (.+))?$"
+)
+_OPEN_REPO_OPENCODE = re.compile(r"^abrir opencode(?: en el (?:repo|repositorio|proyecto))?(?: (.+))?$")
+_OPEN_REPO_POINTER = re.compile(r"^abrir (?:el |la )?(?:este|aca)$")
+_OPEN_APP = re.compile(r"^abrir (.+)$")
+_WEB_SEARCH = re.compile(r"^buscar (.+)$")
+_ASK = re.compile(r"^preguntar(?:le)?(?: a opencode)? (.+)$")
+_HELP = re.compile(r"^(?:ayudar|ayuda|que podes hacer|que sabes hacer|que puede hacer)$")
+
+
+def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
+    # Empty repo means "the active project" (delegated to orchestrator, PR3).
+    return {"repo": m.group(1).strip() if m.group(1) else ""}
+
+
+def _web_search_from_match(m: re.Match[str]) -> dict[str, str]:
+    return {"query": m.group(1).strip(), "engine": "google"}
+
+
+def _single_group(key: str) -> Callable[[re.Match[str]], dict[str, str]]:
+    def extract(m: re.Match[str]) -> dict[str, str]:
+        return {key: m.group(1).strip()}
+    return extract
+
+
+# (pattern, intent, entity extractor) — first match wins; repo patterns must
+# precede open_app so "abrir el repo X" never falls into the app fast path.
+FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], dict[str, str]]], ...] = (
+    (_OPEN_REPO_PROJECT, "open_repo", _repo_from_match),
+    (_OPEN_REPO_OPENCODE, "open_repo", _repo_from_match),
+    (_OPEN_REPO_POINTER, "open_repo", lambda m: {"repo": ""}),
+    (_OPEN_APP, "open_app", _single_group("app")),
+    (_WEB_SEARCH, "web_search", _web_search_from_match),
+    (_ASK, "ask", _single_group("query")),
+    (_HELP, "help", lambda m: {}),
+)
+
+
+def gate(normalized: str) -> Intent | None:
+    """Match a normalized transcript; returns an Intent or None (delegate)."""
+    if not normalized:
+        return None
+    for intent, pattern in DESTRUCTIVE_PATTERNS:
+        if re.match(pattern, normalized):
+            return Intent(
+                intent=intent,
+                entities={},
+                confidence=1.0,
+                confirm_required=True,
+                source="golden",
+            )
+    for pattern, intent, extract in FAST_PATH_PATTERNS:
+        match = pattern.match(normalized)
+        if match:
+            return Intent(
+                intent=intent,
+                entities=extract(match),
+                confidence=0.9,
+                confirm_required=False,
+                source="golden",
+            )
+    return None

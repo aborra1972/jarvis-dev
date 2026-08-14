@@ -20,7 +20,11 @@ from typing import Callable
 
 from jarvis import config
 from jarvis.actions import base
-from jarvis.interpreter.llm import build_opencode_command, parse_assistant_text
+from jarvis.interpreter.llm import (
+    build_opencode_command,
+    parse_assistant_text,
+    parse_session_id,
+)
 from jarvis.interpreter.schema import Intent
 from jarvis.orchestrator.contracts import ActionResult
 from jarvis.orchestrator.session import Session
@@ -191,9 +195,12 @@ class OpenCodeExecutor:
         query = (intent.entities.get("query") or "").strip()
         if query:
             prompt = prompt.format(q=query)
+        # PR6 (integration): pass `-s` only once a server-created sessionID is
+        # bound; the first run after serve spawn creates it (see llm.build_opencode_command).
+        session_id = session.work_sessions.get(session.active_project)
         command = build_opencode_command(
             f"http://{self._host}:{allocated.port}",
-            allocated.session_work,
+            session_id,
             prompt,
             Path(session.active_project),
         )
@@ -205,5 +212,9 @@ class OpenCodeExecutor:
             if result is not None and result.returncode == 0:
                 text = parse_assistant_text(result.stdout)
                 if text:
+                    if session_id is None:
+                        created = parse_session_id(result.stdout)
+                        if created:
+                            session.bind_work_session(session.active_project, created)
                     return ActionResult(ok=True, spoken=_truncate(text))
         return ActionResult(ok=False, spoken=_UNABLE_SPOKEN)

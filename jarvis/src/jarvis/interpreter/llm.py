@@ -37,17 +37,39 @@ class FakeProvider:
 
 
 def build_opencode_command(
-    server_url: str, session_id: str, prompt: str, workdir: str | Path | None = None
+    server_url: str, session_id: str | None, prompt: str, workdir: str | Path | None = None
 ) -> list[str]:
-    """``opencode run --attach <url> -s <sessionID> --format json [--dir <repo>] "<prompt>"`` (ADR-8).
+    """``opencode run --attach <url> [-s <sessionID>] --format json [--dir <repo>] "<prompt>"`` (ADR-8).
 
-    List-args subprocess (no shell) keeps the prompt/entities inert.
+    List-args subprocess (no shell) keeps the prompt/entities inert. PR6
+    (integration): ``-s`` is emitted ONLY when a sessionID is known — a fresh
+    server rejects unknown sessions with "Session not found", so the first run
+    after serve spawns without it and binds the id from the NDJSON stream.
     """
-    command = ["opencode", "run", "--attach", server_url, "-s", session_id, "--format", "json"]
+    command = ["opencode", "run", "--attach", server_url]
+    if session_id is not None:
+        command += ["-s", session_id]
+    command += ["--format", "json"]
     if workdir is not None:
         command += ["--dir", str(workdir)]
     command.append(prompt)
     return command
+
+
+def parse_session_id(output: str) -> str | None:
+    """Extract the sessionID from ``opencode run --format json`` NDJSON events."""
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        sid = event.get("sessionID")
+        if isinstance(sid, str) and sid:
+            return sid
+    return None
 
 
 def parse_assistant_text(output: str) -> str:
@@ -80,7 +102,7 @@ class OpenCodeProvider:
     def __init__(
         self,
         server_url: str,
-        session_id: str,
+        session_id: str | None,
         workdir: str | Path | None = None,
         timeout: float = 30.0,
         runner: object | None = None,

@@ -26,11 +26,11 @@ Chain strategy: pending
 - [x] 1.3 Signal: pytest green + `jarvis --help`
 
 ## Phase 2: Interpreter
-- [ ] 2.1 RED: golden/normalize tables ("cerrá linux", "apagate", "abrí/abrime")
-- [ ] 2.2 `interpreter/normalize.py` (accents, wake-strip)
-- [ ] 2.3 `interpreter/golden.py` regex gate; LLM rejection ("cerrá la ventana")
-- [ ] 2.4 `schema.py` + `llm.py` fake-provider tests: happy/unknown→re-ask
-- [ ] 2.5 Corpus replay tests (M1/M3)
+- [x] 2.1 RED: golden/normalize tables ("cerrá linux", "apagate", "abrí/abrime")
+- [x] 2.2 `interpreter/normalize.py` (accents, wake-strip)
+- [x] 2.3 `interpreter/golden.py` regex gate; LLM rejection ("cerrá la ventana")
+- [x] 2.4 `schema.py` + `llm.py` fake-provider tests: happy/unknown→re-ask
+- [x] 2.5 Corpus replay tests (M1/M3)
 
 ## Phase 3: Orchestrator
 - [ ] 3.1 `orchestrator/state.py` FSM + transition tests

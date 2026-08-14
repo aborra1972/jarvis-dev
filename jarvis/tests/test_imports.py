@@ -47,15 +47,14 @@ SKELETON_MODULES = (
 )
 
 # Stub callables must raise until their PR lands (fail loud, no fake logic).
+# NOTE (PR2): the four interpreter stubs were implemented in PR2 and their
+# stub entries removed — behavior is covered by tests/unit/test_normalize.py,
+# test_golden.py, test_schema.py, test_llm.py, test_interpreter.py.
 STUB_CALLABLES = (
     "jarvis.audio.capture",
     "jarvis.wake.detect",
     "jarvis.stt.transcribe",
     "jarvis.tts.speak",
-    "jarvis.interpreter.normalize.normalize",
-    "jarvis.interpreter.golden.gate",
-    "jarvis.interpreter.llm.resolve",
-    "jarvis.interpreter.schema.validate",
     "jarvis.orchestrator.state.transition",
     "jarvis.orchestrator.confirm.confirm",
     "jarvis.orchestrator.session.load_state",

@@ -11,7 +11,7 @@ context: |
   Status: PRD approved (build from scratch, Option A); Linux spike COMPLETE (S1/S2/S3 + system/web/files OK; S4/WSL2 pending). No application code yet — SDD MVP starts now.
   Stack: Python 3.12.3 (system), git (repo initialized, no commits), OpenCode 1.18.18 (CLI + ACP/MCP); whisper.cpp (spike/whisper.cpp/build/bin/whisper-cli) + piper TTS es_AR-daniela (spike/.venv).
   Architecture: thin voice-to-action bridge: wake word -> local STT -> command interpreter -> OpenCode CLI / system / files / web.
-  Testing: no runner configured (pytest absent; stdlib unittest available) — strict_tdd false until a runner is added.
+  Testing: pytest 9.1.1 in jarvis/.venv (bootstrap PR1); strict TDD active from PR2.
   Style: English SDD artifacts, conventional commits, interactive execution, ask-on-risk delivery, 800-line review budget.
 
 rules:
@@ -33,23 +33,23 @@ rules:
     guidelines:
       - Follow existing code patterns; reuse spike artifacts (whisper-cli, piper venv) instead of rebuilding
       - Prefer stdlib where latency matters (voice pipeline)
-    tdd: false  # no test runner configured yet (pytest pending)
-    test_command: ""
+    tdd: true  # enabled at bootstrap (PR1): pytest in jarvis/.venv
+    test_command: "jarvis/.venv/bin/pytest"
   verify:
-    test_command: ""
+    test_command: "jarvis/.venv/bin/pytest"
     build_command: ""
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas
 
 testing:
-  strict_tdd: false
-  runner: none detected (pytest not installed; stdlib unittest available as `python -m unittest`)
+  strict_tdd: true  # enabled at bootstrap (PR1); PR2+ runs RED→GREEN→REFACTOR
+  runner: pytest (jarvis/.venv/bin/pytest, pytest 9.1.1)
   layers:
-    unit: "python -m unittest (stdlib only)"
-    integration: none
-    e2e: none (manual spike scripts only)
-  coverage: none
+    unit: "jarvis/.venv/bin/pytest jarvis/tests"
+    integration: "pytest -m slow (PR4+; real whisper-cli/piper/opencode serve)"
+    e2e: none (manual demo + corpus replay, PR6)
+  coverage: none (threshold 0; pytest-cov not installed)
   quality:
     linter: none
     type_checker: none

@@ -35,6 +35,9 @@ from jarvis.audio.stt import (
     select_model,
 )
 
+from jarvis.audio.tts import TTS_TIMEOUT_S, TTSError, PiperTTS
+from jarvis.audio.playback import DEFAULT_PLAYER, Playback, PlaybackError
+
 __all__ = [
     "BLOCK_MS",
     "MAX_UTTERANCE_S",
@@ -54,4 +57,10 @@ __all__ = [
     "STTError",
     "WhisperSTT",
     "select_model",
+    "TTS_TIMEOUT_S",
+    "TTSError",
+    "PiperTTS",
+    "DEFAULT_PLAYER",
+    "Playback",
+    "PlaybackError",
 ]

@@ -67,4 +67,7 @@ Chain strategy: pending
   - `build_pipeline()` + real `start()` (8f07feb); ack = spoken reply via TTS queue with non-blocking worker (0bfa1dc)
 - [x] 6.2 E2E demo: open repo→ask→shutdown + M1/M3 replay + latency
   - Real binaries smoke suite (ca82a31): whisper STT timing 4.34s, piper+paplay, opencode serve→run--attach→session reuse. Full voice-mic demo not run (no interactive run).
-- [ ] 6.3 `jarvis clean`; switch off (no mic); non-vocal on (RF-11); verify M4/M5/M6; README
+- [x] 6.3 `jarvis clean`; switch off (no mic); non-vocal on (RF-11); verify M4/M5/M6; README
+  - `jarvis clean` wired (loop.clean + cli): deletes logs under `~/.local/state/jarvis/logs/` (capture wavs, reply wavs, transcripts.jsonl), preserves state.json/config; TranscriptLog JSONL journal appended per handled utterance (task 6.3 WU1, logs.py).
+  - RF-11 non-vocal on/off cross-process: SIGUSR1=off/SIGUSR2=on + pid file `~/.local/state/jarvis/jarvis.pid`; `jarvis off`/`jarvis on` signal a running loop; FSM already never consults wake/mic while OFF (WU2, test_switch_signal.py).
+  - M4/M5/M6 verification as executable checks (WU3, tests/unit/test_metrics.py): M6 every destructive intent golden-gated confirm_required + prompt; M4 opencode degrade → spoken notice, system still works; M5 the 4 domains execute. Baseline suite: 524 passed, 3 e2e deselected.

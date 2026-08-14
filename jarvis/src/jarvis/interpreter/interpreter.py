@@ -42,12 +42,15 @@ def resolve_intent(
     """Resolve a raw transcript to an Interpretation (never emits unvalidated intents)."""
     allowlist = _config.ALLOWED_APPS if app_allowlist is None else app_allowlist
 
-    normalized = normalize(text)
-    if not normalized:
+    # Natural surface (no verb canonicalization): golden patterns now accept
+    # rioplatense variants via _verb_alt, so free-text entities (ask/web_search
+    # queries) keep the user's original wording instead of corrupted verb forms.
+    surface = normalize(text, canonicalize=False)
+    if not surface:
         return Interpretation(needs_reask=True, reason="empty")
 
     # 1. Golden gate FIRST — authoritative for destructive intents (ADR-2).
-    hit = golden.gate(normalized)
+    hit = golden.gate(surface)
     if hit is not None:
         if hit.confirm_required:
             return Interpretation(intent=hit)  # destructive: LLM never consulted
@@ -61,7 +64,7 @@ def resolve_intent(
     if provider is None:
         return Interpretation(needs_reask=True, reason="no_provider")
     try:
-        intent = llm.resolve(normalized, schema.build_system_prompt(), provider)
+        intent = llm.resolve(surface, schema.build_system_prompt(), provider)
     except schema.SchemaError as exc:
         if exc.code == "unknown_intent":
             return Interpretation(unsupported=True, reason="unknown_intent")

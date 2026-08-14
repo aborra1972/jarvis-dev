@@ -109,8 +109,15 @@ def _strip_accents(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
-def normalize(text: str) -> str:
-    """Normalize a raw transcript to the canonical command surface."""
+def normalize(text: str, canonicalize: bool = True) -> str:
+    """Normalize a raw transcript to the command surface.
+
+    With ``canonicalize=True`` (default) rioplatense variants are mapped to
+    canonical infinitives — the surface the golden gate matches. With
+    ``canonicalize=False`` the verb table is skipped so free-text entities
+    (ask/web_search queries) keep the user's original wording instead of
+    being corrupted ("se crea" must not become "se crear").
+    """
     lowered = text.lower()
     no_accents = _strip_accents(lowered)
     # Keep letters, digits and safe separators (- _ .); everything else is
@@ -118,7 +125,8 @@ def normalize(text: str) -> str:
     # the golden path (entity validation still guards the LLM path).
     no_punct = re.sub(r"[^a-z0-9\s._-]", " ", no_accents)
     without_wake = _WAKE_STRIP.sub("", no_punct, count=1)
-    canonical = without_wake
-    for pattern, replacement in _CANONICAL:
-        canonical = pattern.sub(replacement, canonical)
-    return _WS.sub(" ", canonical).strip()
+    result = without_wake
+    if canonicalize:
+        for pattern, replacement in _CANONICAL:
+            result = pattern.sub(replacement, result)
+    return _WS.sub(" ", result).strip()

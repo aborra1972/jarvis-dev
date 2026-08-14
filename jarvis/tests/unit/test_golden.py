@@ -18,6 +18,11 @@ def _g(raw: str):
     return gate(normalize(raw))
 
 
+def _g_natural(raw: str):
+    """Gate over the NATURAL surface (canonicalize=False) — the interpreter's contract."""
+    return gate(normalize(raw, canonicalize=False))
+
+
 DESTRUCTIVE_CASES: list[tuple[str, str]] = [
     # (raw utterance, expected destructive intent)
     ("cerrá linux", "shutdown"),
@@ -99,3 +104,27 @@ def test_fast_path_direct_intent(raw: str, expected_intent: str, expected_entiti
     assert intent.confirm_required is False
     assert intent.confidence == 0.9
     assert intent.source == "golden"
+
+
+# --- free-text entities stay natural (WARNING #1 fix) ------------------------
+def test_free_text_query_keeps_original_verbs() -> None:
+    # "se crea" must NOT become "se crear": the surface is natural, only the
+    # golden patterns carry the rioplatense variants.
+    intent = _g_natural("preguntale a opencode cómo se crea una tabla")
+    assert intent is not None
+    assert intent.intent == "ask"
+    assert intent.entities["query"] == "como se crea una tabla"
+
+
+def test_web_search_query_keeps_original_verbs() -> None:
+    intent = _g_natural("buscá cómo se arma un esquema de base de datos")
+    assert intent is not None
+    assert intent.intent == "web_search"
+    assert intent.entities["query"] == "como se arma un esquema de base de datos"
+
+
+def test_ask_query_with_verb_inside_entity() -> None:
+    intent = _g_natural("preguntale cómo se configura el agente")
+    assert intent is not None
+    assert intent.intent == "ask"
+    assert intent.entities["query"] == "como se configura el agente"

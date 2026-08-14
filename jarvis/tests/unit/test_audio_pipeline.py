@@ -22,8 +22,8 @@ from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
 from jarvis.interpreter import Interpretation
 from jarvis.interpreter.schema import Intent
-from jarvis.orchestrator.contracts import ActionResult
-from jarvis.orchestrator.loop import Pipeline, run
+from jarvis.orchestrator.contracts import ActionResult, CaptureError
+from jarvis.orchestrator.loop import STT_ERROR_SPOKEN, Pipeline, run
 from jarvis.orchestrator.session import load_state
 
 BLOCK = SAMPLE_RATE * BLOCK_MS // 1000
@@ -167,12 +167,15 @@ def test_utterance_capture_returns_none_when_no_frames(tmp_path: Path) -> None:
     assert capture.capture() is None
 
 
-def test_utterance_capture_returns_none_on_stt_error(tmp_path: Path) -> None:
+def test_utterance_capture_raises_on_stt_error(tmp_path: Path) -> None:
+    # PR6 (item 5): an STT failure must surface so the loop replies with a
+    # spoken error instead of pretending nothing was heard.
     capturer = FakeCapturer([_speech(), _silence()])
     stt = FakeSTT("", error=True)
     capture = UtteranceCapture(capturer, stt, _vad(), wav_dir=tmp_path)
 
-    assert capture.capture() is None  # silence-like recovery, loop stays idle
+    with pytest.raises(CaptureError):
+        capture.capture()
 
 
 # --- PiperSpeaker (contracts.Speaker) -----------------------------------------
@@ -234,6 +237,33 @@ def _interp() -> Interpretation:
     return Interpretation(intent=_intent(), needs_reask=False, unsupported=False)
 
 
+def _power_off_interp() -> Interpretation:
+    return Interpretation(
+        intent=Intent(
+            intent="shutdown",
+            entities={},
+            confidence=0.9,
+            confirm_required=True,
+        ),
+        needs_reask=False,
+        unsupported=False,
+    )
+
+
+class _FlakySTT:
+    """Succeeds, fails exactly once on the 2nd call, then succeeds again."""
+
+    def __init__(self, good: str) -> None:
+        self.good = good
+        self.calls = 0
+
+    def transcribe(self, wav_path: Path, duration_s: float) -> str:
+        self.calls += 1
+        if self.calls == 2:
+            raise STTError("boom")
+        return self.good
+
+
 def test_loop_listening_uses_capturer_wake_and_stt(
     tmp_path: Path,
 ) -> None:
@@ -264,6 +294,67 @@ def test_loop_listening_uses_capturer_wake_and_stt(
     assert tts.texts == ["ok"]  # speaking goes through TTS + playback
     assert playback.played == tts.outs
     assert capturer.reads > 0
+
+
+def test_loop_speaks_error_when_stt_fails_and_keeps_listening(
+    tmp_path: Path,
+) -> None:
+    # PR6 (item 5): STT failure → spoken error, loop returns to listening.
+    capturer = FakeCapturer([_speech(), _silence()])
+    tts = FakeTTS()
+    playback = FakePlayback()
+    wake = FakeWake([True])
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=wake,
+        capture=UtteranceCapture(capturer, FakeSTT("", error=True), _vad(), wav_dir=tmp_path),
+        interpreter=FakeInterpreter([]),
+        speaker=PiperSpeaker(tts, playback, out_dir=tmp_path),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        switch_state=MicSwitch(capturer, lambda: False),
+    )
+
+    outcome = run(pipeline, iterations=2)
+
+    assert outcome == "stt_error"
+    assert tts.texts == [STT_ERROR_SPOKEN]
+    assert wake.calls == 1  # returned to listening after the error
+
+
+def test_loop_confirmation_survives_stt_failure_and_retries(
+    tmp_path: Path,
+) -> None:
+    # PR6 (item 5): a capture failure during confirmation must not abort the
+    # destructive op silently — it apologizes and retries the confirmation.
+    capturer = FakeCapturer(
+        [_speech(), _speech(), _silence(), _speech(), _speech(), _silence(),
+         _speech(), _speech(), _silence()]
+    )
+    stt = _FlakySTT("si")
+    tts = FakeTTS()
+    playback = FakePlayback()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=UtteranceCapture(capturer, stt, _vad(), wav_dir=tmp_path),
+        interpreter=FakeInterpreter([_power_off_interp()]),
+        speaker=PiperSpeaker(tts, playback, out_dir=tmp_path),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        switch_state=MicSwitch(capturer, lambda: False),
+    )
+
+    outcome = run(pipeline, iterations=5)
+
+    assert outcome == "executed"
+    assert STT_ERROR_SPOKEN in tts.texts
+    assert tts.texts[-1] == "ok"
+    assert stt.calls == 3  # listen + failed confirm + successful confirm
 
 
 def test_loop_off_releases_mic_and_never_consults_wake(

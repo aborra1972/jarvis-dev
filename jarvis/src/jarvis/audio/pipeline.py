@@ -21,14 +21,15 @@ from jarvis.audio.capture import SAMPLE_RATE, Capturer, SilenceVAD, gather_utter
 from jarvis.audio.playback import PlaybackError
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
+from jarvis.orchestrator.contracts import CaptureError
 
 
 class UtteranceCapture:
     """Captures a spoken utterance and transcribes it (contracts.Capture).
 
     Returns None for silence so the loop stays idle (spec: no self-trigger on
-    non-vocal noise). STT failures degrade to None (silence-like recovery);
-    the spoken-error reply is loop polish for E2E.
+    non-vocal noise). STT failures raise CaptureError so the loop speaks an
+    apology and retries (PR6, item 5) instead of staying silently idle.
     """
 
     def __init__(
@@ -61,8 +62,8 @@ class UtteranceCapture:
         write_wav(wav_path, blocks, sample_rate=self.sample_rate)
         try:
             return self.stt.transcribe(wav_path, duration_s)
-        except STTError:
-            return None
+        except STTError as exc:
+            raise CaptureError(str(exc)) from exc
 
 
 class PiperSpeaker:

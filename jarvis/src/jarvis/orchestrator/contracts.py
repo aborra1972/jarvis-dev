@@ -26,6 +26,14 @@ class Capture(Protocol):
     def capture(self) -> str | None: ...
 
 
+class CaptureError(Exception):
+    """Capture/STT hardware failure — the loop replies with a spoken error (PR6).
+
+    Distinct from ``None`` (silence → stay idle): an error is abnormal, so the
+    loop tells the human and retries instead of pretending nothing was heard.
+    """
+
+
 class Speaker(Protocol):
     def speak(self, text: str) -> None: ...
 

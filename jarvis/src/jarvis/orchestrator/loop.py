@@ -20,6 +20,7 @@ from jarvis import config
 from jarvis.actions.base import build_registry
 from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
+from jarvis.orchestrator.contracts import CaptureError
 from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
@@ -32,6 +33,7 @@ REVEAL_PREFIX = "sigo sin entenderte. esto fue lo que capté: "
 REJECTED_SPOKEN = "eso no es válido, no lo puedo hacer"
 UNSUPPORTED_SPOKEN = "no sé hacer eso todavía"
 NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
+STT_ERROR_SPOKEN = "no pude escucharte, intentá de nuevo"
 
 
 @dataclass
@@ -85,7 +87,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.LISTENING, context
 
     if state is State.LISTENING:
-        transcript = pipeline.capture.capture()
+        try:
+            transcript = pipeline.capture.capture()
+        except CaptureError:
+            pipeline.speaker.speak(STT_ERROR_SPOKEN)
+            context.outcome = "stt_error"
+            return State.IDLE, context
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
@@ -121,13 +128,21 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
 
     if state is State.CONFIRMING:
         intent = context.interpretation.intent
-        verdict = confirm(
-            intent,
-            clock=pipeline.clock,
-            capture=pipeline.capture.capture,
-            speaker=pipeline.speaker,
-            timeout=pipeline.confirm_timeout,
-        )
+        try:
+            verdict = confirm(
+                intent,
+                clock=pipeline.clock,
+                capture=pipeline.capture.capture,
+                speaker=pipeline.speaker,
+                timeout=pipeline.confirm_timeout,
+            )
+        except CaptureError:
+            # PR6 (item 5): a capture failure during the confirmation gate is
+            # transient — apologize and retry the confirmation (never abort
+            # the destructive op silently).
+            pipeline.speaker.speak(STT_ERROR_SPOKEN)
+            context.outcome = "stt_error"
+            return State.CONFIRMING, context
         if verdict is Confirmation.CONFIRMED:
             context.outcome = "confirmed"
             return State.EXECUTING, context

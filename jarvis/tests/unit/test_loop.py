@@ -234,6 +234,54 @@ def test_no_wake(tmp_path: Path) -> None:
     assert run(pipeline, iterations=1) == "no_wake"
 
 
+class FakeTranscriptLog:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str | None, str]] = []
+
+    def record(self, transcript: str, intent=None, outcome=None) -> None:
+        self.records.append((transcript, intent, outcome))
+
+
+def test_loop_records_transcripts_to_journal(tmp_path: Path) -> None:
+    journal = FakeTranscriptLog()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["abrí firefox"]),
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        transcript_log=journal,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert journal.records == [("abrí firefox", "open_app", "execute")]
+
+
+def test_loop_off_state_never_consults_wake_or_capture(tmp_path: Path) -> None:
+    wake = FakeWake([True])
+    capture = FakeCapture(["abrí firefox"])
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=wake,
+        capture=capture,
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        switch_state=lambda: True,
+    )
+    outcome = run(pipeline, iterations=3)
+    assert outcome == "off"
+    assert len(wake.results) == 1
+    assert len(capture.transcripts) == 1
+
+
 def test_power_off_self_stops_loop(tmp_path: Path) -> None:
     pipeline = _pipeline(
         wake=[True],

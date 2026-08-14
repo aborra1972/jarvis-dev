@@ -1,8 +1,8 @@
 """Command-line interface.
 
 Exposes the lifecycle/switch commands from the assistant-lifecycle spec
-(`jarvis start/stop/off/on/clean/logs`). start/off/on are wired to the
-orchestrator (PR3); stop/clean/logs stay loud stubs until PR6.
+(`jarvis start/stop/off/on/clean/logs`). start/off/on/clean are wired to the
+orchestrator (PR3, task 6.3); stop/logs stay loud stubs.
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
         return loop.switch_off()
     if args.command == "on":
         return loop.switch_on()
+    if args.command == "clean":
+        return loop.clean()
     print(f"{args.command}: not implemented yet (bootstrap skeleton)", file=sys.stderr)
     return 1
 

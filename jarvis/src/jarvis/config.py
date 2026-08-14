@@ -60,6 +60,14 @@ OPCODE_BASE_PORT = 32111
 # --- Session state (RF-6): active project + repo→{port, sessionIDs} ----------
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
 
+# --- Runtime dirs (task 6.3): local deletable logs (RNF-3) + signal switch ---
+RUN_DIR = Path.home() / ".local" / "state" / "jarvis"
+LOGS_DIR = RUN_DIR / "logs"
+LOGS_CAPTURE_DIR = LOGS_DIR / "capture"   # utterance wavs (audio logs)
+LOGS_REPLY_DIR = LOGS_DIR / "reply"       # TTS reply wavs (audio logs)
+TRANSCRIPTS_FILE = LOGS_DIR / "transcripts.jsonl"  # handled transcripts
+PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
+
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
 ALLOWED_APPS: set[str] = {"firefox"}
 

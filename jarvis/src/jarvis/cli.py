@@ -1,15 +1,16 @@
-"""Command-line interface (bootstrap skeleton).
+"""Command-line interface.
 
 Exposes the lifecycle/switch commands from the assistant-lifecycle spec
-(`jarvis start/stop/off/on/clean/logs`). Commands are stubs that fail loudly
-until their PRs land: start/stop wiring in PR6 (loop.py), off/on switch in
-PR5 (voice) + PR6, clean in PR6 (RNF-3), logs in PR6.
+(`jarvis start/stop/off/on/clean/logs`). start/off/on are wired to the
+orchestrator (PR3); stop/clean/logs stay loud stubs until PR6.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+
+from jarvis.orchestrator import loop
 
 COMMANDS = ("start", "stop", "off", "on", "clean", "logs")
 
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
     for cmd in COMMANDS:
-        sub.add_parser(cmd, help=f"{cmd} (bootstrap stub)")
+        sub.add_parser(cmd, help=f"{cmd}")
     return parser
 
 
@@ -33,6 +34,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    if args.command == "start":
+        return loop.start()
+    if args.command == "off":
+        return loop.switch_off()
+    if args.command == "on":
+        return loop.switch_on()
     print(f"{args.command}: not implemented yet (bootstrap skeleton)", file=sys.stderr)
     return 1
 

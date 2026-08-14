@@ -50,16 +50,14 @@ SKELETON_MODULES = (
 # NOTE (PR2): the four interpreter stubs were implemented in PR2 and their
 # stub entries removed — behavior is covered by tests/unit/test_normalize.py,
 # test_golden.py, test_schema.py, test_llm.py, test_interpreter.py.
+# NOTE (PR3): the orchestrator stubs (state, confirm, session, supervisor,
+# loop) were implemented in PR3 and removed — covered by tests/unit/test_state.py,
+# test_confirm.py, test_session.py, test_supervisor.py, test_loop.py.
 STUB_CALLABLES = (
     "jarvis.audio.capture",
     "jarvis.wake.detect",
     "jarvis.stt.transcribe",
     "jarvis.tts.speak",
-    "jarvis.orchestrator.state.transition",
-    "jarvis.orchestrator.confirm.confirm",
-    "jarvis.orchestrator.session.load_state",
-    "jarvis.orchestrator.supervisor.supervise",
-    "jarvis.orchestrator.loop.run",
     "jarvis.actions.base.register",
     "jarvis.actions.opencode.ensure_server",
     "jarvis.actions.system.shutdown",
@@ -69,6 +67,8 @@ STUB_CALLABLES = (
 )
 
 CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs")
+# Wired in PR3 (start/off/on) or still a skeleton until PR6.
+CLI_STUBS = ("stop", "clean", "logs")
 
 
 def _resolve(dotted: str):
@@ -102,10 +102,28 @@ def test_cli_parser_exposes_lifecycle_commands() -> None:
     assert set(actions) == set(CLI_COMMANDS)
 
 
-@pytest.mark.parametrize("cmd", CLI_COMMANDS)
+@pytest.mark.parametrize("cmd", CLI_STUBS)
 def test_cli_subcommand_is_a_stub(cmd: str, capsys: pytest.CaptureFixture) -> None:
     assert jarvis.cli.main([cmd]) == 1
     assert "not implemented yet" in capsys.readouterr().err
+
+
+def test_cli_start_wires_orchestrator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
+    assert jarvis.cli.main(["start"]) == 1
+    assert "skeleton" in capsys.readouterr().err
+
+
+def test_cli_off_sets_switch_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
+    assert jarvis.cli.main(["off"]) == 0
+    assert (tmp_path / "state.json").exists()
+    assert capsys.readouterr().err  # non-silent switch feedback
+    assert jarvis.cli.main(["on"]) == 0
 
 
 def test_cli_help_exits_zero() -> None:

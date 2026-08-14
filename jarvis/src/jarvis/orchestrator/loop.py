@@ -10,14 +10,19 @@ adapters in without rework; tests drive fakes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
 from typing import Callable
 
 from jarvis import config
-from jarvis.interpreter import Interpretation
+from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
-from jarvis.orchestrator.session import GitRunner, Session
+from jarvis.orchestrator.contracts import ActionResult
+from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
+from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
 
@@ -181,3 +186,85 @@ def _is_switched_off(pipeline: Pipeline) -> bool:
     if pipeline.switch_state is not None:
         return pipeline.switch_state()
     return pipeline.session.switched_off
+
+
+# --- CLI wiring (task 3.6) ----------------------------------------------------
+
+
+def start() -> int:
+    """``jarvis start``: run the orchestrator loop with PR5-skeleton adapters.
+
+    The orchestrator core (FSM, confirm, re-ask, session) is wired and proven
+    end-to-end; the voice pipeline is still a skeleton so a real ``start``
+    fails loudly until PR5.
+    """
+    session = load_state(str(config.STATE_FILE))
+    pipeline = Pipeline(
+        clock=RealClock(),
+        wake=_SkeletonWake(),
+        capture=lambda: None,
+        interpreter=resolve_intent,
+        speaker=_PrintSpeaker(),
+        executor=_SkeletonExecutor(),
+        session=session,
+        cwd=os.getcwd(),
+        git_runner=_git_root,
+    )
+    try:
+        run(pipeline, iterations=1)
+    except NotImplementedError:
+        pass
+    print(
+        "jarvis start: voice pipeline is still a skeleton (PR5); orchestrator core is wired.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def switch_off() -> int:
+    """``jarvis off`` (RF-11): release the mic, ignore wake until ``on``."""
+    session = load_state(str(config.STATE_FILE))
+    session.switched_off = True
+    session.save()
+    print("jarvis off: mic released, no listening until `jarvis on`", file=sys.stderr)
+    return 0
+
+
+def switch_on() -> int:
+    """``jarvis on`` (RF-11): resume listening."""
+    session = load_state(str(config.STATE_FILE))
+    session.switched_off = False
+    session.save()
+    print("jarvis on: listening resumed", file=sys.stderr)
+    return 0
+
+
+class _SkeletonWake:
+    def wait(self, timeout: float) -> bool:
+        return False
+
+
+class _SkeletonExecutor:
+    def execute(self, intent, session: Session) -> ActionResult:
+        return ActionResult(ok=False, spoken="los ejecutores llegan en PR4")
+
+
+class _PrintSpeaker:
+    def speak(self, text: str) -> None:
+        print(text)
+
+
+def _git_root(cwd: str) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    root = proc.stdout.strip()
+    return root or None

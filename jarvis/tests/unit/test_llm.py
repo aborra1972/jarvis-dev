@@ -68,6 +68,19 @@ def test_parse_assistant_text_falls_back_to_message_text() -> None:
     assert parse_assistant_text(output) == '{"intent": "help"}'
 
 
+def test_parse_assistant_text_reads_real_stream_text_events() -> None:
+    # PR6 (verified against opencode 1.18.18): the NDJSON stream carries the
+    # answer in `type:"text"` events with the text under `part.text`, not in a
+    # `message` object.
+    output = "\n".join([
+        '{"type":"step_start","sessionID":"ses_x","part":{"type":"step-start"}}',
+        '{"type":"text","sessionID":"ses_x","part":{"type":"text","text":"hola, soy jarvis"}}',
+        '{"type":"text","sessionID":"ses_x","part":{"type":"text","text":" listo"}}',
+        '{"type":"step_finish","sessionID":"ses_x","part":{"reason":"stop"}}',
+    ])
+    assert parse_assistant_text(output) == "hola, soy jarvis listo"
+
+
 # --- parse_session_id (PR6: bind the server-created session for reuse) --------
 def test_parse_session_id_extracts_from_step_events() -> None:
     output = "\n".join([

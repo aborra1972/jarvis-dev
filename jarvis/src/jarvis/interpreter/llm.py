@@ -73,7 +73,13 @@ def parse_session_id(output: str) -> str | None:
 
 
 def parse_assistant_text(output: str) -> str:
-    """Extract the final assistant text from ``opencode run --format json`` NDJSON events."""
+    """Extract the final assistant text from ``opencode run --format json`` NDJSON events.
+
+    PR6 (verified against opencode 1.18.18): the answer streams as
+    ``type:"text"`` events with the text under ``part.text``; older shapes
+    (``message.parts[].text`` / ``message.text``) are kept as fallbacks.
+    """
+    text = ""
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -82,18 +88,20 @@ def parse_assistant_text(output: str) -> str:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if event.get("type") == "text":
+            part = event.get("part") or {}
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                text += part["text"]
+            continue
         message = event.get("message") or {}
         if message.get("role") != "assistant":
             continue
-        text = ""
         for part in message.get("parts") or []:
             if isinstance(part, dict) and part.get("type") == "text":
                 text += part.get("text", "")
         if not text and isinstance(message.get("text"), str):
             text = message["text"]
-        if text.strip():
-            return text.strip()
-    return ""
+    return text.strip()
 
 
 class OpenCodeProvider:

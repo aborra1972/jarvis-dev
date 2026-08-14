@@ -37,6 +37,7 @@ from jarvis.audio.stt import (
 
 from jarvis.audio.tts import TTS_TIMEOUT_S, TTSError, PiperTTS
 from jarvis.audio.playback import DEFAULT_PLAYER, Playback, PlaybackError
+from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 
 __all__ = [
     "BLOCK_MS",
@@ -63,4 +64,7 @@ __all__ = [
     "DEFAULT_PLAYER",
     "Playback",
     "PlaybackError",
+    "MicSwitch",
+    "PiperSpeaker",
+    "UtteranceCapture",
 ]

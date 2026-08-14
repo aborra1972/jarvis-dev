@@ -27,6 +27,13 @@ from jarvis.audio.wake import (
     OpenWakeWord,
     triggered,
 )
+from jarvis.audio.stt import (
+    GATE_DURATION_S as STT_GATE_DURATION_S,
+    STT_TIMEOUT_S,
+    STTError,
+    WhisperSTT,
+    select_model,
+)
 
 __all__ = [
     "BLOCK_MS",
@@ -42,4 +49,9 @@ __all__ = [
     "WAKE_DEFAULT_THRESHOLD",
     "OpenWakeWord",
     "triggered",
+    "STT_GATE_DURATION_S",
+    "STT_TIMEOUT_S",
+    "STTError",
+    "WhisperSTT",
+    "select_model",
 ]

@@ -58,22 +58,13 @@ SKELETON_MODULES = (
 # NOTE (PR3): the orchestrator stubs (state, confirm, session, supervisor,
 # loop) were implemented in PR3 and removed — covered by tests/unit/test_state.py,
 # test_confirm.py, test_session.py, test_supervisor.py, test_loop.py.
-# NOTE (PR5): jarvis.audio.capture landed with the audio package — the rest of
-# the voice stubs are removed as their modules land in PR5.
-STUB_CALLABLES = (
-    "jarvis.wake.detect",
-    "jarvis.stt.transcribe",
-    "jarvis.tts.speak",
-)
+# NOTE (PR5): the voice stubs (audio, wake, stt, tts) all landed in the audio
+# package — no stub callables remain, so test_stub_fails_until_logic_lands was
+# removed too.
 
 CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs")
 # Wired in PR3 (start/off/on) or still a skeleton until PR6.
 CLI_STUBS = ("stop", "clean", "logs")
-
-
-def _resolve(dotted: str):
-    module_name, _, attr = dotted.rpartition(".")
-    return getattr(importlib.import_module(module_name), attr)
 
 
 # --- Package -----------------------------------------------------------------
@@ -85,12 +76,6 @@ def test_package_version() -> None:
 @pytest.mark.parametrize("module", SKELETON_MODULES)
 def test_skeleton_module_imports(module: str) -> None:
     importlib.import_module(module)
-
-
-@pytest.mark.parametrize("dotted", STUB_CALLABLES)
-def test_stub_fails_until_logic_lands(dotted: str) -> None:
-    with pytest.raises(NotImplementedError):
-        _resolve(dotted)()
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -141,6 +126,21 @@ def test_cli_no_args_prints_help_and_exits_zero(capsys: pytest.CaptureFixture) -
 def test_config_wires_spike_artifacts() -> None:
     for attr in ("SPIKE", "WHISPER_CLI", "WHISPER_MODEL", "PIPER_BIN", "PIPER_MODEL", "PIPER_CONFIG"):
         assert isinstance(getattr(jarvis.config, attr), Path)
+
+
+def test_config_wires_voice_pipeline() -> None:
+    assert jarvis.config.WHISPER_MODEL_MEDIUM.is_file()
+    assert jarvis.config.WHISPER_MODEL.is_file()
+    assert isinstance(jarvis.config.WHISPER_PROMPT, str) and jarvis.config.WHISPER_PROMPT
+    assert isinstance(jarvis.config.WAKE_THRESHOLD, float)
+    assert isinstance(jarvis.config.WAKE_VAD_THRESHOLD, float)
+    assert jarvis.config.AUDIO_SAMPLE_RATE == 16000
+    assert isinstance(jarvis.config.AUDIO_SILENCE_MS, int)
+    assert jarvis.config.STT_TIMEOUT_S > 0
+    assert jarvis.config.STT_GATE_DURATION_S > 0
+    assert jarvis.config.TTS_TIMEOUT_S > 0
+    assert jarvis.config.PLAY_TIMEOUT_S > 0
+    assert isinstance(jarvis.config.PLAYER_BIN, str) and jarvis.config.PLAYER_BIN
 
 
 def test_config_wires_server_ports() -> None:

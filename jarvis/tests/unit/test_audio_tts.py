@@ -65,8 +65,9 @@ def test_synthesize_writes_text_to_stdin(fake_piper: Path, tmp_path: Path) -> No
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import sys\n"
+        "from pathlib import Path\n"
         "open(sys.argv[0] + '.stdin', 'w').write(sys.stdin.read())\n"
-        "open('x.wav', 'wb').write(b'wav')\n"
+        "(Path(sys.argv[0]).parent / 'x.wav').write_bytes(b'wav')\n"
     )
     script.chmod(0o755)
     tts = PiperTTS(piper_bin=script, model=model, config=config)

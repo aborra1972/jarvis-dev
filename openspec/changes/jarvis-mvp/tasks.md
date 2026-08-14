@@ -41,13 +41,13 @@ Chain strategy: pending
 - [x] 3.6 `loop.py` FSM driver + `cli.py` wiring (start/off/on)
 
 ## Phase 4: Executors
-- [ ] 4.1 `actions/base.py`: Executor Protocol + registry
-- [ ] 4.2 RED: opencode fake-server tests (health, attach, JSON)
-- [ ] 4.3 `actions/opencode.py`: serve + 6 commands; RED: `";rm -rf /"` rejected
-- [ ] 4.4 `actions/system.py`: shutdown/reboot, allowlist; RED: disallowed/no shell
-- [ ] 4.5 `actions/files.py`: create_doc new-only, open_file_dir
-- [ ] 4.6 `actions/web.py`: search/open_url; RED: bad URL rejected
-- [ ] 4.7 `actions/assistant_lifecycle.py`: power_off_self, help, cleanup
+- [x] 4.1 `actions/base.py`: Executor Protocol + registry
+- [x] 4.2 RED: opencode fake-server tests (health, attach, JSON)
+- [x] 4.3 `actions/opencode.py`: serve + 6 commands; RED: `";rm -rf /"` rejected
+- [x] 4.4 `actions/system.py`: shutdown/reboot, allowlist; RED: disallowed/no shell
+- [x] 4.5 `actions/files.py`: create_doc new-only, open_file_dir
+- [x] 4.6 `actions/web.py`: search/open_url; RED: bad URL rejected
+- [x] 4.7 `actions/assistant_lifecycle.py`: power_off_self, help, cleanup
 - [ ] 4.8 Integration (slow): real serve + `run --attach`
 
 ## Phase 5: Voice + Apply Gates

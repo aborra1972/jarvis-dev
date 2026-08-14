@@ -21,9 +21,9 @@ import jarvis.config
 SKELETON_MODULES = (
     "jarvis",
     "jarvis.audio",
-    "jarvis.wake",
-    "jarvis.stt",
-    "jarvis.tts",
+    "jarvis.audio.capture",
+    "jarvis.cli",
+    "jarvis.config",
     "jarvis.cli",
     "jarvis.config",
     "jarvis.interpreter",
@@ -53,8 +53,9 @@ SKELETON_MODULES = (
 # NOTE (PR3): the orchestrator stubs (state, confirm, session, supervisor,
 # loop) were implemented in PR3 and removed — covered by tests/unit/test_state.py,
 # test_confirm.py, test_session.py, test_supervisor.py, test_loop.py.
+# NOTE (PR5): jarvis.audio.capture landed with the audio package — the rest of
+# the voice stubs are removed as their modules land in PR5.
 STUB_CALLABLES = (
-    "jarvis.audio.capture",
     "jarvis.wake.detect",
     "jarvis.stt.transcribe",
     "jarvis.tts.speak",

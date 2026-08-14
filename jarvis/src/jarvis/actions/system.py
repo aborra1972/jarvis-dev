@@ -1,13 +1,41 @@
-"""System executor (bootstrap skeleton).
+"""System executor (PR4, task 4.4): shutdown/reboot via systemctl, open_app allowlisted.
 
-Design: shutdown/reboot behind the 15s verbal confirm gate, open_app via
-xdg-open from an allowlist, no arbitrary shell (RF-8, M4, M6).
-Real implementation lands in PR4 (executors).
+Design (RF-8, threat matrix): destructive actions run behind the orchestrator's
+15s confirm gate and are logged here; open_app only ever spawns xdg-open with
+an allowlisted app (disallowed app => rejected, nothing spawned). All
+subprocess is list-args via base.safe_run (no shell).
 """
 
 from __future__ import annotations
 
+from jarvis import config
+from jarvis.actions import base
+from jarvis.interpreter import schema
+from jarvis.interpreter.schema import Intent
+from jarvis.orchestrator.contracts import ActionResult
 
-def shutdown() -> None:
-    """Bootstrap stub — real implementation lands in PR4 (executors)."""
-    raise NotImplementedError("jarvis.actions.system.shutdown: implemented in PR4 (executors)")
+
+def _run(name: str, command: list[str], ok_spoken: str, fail_spoken: str) -> ActionResult:
+    base.log(name)
+    code, _ = base.safe_run(command)
+    if code != 0:
+        return ActionResult(ok=False, spoken=fail_spoken)
+    return ActionResult(ok=True, spoken=ok_spoken)
+
+
+def shutdown(intent: Intent, session: object) -> ActionResult:
+    return _run("shutdown", ["systemctl", "poweroff"], "apagando el sistema", "no pude apagar el sistema")
+
+
+def reboot(intent: Intent, session: object) -> ActionResult:
+    return _run("reboot", ["systemctl", "reboot"], "reiniciando el sistema", "no pude reiniciar el sistema")
+
+
+def open_app(intent: Intent, session: object) -> ActionResult:
+    app = intent.entities.get("app", "")
+    if schema.validate_entities(intent, config.ALLOWED_APPS):
+        return ActionResult(ok=False, spoken="esa aplicación no está permitida")
+    code, _ = base.safe_run(["xdg-open", app])
+    if code != 0:
+        return ActionResult(ok=False, spoken="no pude abrir esa aplicación")
+    return ActionResult(ok=True, spoken=f"abriendo {app}")

@@ -58,12 +58,6 @@ STUB_CALLABLES = (
     "jarvis.wake.detect",
     "jarvis.stt.transcribe",
     "jarvis.tts.speak",
-    "jarvis.actions.base.register",
-    "jarvis.actions.opencode.ensure_server",
-    "jarvis.actions.system.shutdown",
-    "jarvis.actions.files.create_doc",
-    "jarvis.actions.web.open_url",
-    "jarvis.actions.assistant_lifecycle.power_off_self",
 )
 
 CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs")

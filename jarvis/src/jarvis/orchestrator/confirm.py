@@ -16,7 +16,7 @@ from jarvis.interpreter.normalize import normalize
 from jarvis.interpreter.schema import Intent
 
 CONFIRM_TIMEOUT_S = 15.0
-CONFIRM_CANCEL_SPOKEN = "ok, no hago nada"
+CONFIRM_CANCEL_SPOKEN = "ok, cancelo y no hago nada"
 CONFIRM_TIMEOUT_SPOKEN = "no confirmaste a tiempo, cancelé la operación"
 
 

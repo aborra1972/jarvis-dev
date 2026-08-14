@@ -29,6 +29,17 @@ PIPER_CONFIG = SPIKE / "es_AR-daniela-high.onnx.json"
 
 # --- Voice pipeline (PR5) -----------------------------------------------------
 WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+# PR6 integration: whisper.cpp 1.9.x beam size flag is -bs; keep it at 1 (fast).
+WHISPER_BEAM = 1
+# whisper's own VAD model (silero). None = omit `--vad`; the app-level
+# SilenceVAD still provides the spec's VAD gate.
+WHISPER_VAD_MODEL: Path | None = None
+# PR6 gate 5.5: medium (fp16) exceeds the latency budget and q5-medium is not
+# available in spike, so the promote stays OFF until a quantized model lands.
+STT_MEDIUM_PROMOTED = False
+# PR6 gate 5.6: a trained jarvis.onnx (see docs/wake-word-training.md); None =
+# the packaged hey_jarvis_v0.1.onnx.
+WAKE_CUSTOM_MODEL: Path | None = None
 WAKE_THRESHOLD = 0.5
 WAKE_VAD_THRESHOLD = 0.5
 AUDIO_SAMPLE_RATE = 16000

@@ -18,6 +18,12 @@ from typing import Callable
 
 from jarvis import config
 from jarvis.actions.base import build_registry
+from jarvis.audio.capture import SilenceVAD, SoundDeviceCapturer
+from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
+from jarvis.audio.playback import Playback
+from jarvis.audio.stt import WhisperSTT
+from jarvis.audio.tts import PiperTTS
+from jarvis.audio.wake import OpenWakeWord
 from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
 from jarvis.orchestrator.contracts import CaptureError
@@ -220,37 +226,102 @@ def _speaker_is_playing(speaker: object) -> bool:
     return bool(is_playing()) if callable(is_playing) else False
 
 
-# --- CLI wiring (task 3.6) ----------------------------------------------------
+# --- CLI wiring (task 3.6 / PR6 task 5.7) -------------------------------------
+
+ANNOUNCEMENT = "hola, soy jarvis, listo para ayudarte"
+
+
+def build_pipeline(
+    session: Session,
+    *,
+    cwd: str,
+    wake: object | None = None,
+    capture: object | None = None,
+    speaker: object | None = None,
+    interpreter: Callable[[str], Interpretation] = resolve_intent,
+    executor: object | None = None,
+    git_runner: GitRunner | None = None,
+    switch_state: Callable[[], bool] | None = None,
+) -> Pipeline:
+    """Assemble the REAL voice pipeline from config (PR6, task 5.7).
+
+    Defaults construct the real adapters — sounddevice mic, OpenWakeWord,
+    whisper-cli STT, piper TTS, paplay playback and the opencode executor
+    registry. Every slot can be injected so tests and E2E drive fakes without
+    touching hardware; defaults are only exercised by ``start``/``e2e``.
+    """
+    if wake is None:
+        capturer = SoundDeviceCapturer(
+            sample_rate=config.AUDIO_SAMPLE_RATE,
+            block_ms=config.AUDIO_BLOCK_MS,
+        )
+        vad = SilenceVAD(
+            threshold=config.AUDIO_VAD_THRESHOLD,
+            silence_s=config.AUDIO_SILENCE_MS / 1000.0,
+            max_s=config.AUDIO_MAX_UTTERANCE_S,
+            sample_rate=config.AUDIO_SAMPLE_RATE,
+            block_ms=config.AUDIO_BLOCK_MS,
+        )
+        stt = WhisperSTT(
+            whisper_cli=config.WHISPER_CLI,
+            model_small=config.WHISPER_MODEL,
+            model_medium=config.WHISPER_MODEL_MEDIUM if config.STT_MEDIUM_PROMOTED else None,
+            prompt=config.WHISPER_PROMPT,
+            language="es",
+            gate_duration_s=config.STT_GATE_DURATION_S,
+            timeout_s=config.STT_TIMEOUT_S,
+            beam=config.WHISPER_BEAM,
+            vad_model=config.WHISPER_VAD_MODEL,
+        )
+        capture = UtteranceCapture(capturer, stt, vad, sample_rate=config.AUDIO_SAMPLE_RATE)
+        wake = OpenWakeWord(
+            capturer,
+            threshold=config.WAKE_THRESHOLD,
+            vad_threshold=config.WAKE_VAD_THRESHOLD,
+            custom=config.WAKE_CUSTOM_MODEL,
+        )
+        if switch_state is None:
+            switch_state = MicSwitch(capturer, lambda: session.switched_off)
+    if speaker is None:
+        tts = PiperTTS(
+            piper_bin=config.PIPER_BIN,
+            model=config.PIPER_MODEL,
+            config=config.PIPER_CONFIG,
+            timeout_s=config.TTS_TIMEOUT_S,
+        )
+        playback = Playback(player=config.PLAYER_BIN, timeout_s=config.PLAY_TIMEOUT_S)
+        speaker = PiperSpeaker(tts, playback)
+    if executor is None:
+        executor = build_registry()
+    return Pipeline(
+        clock=RealClock(),
+        wake=wake,
+        capture=capture,
+        interpreter=interpreter,
+        speaker=speaker,
+        executor=executor,
+        session=session,
+        cwd=cwd,
+        git_runner=git_runner or _git_root,
+        base_port=config.OPCODE_BASE_PORT,
+        switch_state=switch_state,
+    )
 
 
 def start() -> int:
-    """``jarvis start``: run the orchestrator loop with PR5-skeleton adapters.
+    """``jarvis start``: run the orchestrator loop with the REAL voice pipeline.
 
-    The orchestrator core (FSM, confirm, re-ask, session) is wired and proven
-    end-to-end; the voice pipeline is still a skeleton so a real ``start``
-    fails loudly until PR5.
+    Announcer readiness through TTS, degrading to a text line if synthesis is
+    unavailable. The loop runs until power_off_self (PR6).
     """
     session = load_state(str(config.STATE_FILE))
-    pipeline = Pipeline(
-        clock=RealClock(),
-        wake=_SkeletonWake(),
-        capture=lambda: None,
-        interpreter=resolve_intent,
-        speaker=_PrintSpeaker(),
-        executor=build_registry(),
-        session=session,
-        cwd=os.getcwd(),
-        git_runner=_git_root,
-    )
+    pipeline = build_pipeline(session, cwd=os.getcwd())
     try:
-        run(pipeline, iterations=1)
-    except NotImplementedError:
-        pass
-    print(
-        "jarvis start: voice pipeline is still a skeleton (PR5); orchestrator core is wired.",
-        file=sys.stderr,
-    )
-    return 1
+        pipeline.speaker.speak(ANNOUNCEMENT)
+    except Exception:
+        print(ANNOUNCEMENT, file=sys.stderr)
+    run(pipeline)
+    return 0
 
 
 def switch_off() -> int:
@@ -269,16 +340,6 @@ def switch_on() -> int:
     session.save()
     print("jarvis on: listening resumed", file=sys.stderr)
     return 0
-
-
-class _SkeletonWake:
-    def wait(self, timeout: float) -> bool:
-        return False
-
-
-class _PrintSpeaker:
-    def speak(self, text: str) -> None:
-        print(text)
 
 
 def _git_root(cwd: str) -> str | None:

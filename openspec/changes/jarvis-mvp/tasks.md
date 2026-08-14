@@ -51,13 +51,14 @@ Chain strategy: pending
 - [ ] 4.8 Integration (slow): real serve + `run --attach`
 
 ## Phase 5: Voice + Apply Gates
-- [ ] 5.1 `audio.py`: sounddevice 16kHz, VAD, 800ms-silence, fallback
-- [ ] 5.2 `wake.py`: openWakeWord (hey_jarvis + jarvis.onnx); no self-trigger
-- [ ] 5.3 `stt.py`: whisper-cli (es, beam1, VAD, --prompt, 15s)
-- [ ] 5.4 `tts.py`: piper es_AR-daniela + queue (20s)
-- [ ] 5.5 GATE q5-medium: ≤4s CPU→promote; record
-- [ ] 5.6 GATE wake: train jarvis.onnx; promote if beats hey_jarvis; record
-- [ ] 5.7 Integration (slow): real whisper/piper; offline degrade
+- [x] 5.1 capture (`audio/capture.py`): sounddevice 16kHz, VAD, 800ms-silence, fallback
+- [x] 5.2 wake (`audio/wake.py`): openWakeWord (hey_jarvis + jarvis.onnx); no self-trigger
+- [x] 5.3 stt (`audio/stt.py`): whisper-cli (es, beam1, VAD, --prompt, 15s)
+- [x] 5.4 tts (`audio/tts.py`): piper es_AR-daniela (20s); async queue lands in E2E (PR6)
+- [x] 5.5 GATE q5-medium: model selection by duration (≤4s→medium) wired in `select_model`; CPU timing promote decision recorded E2E (PR6)
+- [ ] 5.6 GATE wake: train jarvis.onnx; promote if beats hey_jarvis; record — E2E (PR6)
+- [ ] 5.7 Integration (slow): real whisper/piper; offline degrade — E2E (PR6)
+- NOTE (PR5): the orchestrator slice instruction specified an `audio/` package (capture/wake/stt/tts/playback/pipeline) instead of the flat `audio.py`/`wake.py`/`stt.py`/`tts.py` from design.md — package layout is the operative structure; flat stubs deleted.
 
 ## Phase 6: E2E + Polish
 - [ ] 6.1 `orchestrator/loop.py`: capture→STT→interpreter→executor→TTS; ack >3s

@@ -285,3 +285,66 @@ def test_persists_session_state_after_run(tmp_path: Path) -> None:
     reloaded = load_state(str(tmp_path / "state.json"))
     assert reloaded.active_project == "chromium"
     assert reloaded.repos == {"chromium": 0}
+
+
+# --- PR4: open_repo owns project switching; registry wired into the loop -----
+class _FakeOpenCodeManager:
+    def ensure_server(self, port, repo):
+        self.calls = getattr(self, "calls", [])
+        self.calls.append((port, repo))
+        return True
+
+
+def test_open_repo_with_explicit_repo_executes_without_active_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _FakeOpenCodeManager()
+    monkeypatch.setattr("jarvis.actions.opencode.ServerManager", lambda *a, **k: manager)
+    session = Session()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["abrí " + str(tmp_path)], clock=FakeClock(), advance=16.0),
+        interpreter=FakeInterpreter(
+            [_interp(_intent(intent="open_repo", entities={"repo": str(tmp_path)}))]
+        ),
+        speaker=FakeSpeaker(),
+        executor=_build_registry(),
+        session=session,
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert session.active_project == str(tmp_path)
+    assert manager.calls == [(32111, Path(str(tmp_path)))]
+
+
+def test_loop_dispatches_open_app_through_real_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands = []
+    monkeypatch.setattr(
+        "jarvis.actions.base.safe_run",
+        lambda command, timeout=20.0: commands.append(command) or (0, ""),
+    )
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["abrí firefox"], clock=FakeClock(), advance=16.0),
+        interpreter=FakeInterpreter([_interp(_intent(entities={"app": "firefox"}))]),
+        speaker=FakeSpeaker(),
+        executor=_build_registry(),
+        session=Session(),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert commands == [["xdg-open", "firefox"]]
+
+
+def _build_registry():
+    from jarvis.actions.base import build_registry
+
+    return build_registry()

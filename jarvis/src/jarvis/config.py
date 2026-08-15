@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from jarvis.interpreter.schema import build_system_prompt  # PR2: real prompt
+
 # --- Layout ------------------------------------------------------------------
 _THIS = Path(__file__).resolve()
 APP_ROOT = _THIS.parents[2]   # jarvis/ (app root)
@@ -34,5 +36,5 @@ STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
 ALLOWED_APPS: set[str] = {"firefox"}
 
-# --- Interpreter (PR2 wires the JSON-only system prompt) ---------------------
-INTERPRETER_SYSTEM_PROMPT = ""
+# --- Interpreter (PR2: JSON-only system prompt built from the schema) --------
+INTERPRETER_SYSTEM_PROMPT = build_system_prompt()

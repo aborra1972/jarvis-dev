@@ -43,6 +43,11 @@ class ActionResult:
     ok: bool
     spoken: str
     data: dict = field(default_factory=dict)
+    # Verify fix (voice-pipeline "Long LLM operation"): marks an operation the
+    # executor estimates over 3s (LLM/OpenCode work commands) so consumers can
+    # branch on it; the loop reads the registry's long_running_intents to speak
+    # the acknowledgment BEFORE calling execute().
+    long_running: bool = False
 
 
 class Executor(Protocol):

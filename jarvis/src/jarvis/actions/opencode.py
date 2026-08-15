@@ -32,6 +32,11 @@ from jarvis.orchestrator.supervisor import RealClock, tcp_healthy
 
 OPCODE_INTENTS = ("open_repo", "ask", "configure", "create_artifact", "implement", "review")
 
+# Verify fix (voice-pipeline "Long LLM operation"): the LLM work commands ride
+# the persistent session and can take up to 30s, so the loop speaks a "dale, te
+# aviso" acknowledgment before they run. Non-work commands are not long-running.
+LONG_RUNNING_INTENTS = frozenset({"ask", "create_artifact", "implement", "review"})
+
 NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
 OFFLINE_SPOKEN = "necesito red para eso"
 _UNABLE_SPOKEN = "no pude completar eso; probá de nuevo"
@@ -216,5 +221,5 @@ class OpenCodeExecutor:
                         created = parse_session_id(result.stdout)
                         if created:
                             session.bind_work_session(session.active_project, created)
-                    return ActionResult(ok=True, spoken=_truncate(text))
+                    return ActionResult(ok=True, spoken=_truncate(text), long_running=True)
         return ActionResult(ok=False, spoken=_UNABLE_SPOKEN)

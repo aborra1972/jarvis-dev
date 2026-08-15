@@ -43,6 +43,11 @@ REJECTED_SPOKEN = "eso no es válido, no lo puedo hacer"
 UNSUPPORTED_SPOKEN = "no sé hacer eso todavía"
 NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
 STT_ERROR_SPOKEN = "no pude escucharte, intentá de nuevo"
+# Verify fix (voice-pipeline "Long LLM operation"): spoken ack emitted BEFORE a
+# long-running executor call (ask/implement/review/create_artifact can take up
+# to 30s). Non-blocking: PiperSpeaker.speak enqueues and returns, so the ack
+# plays on the TTS worker while the operation runs.
+LONG_OPERATION_ACK = "dale, te aviso cuando esté"
 
 
 @dataclass
@@ -181,6 +186,8 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             pipeline.speaker.speak(NO_ACTIVE_PROJECT)
             context.outcome = "rejected"
             return State.SPEAKING, context
+        if _is_long_running(pipeline.executor, intent.intent):
+            pipeline.speaker.speak(LONG_OPERATION_ACK)
         result = pipeline.executor.execute(intent, pipeline.session)
         pipeline.speaker.speak(result.spoken)
         if intent.intent == "power_off_self":
@@ -234,6 +241,15 @@ def _is_switched_off(pipeline: Pipeline) -> bool:
 def _speaker_is_playing(speaker: object) -> bool:
     is_playing = getattr(speaker, "is_playing", None)
     return bool(is_playing()) if callable(is_playing) else False
+
+
+def _is_long_running(executor: object, intent: str) -> bool:
+    """True when the executor flags this intent as >3s (ack before it runs).
+
+    Duck-typed so bare fakes without the attribute answer False (no ack).
+    """
+    long_running = getattr(executor, "long_running_intents", frozenset())
+    return intent in long_running
 
 
 # --- CLI wiring (task 3.6 / PR6 task 5.7) -------------------------------------

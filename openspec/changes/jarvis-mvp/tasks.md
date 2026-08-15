@@ -33,11 +33,12 @@ Chain strategy: pending
 - [x] 2.5 Corpus replay tests (M1/M3)
 
 ## Phase 3: Orchestrator
-- [ ] 3.1 `orchestrator/state.py` FSM + transition tests
-- [ ] 3.2 `confirm.py` 15s (injectable clock): sí/no/timeout abort (M6)
-- [ ] 3.3 Re-ask ×2→reveal (RNF-4) in `session.py`
-- [ ] 3.4 `session.py`: active project (git cwd→last-repo), repo→{port, sessionIDs}
-- [ ] 3.5 `supervisor.py`: health/restart (3/min), timeouts 15s/20s, degrade (M4)
+- [x] 3.1 `orchestrator/state.py` FSM + transition tests
+- [x] 3.2 `confirm.py` 15s (injectable clock): sí/no/timeout abort (M6)
+- [x] 3.3 Re-ask ×2→reveal (RNF-4) in `session.py`
+- [x] 3.4 `session.py`: active project (git cwd→last-repo), repo→{port, sessionIDs}
+- [x] 3.5 `supervisor.py`: health/restart (3/min), timeouts 15s/20s, degrade (M4)
+- [x] 3.6 `loop.py` FSM driver + `cli.py` wiring (start/off/on)
 
 ## Phase 4: Executors
 - [ ] 4.1 `actions/base.py`: Executor Protocol + registry

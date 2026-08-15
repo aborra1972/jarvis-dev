@@ -18,6 +18,7 @@ from jarvis.interpreter import Interpretation
 from jarvis.interpreter.schema import Intent
 from jarvis.orchestrator.contracts import ActionResult
 from jarvis.orchestrator.loop import (
+    LONG_OPERATION_ACK,
     REASK_1,
     REASK_2,
     REJECTED_SPOKEN,
@@ -86,6 +87,25 @@ class FakeExecutor:
     def execute(self, intent: Intent, session: object) -> ActionResult:
         self.calls.append(intent)
         return self.results.get(intent.intent, ActionResult(ok=True, spoken="ok"))
+
+
+class TrackingExecutor:
+    """Records what the speaker had already said when execute() ran (order)."""
+
+    def __init__(
+        self,
+        speaker: FakeSpeaker,
+        result: ActionResult,
+        long_running: frozenset[str] = frozenset(),
+    ) -> None:
+        self.speaker = speaker
+        self.result = result
+        self.long_running_intents = long_running
+        self.spoken_before_execute: list[str] = []
+
+    def execute(self, intent: Intent, session: object) -> ActionResult:
+        self.spoken_before_execute = list(self.speaker.said)
+        return self.result
 
 
 def _intent(**overrides) -> Intent:
@@ -234,6 +254,54 @@ def test_no_wake(tmp_path: Path) -> None:
     assert run(pipeline, iterations=1) == "no_wake"
 
 
+class FakeTranscriptLog:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str | None, str]] = []
+
+    def record(self, transcript: str, intent=None, outcome=None) -> None:
+        self.records.append((transcript, intent, outcome))
+
+
+def test_loop_records_transcripts_to_journal(tmp_path: Path) -> None:
+    journal = FakeTranscriptLog()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["abrí firefox"]),
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        transcript_log=journal,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert journal.records == [("abrí firefox", "open_app", "execute")]
+
+
+def test_loop_off_state_never_consults_wake_or_capture(tmp_path: Path) -> None:
+    wake = FakeWake([True])
+    capture = FakeCapture(["abrí firefox"])
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=wake,
+        capture=capture,
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+        switch_state=lambda: True,
+    )
+    outcome = run(pipeline, iterations=3)
+    assert outcome == "off"
+    assert len(wake.results) == 1
+    assert len(capture.transcripts) == 1
+
+
 def test_power_off_self_stops_loop(tmp_path: Path) -> None:
     pipeline = _pipeline(
         wake=[True],
@@ -285,6 +353,62 @@ def test_persists_session_state_after_run(tmp_path: Path) -> None:
     reloaded = load_state(str(tmp_path / "state.json"))
     assert reloaded.active_project == "chromium"
     assert reloaded.repos == {"chromium": 0}
+
+
+# --- Verify fixes: spoken ack before long-running ops (voice-pipeline) --------
+def test_long_llm_operation_speaks_ack_before_executing(tmp_path: Path) -> None:
+    speaker = FakeSpeaker()
+    executor = TrackingExecutor(
+        speaker,
+        ActionResult(ok=True, spoken="listo, implementé el login"),
+        long_running={"implement"},
+    )
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["implementá el login"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="implement", entities={"text": "login"}))]),
+        speaker=speaker,
+        executor=executor,
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert executor.spoken_before_execute == [LONG_OPERATION_ACK]
+    assert speaker.said == [LONG_OPERATION_ACK, "listo, implementé el login"]
+
+
+def test_short_operation_speaks_no_ack(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["abrí firefox"],
+        interpreter_script=[_interp(_intent())],
+        tmp_path=tmp_path,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert pipeline.speaker.said == ["ok"]
+
+
+def test_create_doc_invalid_path_degrades_to_spoken_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("soy un archivo, no una carpeta")
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["creá una nota"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="create_doc", entities={"text": "nota"}))]),
+        speaker=FakeSpeaker(),
+        executor=_build_registry(),
+        session=Session(active_project=str(blocker)),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "failed"
+    assert "no pude crear" in pipeline.speaker.said[-1]
 
 
 # --- PR4: open_repo owns project switching; registry wired into the loop -----

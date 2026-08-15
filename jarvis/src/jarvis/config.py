@@ -29,6 +29,17 @@ PIPER_CONFIG = SPIKE / "es_AR-daniela-high.onnx.json"
 
 # --- Voice pipeline (PR5) -----------------------------------------------------
 WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+# PR6 integration: whisper.cpp 1.9.x beam size flag is -bs; keep it at 1 (fast).
+WHISPER_BEAM = 1
+# whisper's own VAD model (silero). None = omit `--vad`; the app-level
+# SilenceVAD still provides the spec's VAD gate.
+WHISPER_VAD_MODEL: Path | None = None
+# PR6 gate 5.5: medium (fp16) exceeds the latency budget and q5-medium is not
+# available in spike, so the promote stays OFF until a quantized model lands.
+STT_MEDIUM_PROMOTED = False
+# PR6 gate 5.6: a trained jarvis.onnx (see docs/wake-word-training.md); None =
+# the packaged hey_jarvis_v0.1.onnx.
+WAKE_CUSTOM_MODEL: Path | None = None
 WAKE_THRESHOLD = 0.5
 WAKE_VAD_THRESHOLD = 0.5
 AUDIO_SAMPLE_RATE = 16000
@@ -48,6 +59,14 @@ OPCODE_BASE_PORT = 32111
 
 # --- Session state (RF-6): active project + repo→{port, sessionIDs} ----------
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
+
+# --- Runtime dirs (task 6.3): local deletable logs (RNF-3) + signal switch ---
+RUN_DIR = Path.home() / ".local" / "state" / "jarvis"
+LOGS_DIR = RUN_DIR / "logs"
+LOGS_CAPTURE_DIR = LOGS_DIR / "capture"   # utterance wavs (audio logs)
+LOGS_REPLY_DIR = LOGS_DIR / "reply"       # TTS reply wavs (audio logs)
+TRANSCRIPTS_FILE = LOGS_DIR / "transcripts.jsonl"  # handled transcripts
+PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
 
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
 ALLOWED_APPS: set[str] = {"firefox"}

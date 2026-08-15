@@ -63,6 +63,16 @@ def test_build_registry_covers_every_allowed_intent() -> None:
     assert set(registry.handlers()) == ALLOWED_INTENTS - {"unknown"}
 
 
+def test_build_registry_marks_opencode_work_intents_long_running() -> None:
+    registry = base.build_registry()
+    assert registry.long_running_intents == {
+        "ask",
+        "create_artifact",
+        "implement",
+        "review",
+    }
+
+
 # --- Shared helpers --------------------------------------------------------
 def test_exclusive_write_creates_new_file(tmp_path) -> None:
     path = tmp_path / "doc.md"

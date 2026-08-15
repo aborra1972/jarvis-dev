@@ -63,8 +63,8 @@ SKELETON_MODULES = (
 # removed too.
 
 CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs")
-# Wired in PR3 (start/off/on) or still a skeleton until PR6.
-CLI_STUBS = ("stop", "clean", "logs")
+# Wired in PR3 (start/off/on) or task 6.3 (clean); stop/logs stay skeleton.
+CLI_STUBS = ("stop", "logs")
 
 
 # --- Package -----------------------------------------------------------------
@@ -93,22 +93,69 @@ def test_cli_subcommand_is_a_stub(cmd: str, capsys: pytest.CaptureFixture) -> No
     assert "not implemented yet" in capsys.readouterr().err
 
 
-def test_cli_start_wires_orchestrator(
+def test_cli_start_runs_real_pipeline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
-    assert jarvis.cli.main(["start"]) == 1
-    assert "skeleton" in capsys.readouterr().err
+    monkeypatch.setattr(jarvis.config, "RUN_DIR", tmp_path / "run")
+    monkeypatch.setattr(jarvis.config, "PID_FILE", tmp_path / "run" / "jarvis.pid")
+    ran: list[object] = []
+    monkeypatch.setattr(jarvis.orchestrator.loop, "run", lambda pipeline, iterations=None: ran.append(pipeline))
+
+    class _FakeSpeaker:
+        def __init__(self) -> None:
+            self.spoken: list[str] = []
+
+        def speak(self, text: str) -> None:
+            self.spoken.append(text)
+
+        def flush(self) -> None:
+            pass
+
+    fake = _FakeSpeaker()
+    monkeypatch.setattr(jarvis.orchestrator.loop, "PiperSpeaker", lambda *a, **k: fake)
+    # Real adapter wiring (sounddevice/OpenWakeWord/whisper/piper) is covered by
+    # test_bootstrap with recorders; here only the start() flow must run fast
+    # and without loading ONNX/hardware.
+    monkeypatch.setattr(jarvis.orchestrator.loop, "OpenWakeWord", lambda *a, **k: None)
+    monkeypatch.setattr(jarvis.orchestrator.loop, "SoundDeviceCapturer", lambda *a, **k: None)
+    monkeypatch.setattr(jarvis.orchestrator.loop, "MicSwitch", lambda *a, **k: (lambda: False))
+
+    signals: list[object] = []
+    monkeypatch.setattr(
+        jarvis.orchestrator.loop,
+        "_register_switch_signals",
+        lambda session, switch: signals.append((session, switch)),
+    )
+
+    assert jarvis.cli.main(["start"]) == 0
+    assert ran and ran[0].speaker is fake
+    assert signals, "start() must wire the RF-11 non-vocal signal handlers"
+    assert not (tmp_path / "run" / "jarvis.pid").exists()  # pid removed on exit
+    assert fake.spoken == ["hola, soy jarvis, listo para ayudarte"]
+    assert "skeleton" not in capsys.readouterr().err
 
 
 def test_cli_off_sets_switch_flag(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(jarvis.config, "PID_FILE", tmp_path / "jarvis.pid")
     assert jarvis.cli.main(["off"]) == 0
     assert (tmp_path / "state.json").exists()
     assert capsys.readouterr().err  # non-silent switch feedback
     assert jarvis.cli.main(["on"]) == 0
+
+
+def test_cli_clean_deletes_logs_and_confirms(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setattr(jarvis.config, "LOGS_DIR", tmp_path / "logs")
+    (tmp_path / "logs" / "capture").mkdir(parents=True)
+    (tmp_path / "logs" / "capture" / "utterance.wav").write_bytes(b"wav")
+    assert jarvis.cli.main(["clean"]) == 0
+    assert "eliminados" in capsys.readouterr().err
+    assert not (tmp_path / "logs" / "capture" / "utterance.wav").exists()
 
 
 def test_cli_help_exits_zero() -> None:
@@ -141,6 +188,17 @@ def test_config_wires_voice_pipeline() -> None:
     assert jarvis.config.TTS_TIMEOUT_S > 0
     assert jarvis.config.PLAY_TIMEOUT_S > 0
     assert isinstance(jarvis.config.PLAYER_BIN, str) and jarvis.config.PLAYER_BIN
+
+
+def test_config_wires_pr6_voice_settings() -> None:
+    assert isinstance(jarvis.config.WHISPER_BEAM, int) and jarvis.config.WHISPER_BEAM >= 1
+    assert isinstance(jarvis.config.STT_MEDIUM_PROMOTED, bool)
+    assert jarvis.config.WHISPER_VAD_MODEL is None or isinstance(
+        jarvis.config.WHISPER_VAD_MODEL, Path
+    )
+    assert jarvis.config.WAKE_CUSTOM_MODEL is None or isinstance(
+        jarvis.config.WAKE_CUSTOM_MODEL, Path
+    )
 
 
 def test_config_wires_server_ports() -> None:

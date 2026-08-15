@@ -68,6 +68,9 @@ class Registry:
 
     def __init__(self) -> None:
         self._handlers: dict[str, Handler] = {}
+        # Verify fix: intents the executor estimates over 3s; the loop speaks a
+        # spoken ack before executing them (voice-pipeline "Long LLM operation").
+        self.long_running_intents: frozenset[str] = frozenset()
 
     def register(self, intent: str, handler: Handler) -> None:
         self._handlers[intent] = handler
@@ -88,6 +91,7 @@ def build_registry() -> Registry:
 
     registry = Registry()
     oc = opencode.OpenCodeExecutor()
+    registry.long_running_intents = opencode.LONG_RUNNING_INTENTS
     for intent in opencode.OPCODE_INTENTS:
         registry.register(intent, getattr(oc, f"handle_{intent}"))
     registry.register("shutdown", system.shutdown)

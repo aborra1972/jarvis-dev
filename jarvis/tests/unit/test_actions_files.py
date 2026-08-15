@@ -59,6 +59,24 @@ def test_create_doc_falls_back_to_cwd_without_active_project(tmp_path, monkeypat
     assert (tmp_path / "nota.md").exists()
 
 
+def test_create_doc_invalid_project_path_reports_spoken_error(tmp_path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("soy un archivo, no una carpeta")
+    session = Session(active_project=str(blocker))
+    result = files.create_doc(_intent("create_doc", {"text": "nota"}), session)
+    assert result.ok is False
+    assert "no pude crear" in result.spoken
+    assert not list(blocker.glob("*.md"))
+
+
+def test_create_doc_missing_parent_dir_reports_spoken_error(tmp_path) -> None:
+    session = Session(active_project=str(tmp_path / "no-existe"))
+    result = files.create_doc(_intent("create_doc", {"text": "nota"}), session)
+    assert result.ok is False
+    assert "no pude crear" in result.spoken
+    assert not (tmp_path / "no-existe" / "nota.md").exists()
+
+
 # --- open_file_dir ------------------------------------------------------------
 def test_open_file_dir_opens_active_project_dir(tmp_path, monkeypatch) -> None:
     commands = _commands(monkeypatch)

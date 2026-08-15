@@ -56,12 +56,15 @@ def _result(stdout: str, returncode: int = 0):
     return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
 
-def _assistant(text: str) -> str:
+def _assistant(text: str, session_id: str | None = None) -> str:
     import json
 
-    event = {
-        "message": {"role": "assistant", "parts": [{"type": "text", "text": text}]}
+    event: dict = {
+        "type": "message",
+        "message": {"role": "assistant", "parts": [{"type": "text", "text": text}]},
     }
+    if session_id:
+        event["sessionID"] = session_id
     return json.dumps(event)
 
 
@@ -211,8 +214,11 @@ def test_ask_requires_active_project() -> None:
     assert result.spoken == opencode.NO_ACTIVE_PROJECT
 
 
-def test_ask_attaches_to_allocated_session_and_parses_answer(tmp_path) -> None:
-    runner = FakeRunner(_result(_assistant("hola, ¿en qué te ayudo?")))
+def test_ask_first_call_omits_session_and_binds_server_session_id(tmp_path) -> None:
+    # PR6 (integration): a fresh server has no session yet, so the first run
+    # MUST NOT pass `-s` (opencode errors "Session not found"); the sessionID
+    # from the NDJSON stream is bound for later calls.
+    runner = FakeRunner(_result(_assistant("hola, ¿en qué te ayudo?", session_id="ses_xyz")))
     executor = opencode.OpenCodeExecutor(manager=FakeManager(), runner=runner)
     session = Session()
     session.start(str(tmp_path), git_runner=lambda cwd: str(tmp_path))
@@ -220,8 +226,27 @@ def test_ask_attaches_to_allocated_session_and_parses_answer(tmp_path) -> None:
     assert result.ok is True
     assert result.spoken == "hola, ¿en qué te ayudo?"
     command = runner.commands[0]
-    assert command[:6] == ["opencode", "run", "--attach", f"http://{OPCODE_HOST}:{OPCODE_BASE_PORT}", "-s", session.allocate(str(tmp_path), OPCODE_BASE_PORT).session_work]
+    assert command[:4] == [
+        "opencode", "run", "--attach",
+        f"http://{OPCODE_HOST}:{OPCODE_BASE_PORT}",
+    ]
+    assert "-s" not in command
+    assert session.work_sessions[session.active_project] == "ses_xyz"
     assert "--dir" in command
+
+
+def test_ask_reuses_bound_session_on_subsequent_calls(tmp_path) -> None:
+    runner = FakeRunner(
+        _result(_assistant("primera", session_id="ses_abc")),
+        _result(_assistant("segunda")),
+    )
+    executor = opencode.OpenCodeExecutor(manager=FakeManager(), runner=runner)
+    session = Session()
+    session.start(str(tmp_path), git_runner=lambda cwd: str(tmp_path))
+    assert executor.handle_ask(_intent("ask", {"query": "primera"}), session).ok is True
+    assert executor.handle_ask(_intent("ask", {"query": "segunda"}), session).ok is True
+    second = runner.commands[1]
+    assert second[second.index("-s") + 1] == "ses_abc"
 
 
 def test_ask_truncates_long_spoken_text(tmp_path) -> None:

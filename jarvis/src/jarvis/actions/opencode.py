@@ -20,13 +20,22 @@ from typing import Callable
 
 from jarvis import config
 from jarvis.actions import base
-from jarvis.interpreter.llm import build_opencode_command, parse_assistant_text
+from jarvis.interpreter.llm import (
+    build_opencode_command,
+    parse_assistant_text,
+    parse_session_id,
+)
 from jarvis.interpreter.schema import Intent
 from jarvis.orchestrator.contracts import ActionResult
 from jarvis.orchestrator.session import Session
 from jarvis.orchestrator.supervisor import RealClock, tcp_healthy
 
 OPCODE_INTENTS = ("open_repo", "ask", "configure", "create_artifact", "implement", "review")
+
+# Verify fix (voice-pipeline "Long LLM operation"): the LLM work commands ride
+# the persistent session and can take up to 30s, so the loop speaks a "dale, te
+# aviso" acknowledgment before they run. Non-work commands are not long-running.
+LONG_RUNNING_INTENTS = frozenset({"ask", "create_artifact", "implement", "review"})
 
 NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
 OFFLINE_SPOKEN = "necesito red para eso"
@@ -191,9 +200,12 @@ class OpenCodeExecutor:
         query = (intent.entities.get("query") or "").strip()
         if query:
             prompt = prompt.format(q=query)
+        # PR6 (integration): pass `-s` only once a server-created sessionID is
+        # bound; the first run after serve spawn creates it (see llm.build_opencode_command).
+        session_id = session.work_sessions.get(session.active_project)
         command = build_opencode_command(
             f"http://{self._host}:{allocated.port}",
-            allocated.session_work,
+            session_id,
             prompt,
             Path(session.active_project),
         )
@@ -205,5 +217,9 @@ class OpenCodeExecutor:
             if result is not None and result.returncode == 0:
                 text = parse_assistant_text(result.stdout)
                 if text:
-                    return ActionResult(ok=True, spoken=_truncate(text))
+                    if session_id is None:
+                        created = parse_session_id(result.stdout)
+                        if created:
+                            session.bind_work_session(session.active_project, created)
+                    return ActionResult(ok=True, spoken=_truncate(text), long_running=True)
         return ActionResult(ok=False, spoken=_UNABLE_SPOKEN)

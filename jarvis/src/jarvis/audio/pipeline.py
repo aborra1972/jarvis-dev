@@ -13,7 +13,10 @@ config at E2E (PR6); these adapters only depend on the audio interfaces.
 from __future__ import annotations
 
 import os
+import queue
 import tempfile
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -21,14 +24,15 @@ from jarvis.audio.capture import SAMPLE_RATE, Capturer, SilenceVAD, gather_utter
 from jarvis.audio.playback import PlaybackError
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
+from jarvis.orchestrator.contracts import CaptureError
 
 
 class UtteranceCapture:
     """Captures a spoken utterance and transcribes it (contracts.Capture).
 
     Returns None for silence so the loop stays idle (spec: no self-trigger on
-    non-vocal noise). STT failures degrade to None (silence-like recovery);
-    the spoken-error reply is loop polish for E2E.
+    non-vocal noise). STT failures raise CaptureError so the loop speaks an
+    apology and retries (PR6, item 5) instead of staying silently idle.
     """
 
     def __init__(
@@ -61,12 +65,19 @@ class UtteranceCapture:
         write_wav(wav_path, blocks, sample_rate=self.sample_rate)
         try:
             return self.stt.transcribe(wav_path, duration_s)
-        except STTError:
-            return None
+        except STTError as exc:
+            raise CaptureError(str(exc)) from exc
 
 
 class PiperSpeaker:
-    """Synthesizes and plays a spoken reply (contracts.Speaker)."""
+    """Synthesizes and plays spoken replies on a worker thread (contracts.Speaker).
+
+    PR6 (item 6): piper is slow (seconds per reply), so ``speak()`` enqueues
+    and returns immediately — the loop never blocks on TTS and replies play in
+    order. ``is_playing()`` feeds the loop's IDLE gate (no self-trigger on
+    jarvis's own voice); ``flush()`` waits until the queue drains (used by the
+    loop on exit and by tests); ``close()`` stops the worker.
+    """
 
     def __init__(
         self,
@@ -78,17 +89,59 @@ class PiperSpeaker:
         self.tts = tts
         self.playback = playback
         self.out_dir = Path(out_dir) if out_dir else Path(tempfile.gettempdir())
+        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._closed = False
+        self._playing = False
+        self._thread = threading.Thread(target=self._worker, name="jarvis-piper", daemon=True)
+        self._thread.start()
 
     def _next_wav(self) -> Path:
         return self.out_dir / f"jarvis-reply-{uuid.uuid4().hex}.wav"
 
-    def speak(self, text: str) -> None:
+    def _worker(self) -> None:
+        while True:
+            text = self._queue.get()
+            if text is None:  # stop sentinel
+                return
+            self._playing = True
+            try:
+                self._play(text)
+            finally:
+                self._playing = False
+                self._queue.task_done()
+
+    def _play(self, text: str) -> None:
         wav_path = self._next_wav()
         try:
             wav_path = self.tts.synthesize(text, wav_path)
             self.playback.play(wav_path)
         except (TTSError, PlaybackError):
             pass  # loop keeps running; the human can retry
+
+    def speak(self, text: str) -> None:
+        if self._closed:
+            return
+        self._queue.put(text)
+
+    def is_playing(self) -> bool:
+        return self._queue.unfinished_tasks > 0 or self._playing
+
+    def flush(self, timeout: float = 10.0) -> None:
+        if self._closed:
+            return
+        deadline = time.monotonic() + timeout
+        while self._queue.unfinished_tasks > 0:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.005)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self.flush()
+        self._closed = True
+        self._queue.put(None)
+        self._thread.join(timeout=5.0)
 
 
 class MicSwitch:

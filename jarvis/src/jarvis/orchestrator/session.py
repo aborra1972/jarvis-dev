@@ -40,7 +40,16 @@ class Session:
     reask_attempts: int = 0
     state_path: str = ""
     switched_off: bool = False
+    work_sessions: dict[str, str] = field(default_factory=dict)
     _allocated: dict[str, RepoSession] = field(default_factory=dict)
+
+    def bind_work_session(self, repo: str, session_id: str) -> None:
+        """Remember the sessionID the server created for this repo (PR6).
+
+        In-memory only: the id dies with the serve process, and a stale id
+        degrades to the M4 spoken error on the next call.
+        """
+        self.work_sessions[repo] = session_id
 
     def start(self, cwd: str, git_runner: GitRunner) -> str | None:
         try:

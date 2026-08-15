@@ -24,3 +24,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# PR6: e2e smoke tests need the real spike binaries (whisper-cli, piper,
+# paplay, opencode) — excluded by default so the normal suite never touches
+# them; run explicitly with: pytest -m e2e
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: end-to-end smoke against real spike binaries (run with pytest -m e2e)",
+]

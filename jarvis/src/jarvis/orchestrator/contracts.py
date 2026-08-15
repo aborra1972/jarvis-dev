@@ -26,6 +26,14 @@ class Capture(Protocol):
     def capture(self) -> str | None: ...
 
 
+class CaptureError(Exception):
+    """Capture/STT hardware failure — the loop replies with a spoken error (PR6).
+
+    Distinct from ``None`` (silence → stay idle): an error is abnormal, so the
+    loop tells the human and retries instead of pretending nothing was heard.
+    """
+
+
 class Speaker(Protocol):
     def speak(self, text: str) -> None: ...
 
@@ -35,6 +43,11 @@ class ActionResult:
     ok: bool
     spoken: str
     data: dict = field(default_factory=dict)
+    # Verify fix (voice-pipeline "Long LLM operation"): marks an operation the
+    # executor estimates over 3s (LLM/OpenCode work commands) so consumers can
+    # branch on it; the loop reads the registry's long_running_intents to speak
+    # the acknowledgment BEFORE calling execute().
+    long_running: bool = False
 
 
 class Executor(Protocol):

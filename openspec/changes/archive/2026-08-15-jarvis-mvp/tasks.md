@@ -48,7 +48,8 @@ Chain strategy: pending
 - [x] 4.5 `actions/files.py`: create_doc new-only, open_file_dir
 - [x] 4.6 `actions/web.py`: search/open_url; RED: bad URL rejected
 - [x] 4.7 `actions/assistant_lifecycle.py`: power_off_self, help, cleanup
-- [ ] 4.8 Integration (slow): real serve + `run --attach`
+- [x] 4.8 Integration (slow): real serve + `run --attach` — e2e roundtrip (session binding)
+- [x] 4.8b fix: opencode streams the reply in `type:"text"` events → `parse_assistant_text` fixed (5deea57)
 
 ## Phase 5: Voice + Apply Gates
 - [x] 5.1 capture (`audio/capture.py`): sounddevice 16kHz, VAD, 800ms-silence, fallback
@@ -56,11 +57,17 @@ Chain strategy: pending
 - [x] 5.3 stt (`audio/stt.py`): whisper-cli (es, beam1, VAD, --prompt, 15s)
 - [x] 5.4 tts (`audio/tts.py`): piper es_AR-daniela (20s); async queue lands in E2E (PR6)
 - [x] 5.5 GATE q5-medium: model selection by duration (≤4s→medium) wired in `select_model`; CPU timing promote decision recorded E2E (PR6)
-- [ ] 5.6 GATE wake: train jarvis.onnx; promote if beats hey_jarvis; record — E2E (PR6)
-- [ ] 5.7 Integration (slow): real whisper/piper; offline degrade — E2E (PR6)
+- [x] 5.6 GATE wake: train jarvis.onnx; promote if beats hey_jarvis; record — E2E (PR6)
+  - RESOLVED (PR6): training not feasible here (no dataset/tools) → `docs/wake-word-training.md` (ef8cb9b) documents the training/promote path; `WAKE_CUSTOM_MODEL` config hook + precedence in `build_model_paths` shipped; packaged `hey_jarvis_v0.1.onnx` stays active. Promote NOT granted (no beats-evidence).
+- [x] 5.7 Integration (slow): real whisper/piper; offline degrade — E2E (PR6)
 - NOTE (PR5): the orchestrator slice instruction specified an `audio/` package (capture/wake/stt/tts/playback/pipeline) instead of the flat `audio.py`/`wake.py`/`stt.py`/`tts.py` from design.md — package layout is the operative structure; flat stubs deleted.
 
 ## Phase 6: E2E + Polish
-- [ ] 6.1 `orchestrator/loop.py`: capture→STT→interpreter→executor→TTS; ack >3s
-- [ ] 6.2 E2E demo: open repo→ask→shutdown + M1/M3 replay + latency
-- [ ] 6.3 `jarvis clean`; switch off (no mic); non-vocal on (RF-11); verify M4/M5/M6; README
+- [x] 6.1 `orchestrator/loop.py`: capture→STT→interpreter→executor→TTS; ack >3s
+  - `build_pipeline()` + real `start()` (8f07feb); ack = spoken reply via TTS queue with non-blocking worker (0bfa1dc)
+- [x] 6.2 E2E demo: open repo→ask→shutdown + M1/M3 replay + latency
+  - Real binaries smoke suite (ca82a31): whisper STT timing 4.34s, piper+paplay, opencode serve→run--attach→session reuse. Full voice-mic demo not run (no interactive run).
+- [x] 6.3 `jarvis clean`; switch off (no mic); non-vocal on (RF-11); verify M4/M5/M6; README
+  - `jarvis clean` wired (loop.clean + cli): deletes logs under `~/.local/state/jarvis/logs/` (capture wavs, reply wavs, transcripts.jsonl), preserves state.json/config; TranscriptLog JSONL journal appended per handled utterance (task 6.3 WU1, logs.py).
+  - RF-11 non-vocal on/off cross-process: SIGUSR1=off/SIGUSR2=on + pid file `~/.local/state/jarvis/jarvis.pid`; `jarvis off`/`jarvis on` signal a running loop; FSM already never consults wake/mic while OFF (WU2, test_switch_signal.py).
+  - M4/M5/M6 verification as executable checks (WU3, tests/unit/test_metrics.py): M6 every destructive intent golden-gated confirm_required + prompt; M4 opencode degrade → spoken notice, system still works; M5 the 4 domains execute. Baseline suite: 524 passed, 3 e2e deselected.

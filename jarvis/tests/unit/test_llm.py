@@ -15,6 +15,7 @@ from jarvis.interpreter.llm import (
     OpenCodeProvider,
     build_opencode_command,
     parse_assistant_text,
+    parse_session_id,
     resolve,
 )
 from jarvis.interpreter.schema import SchemaError
@@ -27,6 +28,14 @@ def test_command_builds_attach_with_session_and_json_format() -> None:
         "opencode", "run", "--attach", "http://127.0.0.1:32111",
         "-s", "interp-1", "--format", "json", "abrir firefox",
     ]
+
+
+def test_command_omits_session_flag_when_session_is_none() -> None:
+    # PR6 (integration): a fresh server has no registered session, so the first
+    # call must NOT pass `-s` (opencode answers "Session not found" otherwise).
+    command = build_opencode_command("http://127.0.0.1:32111", None, "abrir firefox")
+    assert "-s" not in command
+    assert command[command.index("--format") + 1] == "json"
 
 
 def test_command_includes_dir_when_workdir_given() -> None:
@@ -57,6 +66,34 @@ def test_parse_assistant_text_ignores_non_assistant_and_garbage() -> None:
 def test_parse_assistant_text_falls_back_to_message_text() -> None:
     output = '{"type":"message","message":{"role":"assistant","text":"{\\"intent\\": \\"help\\"}"}}'
     assert parse_assistant_text(output) == '{"intent": "help"}'
+
+
+def test_parse_assistant_text_reads_real_stream_text_events() -> None:
+    # PR6 (verified against opencode 1.18.18): the NDJSON stream carries the
+    # answer in `type:"text"` events with the text under `part.text`, not in a
+    # `message` object.
+    output = "\n".join([
+        '{"type":"step_start","sessionID":"ses_x","part":{"type":"step-start"}}',
+        '{"type":"text","sessionID":"ses_x","part":{"type":"text","text":"hola, soy jarvis"}}',
+        '{"type":"text","sessionID":"ses_x","part":{"type":"text","text":" listo"}}',
+        '{"type":"step_finish","sessionID":"ses_x","part":{"reason":"stop"}}',
+    ])
+    assert parse_assistant_text(output) == "hola, soy jarvis listo"
+
+
+# --- parse_session_id (PR6: bind the server-created session for reuse) --------
+def test_parse_session_id_extracts_from_step_events() -> None:
+    output = "\n".join([
+        '{"type":"step_start","timestamp":1,"sessionID":"ses_abc123","part":{}}',
+        '{"type":"text","timestamp":2,"sessionID":"ses_abc123","part":{}}',
+    ])
+    assert parse_session_id(output) == "ses_abc123"
+
+
+def test_parse_session_id_returns_none_when_absent() -> None:
+    assert parse_session_id('{"type":"done"}') is None
+    assert parse_session_id("") is None
+    assert parse_session_id("not json") is None
 
 
 # --- FakeProvider ------------------------------------------------------------

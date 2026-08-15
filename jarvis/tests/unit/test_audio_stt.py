@@ -75,9 +75,47 @@ def test_transcribe_builds_list_args_command(
     assert args[2] == "-f"
     assert args[3] == str(wav)
     assert "-l" in args and "es" in args
-    assert "-b" in args and "1" in args
-    assert "--vad" in args
+    # PR6 (integration): whisper.cpp 1.9.x names beam size `-bs`, not `-b`.
+    assert "-bs" in args and "1" in args
     assert "--prompt" in args and FIXTURE_PROMPT in args
+
+
+def test_transcribe_omits_vad_when_no_vad_model(
+    fake_whisper_cli: Path, tmp_path: Path
+) -> None:
+    stt = WhisperSTT(
+        whisper_cli=fake_whisper_cli,
+        model_small=tmp_path / "small.bin",
+        model_medium=tmp_path / "medium.bin",
+        prompt=FIXTURE_PROMPT,
+        vad_model=None,
+    )
+    wav = tmp_path / "u.wav"
+    wav.write_bytes(b"RIFF")
+    stt.transcribe(wav, duration_s=1.0)
+    args = eval((fake_whisper_cli.parent / (fake_whisper_cli.name + ".log")).read_text())
+    assert "--vad" not in args
+    assert "-vm" not in args
+
+
+def test_transcribe_adds_vad_with_vad_model(
+    fake_whisper_cli: Path, tmp_path: Path
+) -> None:
+    vad_model = tmp_path / "silero.ggml.bin"
+    vad_model.write_bytes(b"vad")
+    stt = WhisperSTT(
+        whisper_cli=fake_whisper_cli,
+        model_small=tmp_path / "small.bin",
+        model_medium=tmp_path / "medium.bin",
+        prompt=FIXTURE_PROMPT,
+        vad_model=vad_model,
+    )
+    wav = tmp_path / "u.wav"
+    wav.write_bytes(b"RIFF")
+    stt.transcribe(wav, duration_s=1.0)
+    args = eval((fake_whisper_cli.parent / (fake_whisper_cli.name + ".log")).read_text())
+    assert "--vad" in args
+    assert args[args.index("-vm") + 1] == str(vad_model)
 
 
 def test_transcribe_selects_small_for_long_utterance(

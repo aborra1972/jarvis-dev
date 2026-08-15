@@ -1,13 +1,22 @@
-"""Assistant lifecycle executor (bootstrap skeleton).
+"""Assistant lifecycle executor (PR4, task 4.7).
 
-Design: power_off_self lives ONLY here (binding: single location), golden-gated
-+ 15s confirm; help; log cleanup (RNF-3). Real implementation lands in PR4
-(executors).
+Design (binding: single location): power_off_self lives ONLY here and is
+golden-gated + 15s-confirmed by the orchestrator; the executor only logs and
+acknowledges. handle_help enumerates the 15-command allowlist.
 """
 
 from __future__ import annotations
 
+from jarvis.actions import base
+from jarvis.interpreter.schema import ALLOWED_INTENTS, Intent
+from jarvis.orchestrator.contracts import ActionResult
 
-def power_off_self() -> None:
-    """Bootstrap stub — real implementation lands in PR4 (executors)."""
-    raise NotImplementedError("jarvis.actions.assistant_lifecycle.power_off_self: implemented in PR4 (executors)")
+
+def power_off_self(intent: Intent, session: object) -> ActionResult:
+    base.log("power_off_self")
+    return ActionResult(ok=True, spoken="me apago, chau")
+
+
+def handle_help(intent: Intent, session: object) -> ActionResult:
+    commands = ", ".join(sorted(ALLOWED_INTENTS - {"unknown"}))
+    return ActionResult(ok=True, spoken=f"puedo: {commands}")

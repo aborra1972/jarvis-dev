@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from jarvis import config
+from jarvis.actions.base import build_registry
 from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
-from jarvis.orchestrator.contracts import ActionResult
 from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
@@ -162,9 +162,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
 
 
 def _needs_repo(intent: str) -> bool:
+    # open_repo deliberately excluded: the executor owns project switching
+    # (switch + allocate), so an explicit repo works even without an active
+    # project (PR4).
     return intent in (
         "open_app",
-        "open_repo",
         "open_url",
         "ask",
         "configure",
@@ -205,7 +207,7 @@ def start() -> int:
         capture=lambda: None,
         interpreter=resolve_intent,
         speaker=_PrintSpeaker(),
-        executor=_SkeletonExecutor(),
+        executor=build_registry(),
         session=session,
         cwd=os.getcwd(),
         git_runner=_git_root,
@@ -242,11 +244,6 @@ def switch_on() -> int:
 class _SkeletonWake:
     def wait(self, timeout: float) -> bool:
         return False
-
-
-class _SkeletonExecutor:
-    def execute(self, intent, session: Session) -> ActionResult:
-        return ActionResult(ok=False, spoken="los ejecutores llegan en PR4")
 
 
 class _PrintSpeaker:

@@ -22,9 +22,25 @@ REPO_ROOT = _THIS.parents[3]  # repo root (contains spike/)
 SPIKE = REPO_ROOT / "spike"
 WHISPER_CLI = SPIKE / "whisper.cpp" / "build" / "bin" / "whisper-cli"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
+WHISPER_MODEL_MEDIUM = SPIKE / "ggml-medium.bin"
 PIPER_BIN = SPIKE / ".venv" / "bin" / "piper"
 PIPER_MODEL = SPIKE / "es_AR-daniela-high.onnx"
 PIPER_CONFIG = SPIKE / "es_AR-daniela-high.onnx.json"
+
+# --- Voice pipeline (PR5) -----------------------------------------------------
+WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+WAKE_THRESHOLD = 0.5
+WAKE_VAD_THRESHOLD = 0.5
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_BLOCK_MS = 100
+AUDIO_SILENCE_MS = 800
+AUDIO_MAX_UTTERANCE_S = 10.0
+AUDIO_VAD_THRESHOLD = 0.02
+STT_TIMEOUT_S = 15.0
+STT_GATE_DURATION_S = 4.0
+TTS_TIMEOUT_S = 20.0
+PLAY_TIMEOUT_S = 20.0
+PLAYER_BIN = "paplay"
 
 # --- opencode serve (ADR-1): one headless server per repo --------------------
 OPCODE_HOST = "127.0.0.1"

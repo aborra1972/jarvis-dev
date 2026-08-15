@@ -21,9 +21,9 @@ Chain strategy: pending
 | 6 | E2E+polish (PR 6) | `pytest -q` + e2e demo | open repo→ask→shutdown + replay | delete jarvis/; stop serve; checkout AGENTS.md |
 
 ## Phase 1: Bootstrap
-- [ ] 1.1 `pyproject.toml` (scripts jarvis, pytest ini, deps) + `jarvis/.venv` install; strict_tdd→true
-- [ ] 1.2 `tests/{unit,integration,fixtures}` + conftest; `cli.py` stubs + `config.py` (paths, ports, allowlists)
-- [ ] 1.3 Signal: pytest green + `jarvis --help`
+- [x] 1.1 `pyproject.toml` (scripts jarvis, pytest ini, deps) + `jarvis/.venv` install; strict_tdd→true
+- [x] 1.2 `tests/{unit,integration,fixtures}` + conftest; `cli.py` stubs + `config.py` (paths, ports, allowlists)
+- [x] 1.3 Signal: pytest green + `jarvis --help`
 
 ## Phase 2: Interpreter
 - [ ] 2.1 RED: golden/normalize tables ("cerrá linux", "apagate", "abrí/abrime")

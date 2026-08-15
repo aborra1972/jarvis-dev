@@ -392,6 +392,25 @@ def test_short_operation_speaks_no_ack(tmp_path: Path) -> None:
     assert pipeline.speaker.said == ["ok"]
 
 
+def test_create_doc_invalid_path_degrades_to_spoken_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("soy un archivo, no una carpeta")
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["creá una nota"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="create_doc", entities={"text": "nota"}))]),
+        speaker=FakeSpeaker(),
+        executor=_build_registry(),
+        session=Session(active_project=str(blocker)),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "failed"
+    assert "no pude crear" in pipeline.speaker.said[-1]
+
+
 # --- PR4: open_repo owns project switching; registry wired into the loop -----
 class _FakeOpenCodeManager:
     def ensure_server(self, port, repo):

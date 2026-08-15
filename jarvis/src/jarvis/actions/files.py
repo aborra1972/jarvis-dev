@@ -31,6 +31,11 @@ def create_doc(intent: Intent, session: Session) -> ActionResult:
         base.exclusive_write(target, content)
     except FileExistsError:
         return ActionResult(ok=False, spoken="ya existe un documento con ese nombre, elegí otro")
+    except OSError:
+        # Verify fix (file-management "Invalid path"): a missing parent dir, a
+        # non-writable project or a reserved name raises OSError from os.open
+        # (O_EXCL) — degrade to a spoken error instead of crashing the loop.
+        return ActionResult(ok=False, spoken="no pude crear el documento")
     return ActionResult(ok=True, spoken=f"creé {name}")
 
 

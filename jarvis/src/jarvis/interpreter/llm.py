@@ -1,15 +1,18 @@
-"""LLM intent resolution riding the persistent opencode server (PR2, task 2.4).
+"""LLM intent resolution — Ollama direct HTTP (primary) + opencode fallback.
 
-ADR-2/ADR-8: non-destructive intents resolve through the SAME OpenCode
-provider the user already configured — ``opencode run --attach`` with a
-JSON-only prompt (zero provider setup). Transport is injectable: tests drive
-the FakeProvider; the interpreter only depends on the IntentProvider protocol.
+ADR-2/ADR-8: non-destructive intents resolve through a local LLM via
+Ollama's HTTP API (localhost:11434). This keeps the entire pipeline offline
+and under 5 seconds for voice interaction. The OpenCode transport remains
+as a fallback; tests use FakeProvider.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Protocol
 
@@ -34,6 +37,67 @@ class FakeProvider:
         if not self.responses:
             raise RuntimeError("fake provider exhausted")
         return self.responses.pop(0)
+
+
+class OllamaProvider:
+    """Direct HTTP transport to Ollama (localhost:11434) — primary LLM provider.
+
+    ADR-2: Ollama is Jarvis's brain for intent routing. No subprocess, no
+    server dependency. Optimized for voice latency: num_ctx=1024,
+    num_predict=64 (we only need ~20 tokens for the JSON response),
+    temperature=0.1 for deterministic output.
+    """
+
+    def __init__(
+        self,
+        model: str = "qwen2.5:3b",
+        base_url: str = "http://localhost:11434",
+        timeout: float = 10.0,
+    ) -> None:
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def resolve(self, prompt: str, system: str) -> dict:
+        url = f"{self.base_url}/api/generate"
+        payload = json.dumps({
+            "model": self.model,
+            "prompt": prompt,
+            "system": system,
+            "stream": False,
+            "options": {
+                "num_ctx": 1024,
+                "temperature": 0.1,
+                "num_predict": 64,
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+
+        text = data.get("response", "").strip()
+        if not text:
+            raise RuntimeError("Ollama returned empty response")
+
+        # Strip markdown code fences: ```json ... ``` → raw JSON
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Ollama returned non-JSON: {text[:200]}") from exc
 
 
 def build_opencode_command(

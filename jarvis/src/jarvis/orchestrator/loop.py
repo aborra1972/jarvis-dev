@@ -374,10 +374,14 @@ def build_pipeline(
     if executor is None:
         executor = build_registry()
 
-    # Wire LLM provider for interpreter (ADR-2: LLM-first for non-destructive intents)
+    # Wire LLM provider for interpreter (ADR-2: Ollama = Jarvis's brain)
     if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
-        from jarvis.interpreter.llm import DirectProvider
-        _provider = DirectProvider(workdir=cwd, timeout=30.0, model=config.INTERPRETER_LLM_MODEL)
+        from jarvis.interpreter.llm import OllamaProvider
+        _provider = OllamaProvider(
+            model=config.INTERPRETER_LLM_MODEL,
+            base_url=config.OLLAMA_BASE_URL,
+            timeout=10.0,
+        )
         def _interpret_with_llm(text: str, _prov=_provider) -> Interpretation:
             return resolve_intent(text, provider=_prov)
         interpreter = _interpret_with_llm

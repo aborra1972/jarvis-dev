@@ -100,6 +100,20 @@ class FakePlayback:
         self.played.append(Path(wav_path))
 
 
+class Mp3TTS(FakeTTS):
+    """EdgeTTS-shaped fake: output extension is .mp3 (drives the speaker)."""
+
+    extension = ".mp3"
+
+    def synthesize(self, text: str, out_path: Path) -> Path:
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"MP3")
+        self.texts.append(text)
+        self.outs.append(out)
+        return out
+
+
 class _SlowTTS:
     """TTS that signals when synthesis starts and blocks until released."""
 
@@ -238,6 +252,19 @@ def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
     assert tts.texts == ["hecho"]
     assert playback.played == tts.outs
     assert tts.outs[0].is_file()
+
+
+def test_piper_speaker_writes_mp3_when_tts_extension_is_mp3(tmp_path: Path) -> None:
+    tts = Mp3TTS()
+    playback = FakePlayback()
+    speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
+
+    speaker.speak("hecho")
+    speaker.flush()
+
+    assert tts.outs[0].suffix == ".mp3"
+    assert tts.outs[0].read_bytes() == b"MP3"
+    assert playback.played == tts.outs
 
 
 def test_piper_speaker_preserves_order_and_delivers_all(tmp_path: Path) -> None:

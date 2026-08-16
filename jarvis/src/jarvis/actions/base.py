@@ -78,7 +78,7 @@ class Registry:
     def execute(self, intent: Intent, session: object) -> ActionResult:
         handler = self._handlers.get(intent.intent)
         if handler is None:
-            return ActionResult(ok=False, spoken="no sé hacer eso todavía")
+            return ActionResult(ok=False, spoken="Aún no sé hacer eso, señor.")
         return handler(intent, session)
 
     def handlers(self) -> dict[str, Handler]:

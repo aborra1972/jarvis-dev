@@ -134,7 +134,10 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
             invalid.append("repo")
 
     if intent.intent == "open_app" and app_allowlist is not None:
-        if entities.get("app", "") not in app_allowlist:
+        app_raw = entities.get("app", "")
+        # Strip common Spanish articles so "la terminal" → "terminal"
+        app_clean = re.sub(r"^(el|los?|las?)\s+", "", app_raw).strip()
+        if app_clean not in app_allowlist:
             invalid.append("app")
 
     if intent.intent == "open_url":

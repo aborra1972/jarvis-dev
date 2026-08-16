@@ -24,18 +24,18 @@ def _run(name: str, command: list[str], ok_spoken: str, fail_spoken: str) -> Act
 
 
 def shutdown(intent: Intent, session: object) -> ActionResult:
-    return _run("shutdown", ["systemctl", "poweroff"], "apagando el sistema", "no pude apagar el sistema")
+    return _run("shutdown", ["systemctl", "poweroff"], "Apagando el sistema, señor.", "Lo lamento, señor, no pude apagar el sistema.")
 
 
 def reboot(intent: Intent, session: object) -> ActionResult:
-    return _run("reboot", ["systemctl", "reboot"], "reiniciando el sistema", "no pude reiniciar el sistema")
+    return _run("reboot", ["systemctl", "reboot"], "Reiniciando el sistema, señor.", "Lo lamento, señor, no pude reiniciar el sistema.")
 
 
 def open_app(intent: Intent, session: object) -> ActionResult:
     app = intent.entities.get("app", "")
     if schema.validate_entities(intent, config.ALLOWED_APPS):
-        return ActionResult(ok=False, spoken="esa aplicación no está permitida")
+        return ActionResult(ok=False, spoken="Esa aplicación no está permitida, señor.")
     code, _ = base.safe_run(["xdg-open", app])
     if code != 0:
-        return ActionResult(ok=False, spoken="no pude abrir esa aplicación")
-    return ActionResult(ok=True, spoken=f"abriendo {app}")
+        return ActionResult(ok=False, spoken="Lo lamento, señor, no pude abrir esa aplicación.")
+    return ActionResult(ok=True, spoken=f"Abriendo {app}, señor.")

@@ -14,9 +14,9 @@ from jarvis.orchestrator.contracts import ActionResult
 
 def power_off_self(intent: Intent, session: object) -> ActionResult:
     base.log("power_off_self")
-    return ActionResult(ok=True, spoken="me apago, chau")
+    return ActionResult(ok=True, spoken="Muy bien, señor. Me apago.")
 
 
 def handle_help(intent: Intent, session: object) -> ActionResult:
     commands = ", ".join(sorted(ALLOWED_INTENTS - {"unknown"}))
-    return ActionResult(ok=True, spoken=f"puedo: {commands}")
+    return ActionResult(ok=True, spoken=f"A su disposición, señor. Puedo: {commands}")

@@ -16,8 +16,8 @@ from jarvis.interpreter.normalize import normalize
 from jarvis.interpreter.schema import Intent
 
 CONFIRM_TIMEOUT_S = 15.0
-CONFIRM_CANCEL_SPOKEN = "ok, cancelo y no hago nada"
-CONFIRM_TIMEOUT_SPOKEN = "no confirmaste a tiempo, cancelé la operación"
+CONFIRM_CANCEL_SPOKEN = "Muy bien, señor. Cancelo y no ejecuto nada."
+CONFIRM_TIMEOUT_SPOKEN = "No confirmó a tiempo, señor. He cancelado la operación."
 
 
 class Confirmation(Enum):
@@ -36,9 +36,9 @@ _NEGATIVE: frozenset[str] = frozenset({
 })
 
 _PROMPTS: dict[str, str] = {
-    "shutdown": "¿Confirmás que apago la máquina?",
-    "reboot": "¿Confirmás que reinicio la máquina?",
-    "power_off_self": "¿Confirmás que me apago?",
+    "shutdown": "¿Confirma, señor, que apague la máquina?",
+    "reboot": "¿Confirma, señor, que reinicie la máquina?",
+    "power_off_self": "¿Confirma, señor, que me apague?",
 }
 
 
@@ -63,7 +63,7 @@ def _starts_with(surface: str, phrases: frozenset[str]) -> bool:
 
 
 def confirmation_prompt(intent: Intent) -> str:
-    return _PROMPTS.get(intent.intent, "¿Confirmás esta operación?")
+    return _PROMPTS.get(intent.intent, "¿Confirma esta operación, señor?")
 
 
 def confirm(

@@ -48,7 +48,7 @@ def test_create_doc_never_overwrites_existing_file(tmp_path) -> None:
     session = Session(active_project=str(tmp_path))
     result = files.create_doc(_intent("create_doc", {"text": "resumen"}), session)
     assert result.ok is False
-    assert "ya existe" in result.spoken
+    assert "Ya existe" in result.spoken
     assert target.read_text() == "original"
 
 

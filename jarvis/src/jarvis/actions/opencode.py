@@ -33,13 +33,13 @@ from jarvis.orchestrator.supervisor import RealClock, tcp_healthy
 OPCODE_INTENTS = ("open_repo", "ask", "configure", "create_artifact", "implement", "review")
 
 # Verify fix (voice-pipeline "Long LLM operation"): the LLM work commands ride
-# the persistent session and can take up to 30s, so the loop speaks a "dale, te
-# aviso" acknowledgment before they run. Non-work commands are not long-running.
+# the persistent session and can take up to 30s, so the loop speaks an "En ello
+# estoy, señor" acknowledgment before they run. Non-work commands are not long-running.
 LONG_RUNNING_INTENTS = frozenset({"ask", "create_artifact", "implement", "review"})
 
-NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
-OFFLINE_SPOKEN = "necesito red para eso"
-_UNABLE_SPOKEN = "no pude completar eso; probá de nuevo"
+NO_ACTIVE_PROJECT = "No hay un proyecto activo, señor. Abra uno primero."
+OFFLINE_SPOKEN = "Necesito conexión a red para eso, señor."
+_UNABLE_SPOKEN = "Lo lamento, señor, no pude completarlo. Intente de nuevo."
 _SPOKEN_LIMIT = 300
 
 # Rejects anything that could break out of a list-args command (threat matrix).
@@ -167,12 +167,12 @@ class OpenCodeExecutor:
         else:
             path = resolve_repo_path(repo)
             if path is None:
-                return ActionResult(ok=False, spoken=f"no puedo abrir eso: {repo}")
+                return ActionResult(ok=False, spoken=f"No puedo abrir eso, señor: {repo}")
         session.switch_active_project(str(path))
         allocated = session.allocate(str(path), self._base_port)
         if not self._manager.ensure_server(allocated.port, path):
             return ActionResult(ok=False, spoken=OFFLINE_SPOKEN)
-        return ActionResult(ok=True, spoken=f"abierto: {path.name}")
+        return ActionResult(ok=True, spoken=f"Abierto, señor: {path.name}")
 
     def handle_ask(self, intent: Intent, session: Session) -> ActionResult:
         return self._attached(intent, session)
@@ -181,7 +181,7 @@ class OpenCodeExecutor:
         if not session.active_project:
             return ActionResult(ok=False, spoken=NO_ACTIVE_PROJECT)
         base.atomic_write(Path(session.active_project) / "AGENTS.md", "project: jarvis")
-        return ActionResult(ok=True, spoken="listo, configuré el proyecto")
+        return ActionResult(ok=True, spoken="He configurado el proyecto, señor.")
 
     def handle_create_artifact(self, intent: Intent, session: Session) -> ActionResult:
         return self._attached(intent, session)

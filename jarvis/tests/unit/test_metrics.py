@@ -89,7 +89,7 @@ def test_m4_opencode_degrades_to_spoken_notice_and_system_still_works(
         Intent(intent="open_app", entities={"app": "firefox"}, confidence=0.9), session
     )
     assert app_result.ok is True
-    assert "abriendo" in app_result.spoken
+    assert "Abriendo" in app_result.spoken
 
 
 # --- M5: the 4 action domains work without blocking errors -------------------

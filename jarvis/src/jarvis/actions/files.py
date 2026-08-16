@@ -30,18 +30,18 @@ def create_doc(intent: Intent, session: Session) -> ActionResult:
     try:
         base.exclusive_write(target, content)
     except FileExistsError:
-        return ActionResult(ok=False, spoken="ya existe un documento con ese nombre, elegí otro")
+        return ActionResult(ok=False, spoken="Ya existe un documento con ese nombre, señor. Elija otro.")
     except OSError:
         # Verify fix (file-management "Invalid path"): a missing parent dir, a
         # non-writable project or a reserved name raises OSError from os.open
         # (O_EXCL) — degrade to a spoken error instead of crashing the loop.
-        return ActionResult(ok=False, spoken="no pude crear el documento")
-    return ActionResult(ok=True, spoken=f"creé {name}")
+        return ActionResult(ok=False, spoken="Lo lamento, señor, no pude crear el documento.")
+    return ActionResult(ok=True, spoken=f"He creado {name}, señor.")
 
 
 def open_file_dir(intent: Intent, session: Session) -> ActionResult:
     if not session.active_project:
-        return ActionResult(ok=False, spoken="no tengo un proyecto activo")
+        return ActionResult(ok=False, spoken="No hay un proyecto activo, señor.")
     root = Path(session.active_project)
     name = intent.entities.get("text", "").strip()
     if name:
@@ -49,8 +49,8 @@ def open_file_dir(intent: Intent, session: Session) -> ActionResult:
         if candidate.is_file():
             root = candidate.parent
     if not root.is_dir():
-        return ActionResult(ok=False, spoken="no encuentro esa carpeta")
+        return ActionResult(ok=False, spoken="No encuentro esa carpeta, señor.")
     code, _ = base.safe_run(["xdg-open", str(root)])
     if code != 0:
-        return ActionResult(ok=False, spoken="no pude abrir esa carpeta")
-    return ActionResult(ok=True, spoken="abriendo carpeta")
+        return ActionResult(ok=False, spoken="Lo lamento, señor, no pude abrir esa carpeta.")
+    return ActionResult(ok=True, spoken="Abriendo la carpeta, señor.")

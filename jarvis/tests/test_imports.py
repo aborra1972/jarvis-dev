@@ -117,7 +117,7 @@ def test_cli_start_runs_real_pipeline(
     # Real adapter wiring (sounddevice/OpenWakeWord/whisper/piper) is covered by
     # test_bootstrap with recorders; here only the start() flow must run fast
     # and without loading ONNX/hardware.
-    monkeypatch.setattr(jarvis.orchestrator.loop, "OpenWakeWord", lambda *a, **k: None)
+    monkeypatch.setattr(jarvis.orchestrator.loop, "build_wake_detector", lambda *a, **k: None)
     monkeypatch.setattr(jarvis.orchestrator.loop, "SoundDeviceCapturer", lambda *a, **k: None)
     monkeypatch.setattr(jarvis.orchestrator.loop, "MicSwitch", lambda *a, **k: (lambda: False))
 
@@ -132,7 +132,7 @@ def test_cli_start_runs_real_pipeline(
     assert ran and ran[0].speaker is fake
     assert signals, "start() must wire the RF-11 non-vocal signal handlers"
     assert not (tmp_path / "run" / "jarvis.pid").exists()  # pid removed on exit
-    assert fake.spoken == ["hola, soy jarvis, listo para ayudarte"]
+    assert fake.spoken == ["Buen día, señor. Soy Jarvis, a su servicio."]
     assert "skeleton" not in capsys.readouterr().err
 
 

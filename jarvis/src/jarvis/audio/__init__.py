@@ -35,8 +35,8 @@ from jarvis.audio.stt import (
     select_model,
 )
 
-from jarvis.audio.tts import TTS_TIMEOUT_S, TTSError, PiperTTS
-from jarvis.audio.playback import DEFAULT_PLAYER, Playback, PlaybackError
+from jarvis.audio.tts import EDGE_TTS_TIMEOUT_S, TTS_TIMEOUT_S, TTSError, EdgeTTS, PiperTTS
+from jarvis.audio.playback import DEFAULT_MP3_PLAYER, DEFAULT_PLAYER, Playback, PlaybackError
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 
 __all__ = [
@@ -59,9 +59,12 @@ __all__ = [
     "WhisperSTT",
     "select_model",
     "TTS_TIMEOUT_S",
+    "EDGE_TTS_TIMEOUT_S",
     "TTSError",
     "PiperTTS",
+    "EdgeTTS",
     "DEFAULT_PLAYER",
+    "DEFAULT_MP3_PLAYER",
     "Playback",
     "PlaybackError",
     "MicSwitch",

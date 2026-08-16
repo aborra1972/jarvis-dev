@@ -1,9 +1,10 @@
 """PR6 bootstrap: build_pipeline() assembles the real voice pipeline (task 5.7).
 
 Design (openspec PR6): ``loop.start()`` must run the orchestrator with the
-REAL adapters — sounddevice mic, OpenWakeWord, whisper-cli, piper, paplay,
-the opencode executor registry. The factory takes injected adapters for tests;
-construction defaults are verified by recording the constructor calls so no
+REAL adapters — sounddevice mic, OpenWakeWord, whisper-cli, TTS (edge-tts by
+default, piper as offline fallback), paplay/gst-launch-1.0, the opencode
+executor registry. The factory takes injected adapters for tests; construction
+defaults are verified by recording the constructor calls so no
 hardware/model is touched in unit tests.
 """
 
@@ -21,8 +22,9 @@ def _recording(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
 
     for name in (
         "SoundDeviceCapturer",
-        "OpenWakeWord",
+        "build_wake_detector",
         "WhisperSTT",
+        "EdgeTTS",
         "PiperTTS",
         "Playback",
     ):
@@ -55,17 +57,38 @@ def test_build_pipeline_wires_real_adapters_from_config(
     assert pipeline.executor == "executor"
     assert pipeline.switch_state is not None
     assert calls["SoundDeviceCapturer"]["kwargs"]["sample_rate"] == config.AUDIO_SAMPLE_RATE
-    assert calls["OpenWakeWord"]["kwargs"]["threshold"] == config.WAKE_THRESHOLD
+    assert calls["build_wake_detector"]["kwargs"]["threshold"] == config.WAKE_THRESHOLD
+    assert calls["build_wake_detector"]["kwargs"]["engine"] == config.WAKE_ENGINE
     stt = calls["WhisperSTT"]["kwargs"]
     assert stt["whisper_cli"] == config.WHISPER_CLI
     assert stt["model_small"] == config.WHISPER_MODEL
     assert stt["beam"] == config.WHISPER_BEAM
     assert stt["vad_model"] == config.WHISPER_VAD_MODEL
     assert stt["gate_duration_s"] == config.STT_GATE_DURATION_S
-    assert calls["PiperTTS"]["kwargs"]["piper_bin"] == config.PIPER_BIN
-    assert calls["PiperTTS"]["kwargs"]["model"] == config.PIPER_MODEL
+    edge = calls["EdgeTTS"]["kwargs"]
+    assert edge["bin_path"] == config.EDGE_TTS_BIN
+    assert edge["voice"] == config.EDGE_VOICE
+    assert edge["timeout_s"] == config.EDGE_TTS_TIMEOUT_S
+    assert edge["rate"] == config.EDGE_RATE
+    assert edge["pitch"] == config.EDGE_PITCH
+    assert "PiperTTS" not in calls  # edge is the default engine
     assert calls["Playback"]["kwargs"]["player"] == config.PLAYER_BIN
     assert pipeline.cwd == "/tmp"
+
+
+def test_build_pipeline_uses_piper_when_engine_is_piper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "TTS_ENGINE", "piper")
+    calls = _recording(monkeypatch)
+
+    loop.build_pipeline(Session(), cwd="/tmp")
+
+    piper = calls["PiperTTS"]["kwargs"]
+    assert piper["piper_bin"] == config.PIPER_BIN
+    assert piper["model"] == config.PIPER_MODEL
+    assert piper["timeout_s"] == config.TTS_TIMEOUT_S
+    assert "EdgeTTS" not in calls
 
 
 def test_build_pipeline_omits_medium_model_when_not_promoted(

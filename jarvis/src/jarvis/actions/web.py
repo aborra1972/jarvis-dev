@@ -31,18 +31,18 @@ def web_search(intent: Intent, session: object) -> ActionResult:
     engine = intent.entities.get("engine", "google").strip() or "google"
     url = build_search_url(query, engine)
     if url is None:
-        return ActionResult(ok=False, spoken="no conozco ese buscador")
+        return ActionResult(ok=False, spoken="No conozco ese buscador, señor.")
     code, _ = base.safe_run(["xdg-open", url])
     if code != 0:
-        return ActionResult(ok=False, spoken="no pude buscar eso")
-    return ActionResult(ok=True, spoken=f"buscando {query}")
+        return ActionResult(ok=False, spoken="Lo lamento, señor, no pude buscar eso.")
+    return ActionResult(ok=True, spoken=f"Buscando {query}, señor.")
 
 
 def open_url(intent: Intent, session: object) -> ActionResult:
     url = intent.entities.get("url", "").strip()
     if schema.validate_entities(intent):
-        return ActionResult(ok=False, spoken="no puedo abrir esa dirección")
+        return ActionResult(ok=False, spoken="No puedo abrir esa dirección, señor.")
     code, _ = base.safe_run(["xdg-open", url])
     if code != 0:
-        return ActionResult(ok=False, spoken="no pude abrir esa dirección")
-    return ActionResult(ok=True, spoken="abriendo página")
+        return ActionResult(ok=False, spoken="Lo lamento, señor, no pude abrir esa dirección.")
+    return ActionResult(ok=True, spoken="Abriendo la página, señor.")

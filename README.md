@@ -1,113 +1,367 @@
-# Jarvis de Desarrollo
+# J.A.R.V.I.S. — Asistente de Voz Local para Linux
 
-A fully local, Spanish-speaking voice assistant for everyday development work.
-Jarvis listens for a wake word, transcribes offline with Whisper, resolves the
-intent through a golden gate (plus an optional LLM), confirms destructive
-actions verbally, and executes them against your repo — all without sending
-audio or text to the cloud.
+Asistente de voz 100% local para desarrollo, inspirado en el JARVIS de Marvel.
+Escucha tu wake word "jarvis", transcribe con Whisper, interpreta comandos en
+español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 
-This MVP is defined by the SDD change **jarvis-mvp** (see `openspec/changes/`):
-requirements, design and per-task evidence live there.
+## Características
 
-## Features
+- **Wake word personalizado**: wav2vec2-XLSR + LogisticRegression entrenado con tu voz argentina (~350ms)
+- **STT offline**: whisper.cpp (small/medium) — nunca envía audio a internet
+- **TTS neural**: Edge TTS (es-MX-JorgeNeural) con fallback offline Piper
+- **4 dominios de acción**: sistema, archivos, web, OpenCode
+- **Seguridad**: comandos destructivos piden confirmación por voz
+- **Interruptor por señal**: `jarvis off`/`jarvis on` con SIGUSR1/SIGUSR2
+- **GUI GTK3**: panel de control flotante con botón on/off, slider de sensibilidad, logs
+- **Privacidad total**: todo queda en tu máquina
 
-- **Voice loop**: wake word → offline Whisper STT → golden intent resolver →
-  execution → piper TTS reply (`jarvis start`).
-- **Four action domains** (registry in `jarvis/src/jarvis/actions/`):
-  - opencode control — open repos in OpenCode with per-repo sessionIDs
-  - system control — open allowed apps, run allowed commands
-  - file management — create/edit allowed project files
-  - web actions — open allowed URLs
-- **Destructive action safety**: `cerrar linux`, `reiniciar la maquina`,
-  `apagarse` and `cerrar` always require a spoken confirmation before running.
-- **Local-by-default**: Spanish STT/TTS, openwakeword keyword, no cloud calls.
-- **Degradation, not failure**: if OpenCode is unreachable Jarvis says so out
-  loud and keeps the rest of the flow working.
-- **Off switch without the mic (RF-11)**: `jarvis off` releases the mic and
-  the loop ignores the wake word until `jarvis on` — a spoken wake word can
-  never reactivate it because no mic is open.
-- **Deletable local logs (RNF-3)**: transcripts and captured audio land under
-  `~/.local/state/jarvis/logs/` and are removed with `jarvis clean` (state and
-  config are preserved).
+## Requisitos del sistema
 
-## Requirements
+### Software
 
-- Linux with a microphone
-- Python 3.12+ and a virtualenv for the `jarvis` package
-- Voice binaries under `spike/` (see `jarvis/src/jarvis/config.py` for exact
-  paths): `whisper-cli` (whisper.cpp), `piper`, `openwakeword` models
-  (`jarvis.onnx` custom keyword), `paplay` for playback
-- OpenCode installed to open repos
+| Requisito | Versión mínima | Verificar |
+|-----------|---------------|-----------|
+| Linux Mint / Ubuntu | 22.04+ | `lsb_release -a` |
+| Python | 3.12+ | `python3 --version` |
+| pip | 22+ | `pip --version` |
+| Git | 2.30+ | `git --version` |
+| Audio (PipeWire/PulseAudio) | — | `pactl info` |
+| `paplay` | — | `which paplay` |
+| `gst-launch-1.0` | — | `which gst-launch-1.0` |
 
-## Setup
+### Dependencias del sistema
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ./jarvis
+# Ubuntu / Linux Mint
+sudo apt install python3.12 python3.12-venv python3-pip \
+  git alsa-utils pulseaudio pipewire \
+  libgstreamer1.0-dev gstreamer1.0-plugins-base \
+  libgirepository1.0-dev gir1.2-gtk-3.0 \
+  python3-gi python3-gi-cairo gir1.2-gtkspell3-3.0
 ```
 
-Place the spike binaries/models as configured in `jarvis/src/jarvis/config.py`
-(build them with the recipes in `spike/` if they are not already installed).
+### Hardware mínimo
 
-## Usage
+- **Micrófono**: USB o integrado (cualquier micrófono funciona)
+- **Altavoces/auriculares**: para la respuesta por voz
+- **RAM**: 4GB mínimo, 8GB recomendado (whisper + torch ~3GB)
+- **Disco**: ~3GB para modelos y dependencias
+
+## Instalación
+
+### 1. Clonar el repositorio
 
 ```bash
-jarvis start   # run the voice loop (announces readiness)
-jarvis off     # release the mic; loop stops listening until `on`
-jarvis on      # resume listening
-jarvis clean   # delete local transcripts and audio logs (keeps state/config)
-jarvis stop    # placeholder (future)
-jarvis logs    # placeholder (future)
+git clone https://github.com/aborra1972/jarvis-dev.git
+cd jarvis-dev
 ```
 
-Voice commands (Spanish): e.g. "hola jarvis", "abrí firefox",
-"creá un documento que diga…", "abrí este repositorio en opencode",
-"abrí https://…", "cerrá la sesión", "apagate". While OFF the loop consumes no
-mic input; `jarvis off`/`jarvis on` signal a running instance via
-`~/.local/state/jarvis/jarvis.pid` (SIGUSR1/SIGUSR2).
+### 2. Crear entorno virtual e instalar dependencias
 
-## Configuration
+```bash
+python3.12 -m venv jarvis/.venv
+source jarvis/.venv/bin/activate
+pip install -e ./jarvis
+```
 
-All paths and behavior are constants in `jarvis/src/jarvis/config.py`:
+Esto instala: torch, transformers, onnxruntime, sounddevice, edge-tts, numpy, scipy, openwakeword.
 
-- allowlists for apps, commands, files and URLs (execution gates)
-- audio/VAD/STT/TTS/wake parameters
-- model and binary paths under `spike/`
-- session state: `~/.local/share/jarvis/state.json` (active project, repo
-  sessionIDs, off switch)
+### 3. Verificar que whisper.cpp está compilado
+
+```bash
+ls spike/whisper.cpp/build/bin/whisper-cli
+ls spike/ggml-small.bin
+```
+
+Si falta, compilá whisper.cpp desde `spike/` (ver `spike/` para recetas).
+
+### 4. Verificar la instalación
+
+```bash
+# Test de importación
+python -m jarvis --help
+
+# Test de audio
+python -c "import sounddevice; print(sounddevice.query_devices())"
+```
+
+### 5. Verificar el wake word entrenado
+
+```bash
+ls spike/models/jarvis_wake.onnx
+```
+
+Si falta, seguí la guía en `jarvis/docs/wake-word-training.md`.
+
+## Uso rápido
+
+### Desde el escritorio (recomendado)
+
+1. Hacé doble clic en **J.A.R.V.I.S.** del escritorio
+2. Hacé clic en **⏻ ENCENDER**
+3. Esperá a que diga "Buen día, señor"
+4. Decí **"JARVIS"** para activarlo
+5. Decí tu comando (ej: "abrí la terminal")
+
+### Desde terminal
+
+```bash
+source jarvis/.venv/bin/activate
+jarvis start    # Iniciar el asistente
+jarvis off      # Apagar (mic liberado, no escucha)
+jarvis on       # Reanudar escucha
+jarvis clean    # Limpiar logs y audio temporal
+```
+
+### Desde otra terminal (señales)
+
+```bash
+# Apagar
+kill -SIGUSR1 $(cat ~/.local/state/jarvis/jarvis.pid)
+
+# Encender
+kill -SIGUSR2 $(cat ~/.local/state/jarvis/jarvis.pid)
+```
+
+## Comandos de voz
+
+### Sistema
+
+| Comando | Acción |
+|---------|--------|
+| "abrí la terminal" | Abre gnome-terminal |
+| "abrí firefox" | Abre Firefox |
+| "abrí el explorador" | Abre Nemo (file manager) |
+| "abrí libreoffice" | Abre LibreOffice |
+| "cerrá linux" | Apaga la máquina (pide confirmación) |
+| "reiniciá linux" | Reinicia la máquina (pide confirmación) |
+| "apagate" | Jarvis se apaga |
+
+### Archivos
+
+| Comando | Acción |
+|---------|--------|
+| "creá una carpeta llamada X" | Crea directorio |
+| "borrá el archivo X" | Elimina archivo (pide confirmación) |
+
+### Web
+
+| Comando | Acción |
+|---------|--------|
+| "buscá X en internet" | Busca en Google |
+| "abrí [url]" | Abre URL en navegador |
+
+### Asistente
+
+| Comando | Acción |
+|---------|--------|
+| "¿qué podés hacer?" | Lista de comandos disponibles |
+| "mostrá el estado" | Estado del proyecto activo |
+| "ayuda" | Muestra ayuda |
+
+### Flujo de uso
+
+```
+Tú:  "JARVIS"
+     [sonido de wake detectado]
+Tú:  "abrí la terminal"
+Jarvis: "Abriendo la terminal, señor"
+     [se abre gnome-terminal]
+Tú:  "JARVIS"
+Tú:  "cerrá linux"
+Jarvis: "¿Confirmo el apagado, señor?"
+Tú:  "sí"
+Jarvis: "Apagando, señor"
+```
+
+## Panel de control (GUI)
+
+```
+┌─────────────────────────────┐
+│  J.A.R.V.I.S.         v1.0 │
+│  Asistente de Voz Local     │
+├─────────────────────────────┤
+│  ● ACTIVO                   │
+│  Escuchando 'JARVIS'...     │
+├─────────────────────────────┤
+│  Sensibilidad Wake Word     │
+│  Baja ← → Alta              │
+│           0.50              │
+│  ═══════════●═══════════    │
+├─────────────────────────────┤
+│  📖 Comandos    │  📋 Logs  │
+├─────────────────────────────┤
+│  Actividad reciente         │
+│  [14:30:01] Jarvis iniciado │
+│  [14:30:05] Wake detectado  │
+└─────────────────────────────┘
+```
+
+### Botones
+
+- **⏻ ENCENDER / APAGAR**: Inicia o detiene Jarvis
+- **📖 Comandos**: Abre la ventana de ayuda con todos los comandos
+- **📋 Logs**: Muestra los logs de actividad reciente
+
+### Slider de sensibilidad
+
+- **Baja (0.1-0.3)**: Solo detecta con pronunciación muy clara
+- **Media (0.4-0.6)**: Balance recomendado
+- **Alta (0.7-0.9)**: Detecta fácil pero puede activarse con ruido
+
+## Configuración
+
+Las opciones están en `jarvis/src/jarvis/config.py`:
+
+```python
+# Wake word
+WAKE_ENGINE = "xslr"           # "xslr" (custom) o "openwakeword"
+WAKE_THRESHOLD = 0.5           # Sensibilidad (0.1-0.9)
+WAKE_XLSR_MODEL = SPIKE / "models" / "jarvis_wake.onnx"
+
+# Audio
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_SILENCE_MS = 800         # Tiempo de corte por silencio
+
+# TTS
+TTS_ENGINE = "edge"            # "edge" (neural) o "piper" (offline)
+EDGE_VOICE = "es-MX-JorgeNeural"
+
+# STT
+WHISPER_MODEL = SPIKE / "ggml-small.bin"
+WHISPER_BEAM = 1               # 1=rápido, 5=preciso
+
+# Apps permitidas
+ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
+```
+
+### Cambiar la voz
+
+```python
+EDGE_VOICE = "es-MX-DaliaNeural"   # femenina
+EDGE_VOICE = "es-MX-JorgeNeural"   # masculina (default)
+EDGE_VOICE = "es-AR-TomasNeural"   # argentino
+```
+
+## Wake word personalizado
+
+El wake word fue entrenado con tu pronunciación argentina de "jarvis".
+
+### Métricas del modelo
+
+- **Recall**: 96.7% (detecta "jarvis" 97 de 100 veces)
+- **Falsos positivos**: 0% en validación
+- **Latencia**: ~354ms por ventana de 2s
+
+### Re-entrenar
+
+Si Jarvis no te detecta bien:
+
+```bash
+# 1. Grabar positivos (decí "jarvis" ~30 veces)
+/tmp/opencode/train-venv/bin/python /tmp/opencode/train/grabar_wake.py pos -n 30
+
+# 2. Grabar negativos (~20 veces)
+/tmp/opencode/train-venv/bin/python /tmp/opencode/train/grabar_wake.py neg -n 20
+
+# 3. Extraer embeddings
+/tmp/opencode/train-venv/bin/python /tmp/opencode/train/extraer_xlsr.py
+
+# 4. Entrenar y exportar
+/tmp/opencode/train-venv/bin/python /tmp/opencode/train/entrenar_clasificador.py --export-onnx
+
+# 5. Copiar modelo
+cp /tmp/opencode/train/modelo_wake/clasificador.onnx spike/models/jarvis_wake.onnx
+```
 
 ## Tests
 
 ```bash
-.venv/bin/pytest jarvis/tests -q                 # unit suite (no hardware)
-.venv/bin/pytest jarvis/tests/e2e -m e2e         # e2e against real spike binaries
+source jarvis/.venv/bin/activate
+pytest jarvis/tests -q                  # suite unitaria (541 tests, sin hardware)
+pytest jarvis/tests/e2e -m e2e          # e2e con binarios reales
 ```
 
-The unit suite covers the orchestrator FSM, confirmation flow, session
-persistence, the golden gate, every action executor, the CLI, and the PRD
-metrics (M4/M5/M6). E2E requires the real mic + spike binaries.
-
-## Architecture
+## Arquitectura
 
 ```
-spike/                 whisper.cpp / piper / openwakeword recipes & binaries
+spike/                  whisper.cpp / piper / modelos / binarios
 jarvis/src/jarvis/
-  config.py            paths, allowlists, model settings
-  cli.py               jarvis start/off/on/clean entry point
-  audio/               wake, capture+VAD, whisper STT, piper TTS, pipeline
-  interpreter/         golden gate + optional LLM resolution → Intent
-  orchestrator/        FSM loop, session state, confirmation, action registry
-    logs.py            transcript journal + clean_logs (RNF-3)
-    loop.py            run loop, start/off/on/clean, signal-based switch
-  actions/             opencode / system / files / web executors
-tests/                 unit + e2e (evidence per task in openspec/changes/)
+  config.py             paths, allowlists, parámetros de audio
+  __main__.py           python -m jarvis entry point
+  cli.py                jarvis start/off/on/clean
+  audio/
+    wake.py             wav2vec2-XLSR + OpenWakeWord
+    capture.py          sounddevice + SilenceVAD
+    stt.py              whisper.cpp STT
+    tts.py              Edge TTS + PiperTTS
+    pipeline.py         UtteranceCapture, PiperSpeaker, MicSwitch
+    playback.py         paplay / gst-launch
+  interpreter/
+    normalize.py        normalización rioplatense (voseo → infinitivo)
+    golden.py           gate determinístico (destructivos + fast-path)
+    schema.py           15 comandos, validación de entidades
+    llm.py              fallback LLM (opcional)
+  orchestrator/
+    loop.py             FSM: wake → listen → interpret → execute → speak
+    session.py          estado persistente (session + off switch)
+    confirm.py          confirmación destrucción por voz
+    supervisor.py       Clock, watchdog
+  actions/
+    opencode.py         abrir repos en OpenCode
+    system.py           abrir apps del sistema
+    files.py            crear/editar archivos
+    web.py              buscar / abrir URLs
+jarvis_gui.py           GUI GTK3 (panel de control)
+launch_jarvis.sh        launcher (system python3 para GTK)
+MANUAL_USUARIO.md       manual completo del usuario
 ```
 
-## Status
+### Flujo de datos
 
-- **Done**: voice loop, all four action domains, golden gate + LLM, verbal
-  confirmation for destructive actions, off/on switch incl. non-vocal
-  reactivation, local log cleanup, PRD metrics M4/M5/M6 verified, docs.
-- **E2E / next improvements**: tuning the whisper small model for the target
-  mic, training a `jarvis.onnx` custom keyword (currently using a generic
-  openwakeword model), and a live demo over the real mic.
+```
+Micrófono → sounddevice (16kHz mono)
+  → wav2vec2-XLSR detecta "jarvis" (~350ms)
+  → Whisper transcribe a texto (~4s)
+  → Normalizador rioplatense ("abrí" → "abrir")
+  → Golden gate: matchea patrón regex o LLM
+  → Executor ejecuta la acción
+  → Edge TTS sintetiza respuesta
+  → paplay reproduce audio
+```
+
+## Documentación
+
+- **Manual completo**: `MANUAL_USUARIO.md`
+- **Comandos**: `jarvis/docs/comandos_jarvis.md`
+- **Entrenamiento wake word**: `jarvis/docs/wake-word-training.md`
+
+## Solución de problemas
+
+### Jarvis no detecta "jarvis"
+1. Bajá la sensibilidad a 0.3-0.4
+2. Grabá más muestras positivas
+3. Verificá micrófono: `arecord -l`
+
+### No hay audio
+1. Verificá dispositivos: `arecord -l` y `aplay -l`
+2. Reiniciá audio: `pulseaudio -k && pulseaudio --start`
+
+### "No entiendo" a todo
+Verificá que `ALLOWED_APPS` en `config.py` incluya las apps que querés abrir.
+
+### El panel no responde
+Cerrá y volvé a abrir. Verificá que no haya otro proceso jarvis corriendo:
+```bash
+ps aux | grep jarvis
+kill -9 <PID>  # si hay uno huérfano
+```
+
+## Licencia
+
+Proyecto personal — ver repositorio para detalles.
+
+---
+
+*J.A.R.V.I.S. — Just A Rather Very Intelligent System*
+*Versión 1.0 — Agosto 2026*

@@ -193,7 +193,7 @@ def test_open_repo_with_explicit_repo_switches_and_allocates(tmp_path) -> None:
     session = Session()
     result = executor.handle_open_repo(_intent("open_repo", {"repo": str(tmp_path)}), session)
     assert result.ok is True
-    assert "abierto" in result.spoken
+    assert "Abierto" in result.spoken
     assert session.active_project == str(tmp_path)
     assert manager.calls == [(OPCODE_BASE_PORT, Path(str(tmp_path)))]
 

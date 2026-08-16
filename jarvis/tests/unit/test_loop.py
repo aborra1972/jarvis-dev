@@ -181,7 +181,7 @@ def test_confirm_no_aborts_without_executing(tmp_path: Path) -> None:
     outcome = run(pipeline, iterations=4)
     assert outcome == "aborted"
     assert pipeline.executor.calls == []
-    assert "cancel" in pipeline.speaker.said[-1]
+    assert "Cancelo" in pipeline.speaker.said[-1]
 
 
 def test_confirm_silence_times_out(tmp_path: Path) -> None:
@@ -196,7 +196,7 @@ def test_confirm_silence_times_out(tmp_path: Path) -> None:
     outcome = run(pipeline, iterations=4)
     assert outcome == "timed_out"
     assert pipeline.executor.calls == []
-    assert "no confirmaste" in pipeline.speaker.said[-1]
+    assert "No confirmó a tiempo" in pipeline.speaker.said[-1]
 
 
 def test_reask_twice_then_reveal_transcript(tmp_path: Path) -> None:

@@ -24,8 +24,10 @@ WHISPER_CLI = SPIKE / "whisper.cpp" / "build" / "bin" / "whisper-cli"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_MODEL_MEDIUM = SPIKE / "ggml-medium.bin"
 PIPER_BIN = SPIKE / ".venv" / "bin" / "piper"
-PIPER_MODEL = SPIKE / "es_AR-daniela-high.onnx"
-PIPER_CONFIG = SPIKE / "es_AR-daniela-high.onnx.json"
+PIPER_MODEL = SPIKE / "es_MX-ald-medium.onnx"
+PIPER_CONFIG = SPIKE / "es_MX-ald-medium.onnx.json"
+# edge-tts (Microsoft neural voices) ships in the app venv, not the spike venv.
+EDGE_TTS_BIN = APP_ROOT / ".venv" / "bin" / "edge-tts"
 
 # --- Voice pipeline (PR5) -----------------------------------------------------
 WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
@@ -42,6 +44,10 @@ STT_MEDIUM_PROMOTED = False
 WAKE_CUSTOM_MODEL: Path | None = None
 WAKE_THRESHOLD = 0.5
 WAKE_VAD_THRESHOLD = 0.5
+# Gate 5.6: wake word engine selection — "openwakeword" (default) or "xslr"
+# (custom wav2vec2-XLSR + LogisticRegression trained on operator voice).
+WAKE_ENGINE = "xslr"
+WAKE_XLSR_MODEL = SPIKE / "models" / "jarvis_wake.onnx"
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_MS = 100
 AUDIO_SILENCE_MS = 800
@@ -52,6 +58,16 @@ STT_GATE_DURATION_S = 4.0
 TTS_TIMEOUT_S = 20.0
 PLAY_TIMEOUT_S = 20.0
 PLAYER_BIN = "paplay"
+# TTS engine selection: "edge" = Microsoft neural voices (primary, mp3 via
+# gst-launch-1.0), "piper" = offline es_MX-ald-medium fallback (wav via paplay).
+TTS_ENGINE = "edge"
+EDGE_VOICE = "es-MX-JorgeNeural"
+# Optional edge-tts voice shaping flags, e.g. "-10%" or "-5Hz"; None = omit.
+EDGE_RATE: str | None = None
+EDGE_PITCH: str | None = None
+# edge-tts chunks long text internally (~4s per 1000 chars); task results are
+# long, so the timeout is generous.
+EDGE_TTS_TIMEOUT_S = 60.0
 
 # --- opencode serve (ADR-1): one headless server per repo --------------------
 OPCODE_HOST = "127.0.0.1"
@@ -69,7 +85,12 @@ TRANSCRIPTS_FILE = LOGS_DIR / "transcripts.jsonl"  # handled transcripts
 PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
 
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
-ALLOWED_APPS: set[str] = {"firefox"}
+ALLOWED_APPS: set[str] = {
+    "firefox",
+    "terminal", "gnome-terminal", "nemo", "nautilus", "libreoffice",
+    "code", "codium", "vim", "nano", "htop",
+    "opencode", "explorador",
+}
 
 # --- Interpreter (PR2: JSON-only system prompt built from the schema) --------
 INTERPRETER_SYSTEM_PROMPT = build_system_prompt()

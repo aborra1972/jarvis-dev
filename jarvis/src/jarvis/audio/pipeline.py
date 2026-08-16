@@ -72,11 +72,13 @@ class UtteranceCapture:
 class PiperSpeaker:
     """Synthesizes and plays spoken replies on a worker thread (contracts.Speaker).
 
-    PR6 (item 6): piper is slow (seconds per reply), so ``speak()`` enqueues
-    and returns immediately — the loop never blocks on TTS and replies play in
-    order. ``is_playing()`` feeds the loop's IDLE gate (no self-trigger on
-    jarvis's own voice); ``flush()`` waits until the queue drains (used by the
-    loop on exit and by tests); ``close()`` stops the worker.
+    Drives any TTS backend (PiperTTS offline, EdgeTTS neural — the output
+    suffix comes from ``tts.extension``). PR6 (item 6): TTS is slow (seconds
+    per reply), so ``speak()`` enqueues and returns immediately — the loop
+    never blocks on TTS and replies play in order. ``is_playing()`` feeds the
+    loop's IDLE gate (no self-trigger on jarvis's own voice); ``flush()``
+    waits until the queue drains (used by the loop on exit and by tests);
+    ``close()`` stops the worker.
     """
 
     def __init__(
@@ -95,8 +97,9 @@ class PiperSpeaker:
         self._thread = threading.Thread(target=self._worker, name="jarvis-piper", daemon=True)
         self._thread.start()
 
-    def _next_wav(self) -> Path:
-        return self.out_dir / f"jarvis-reply-{uuid.uuid4().hex}.wav"
+    def _next_media(self) -> Path:
+        ext = getattr(self.tts, "extension", ".wav")
+        return self.out_dir / f"jarvis-reply-{uuid.uuid4().hex}{ext}"
 
     def _worker(self) -> None:
         while True:
@@ -111,10 +114,10 @@ class PiperSpeaker:
                 self._queue.task_done()
 
     def _play(self, text: str) -> None:
-        wav_path = self._next_wav()
+        media_path = self._next_media()
         try:
-            wav_path = self.tts.synthesize(text, wav_path)
-            self.playback.play(wav_path)
+            media_path = self.tts.synthesize(text, media_path)
+            self.playback.play(media_path)
         except (TTSError, PlaybackError):
             pass  # loop keeps running; the human can retry
 

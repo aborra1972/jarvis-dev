@@ -149,5 +149,39 @@ def test_wait_returns_false_when_capturer_dries_up() -> None:
     assert wake.wait(timeout=10.0) is False
 
 
+def test_wait_flattens_and_scales_float_blocks_before_predict() -> None:
+    """Regression: sounddevice delivers (frames, 1) float32; openwakeword needs
+    flat int16 PCM.
+
+    The 2D shape made the melspectrogram Conv fail with "Invalid input shape"
+    on the first block, crashing jarvis start at the first wake scan. The raw
+    normalized floats would also truncate to silence inside openwakeword's
+    int16 cast, so float blocks must be rescaled to int16 before predict.
+    """
+
+    class RecordingModel(FakeModel):
+        def __init__(self) -> None:
+            super().__init__([{"hey_jarvis": 0.2}])
+            self.seen: list[np.ndarray] = []
+
+        def predict(self, block: np.ndarray) -> dict[str, float]:
+            self.seen.append(block)
+            return super().predict(block)
+
+    model = RecordingModel()
+    wake = OpenWakeWord(
+        capturer=FakeCapturer([_frame().reshape(-1, 1)]),
+        model=model,
+        threshold=0.5,
+        clock=FakeClock(),
+    )
+    assert wake.wait(timeout=1.0) is False
+    assert model.seen[0].ndim == 1
+    assert model.seen[0].shape == (BLOCK,)
+    assert model.seen[0].dtype == np.int16
+    # 0.3 amplitude -> ~9830 int16, not truncated to 0
+    assert np.abs(model.seen[0]).max() > 5000
+
+
 def test_default_threshold_is_exposed() -> None:
     assert isinstance(DEFAULT_THRESHOLD, float)

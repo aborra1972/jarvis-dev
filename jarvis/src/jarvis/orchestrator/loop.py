@@ -24,8 +24,8 @@ from jarvis.audio.capture import SilenceVAD, SoundDeviceCapturer
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 from jarvis.audio.playback import Playback
 from jarvis.audio.stt import WhisperSTT
-from jarvis.audio.tts import PiperTTS
-from jarvis.audio.wake import OpenWakeWord
+from jarvis.audio.tts import EdgeTTS, PiperTTS
+from jarvis.audio.wake import build_wake_detector
 from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
 from jarvis.orchestrator.contracts import CaptureError
@@ -36,18 +36,18 @@ from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
 
-REASK_1 = "no entendí, ¿podés repetir?"
-REASK_2 = "no te entiendo, repetí una vez más"
-REVEAL_PREFIX = "sigo sin entenderte. esto fue lo que capté: "
-REJECTED_SPOKEN = "eso no es válido, no lo puedo hacer"
-UNSUPPORTED_SPOKEN = "no sé hacer eso todavía"
-NO_ACTIVE_PROJECT = "no tengo un proyecto activo; abrí uno primero"
-STT_ERROR_SPOKEN = "no pude escucharte, intentá de nuevo"
+REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
+REASK_2 = "Lo lamento, señor, sigo sin comprender. ¿Repite una vez más, por favor?"
+REVEAL_PREFIX = "Lo lamento, señor, sigo sin comprender. Esto fue lo que capté: "
+REJECTED_SPOKEN = "Eso no es válido, señor. No puedo hacerlo."
+UNSUPPORTED_SPOKEN = "Aún no sé hacer eso, señor."
+NO_ACTIVE_PROJECT = "No hay un proyecto activo, señor. Abra uno primero."
+STT_ERROR_SPOKEN = "Lo lamento, señor, no pude escucharlo. Intente de nuevo."
 # Verify fix (voice-pipeline "Long LLM operation"): spoken ack emitted BEFORE a
 # long-running executor call (ask/implement/review/create_artifact can take up
 # to 30s). Non-blocking: PiperSpeaker.speak enqueues and returns, so the ack
 # plays on the TTS worker while the operation runs.
-LONG_OPERATION_ACK = "dale, te aviso cuando esté"
+LONG_OPERATION_ACK = "En ello estoy, señor. Le aviso cuando termine."
 
 
 @dataclass
@@ -254,7 +254,7 @@ def _is_long_running(executor: object, intent: str) -> bool:
 
 # --- CLI wiring (task 3.6 / PR6 task 5.7) -------------------------------------
 
-ANNOUNCEMENT = "hola, soy jarvis, listo para ayudarte"
+ANNOUNCEMENT = "Buen día, señor. Soy Jarvis, a su servicio."
 
 
 def build_pipeline(
@@ -312,21 +312,30 @@ def build_pipeline(
             sample_rate=config.AUDIO_SAMPLE_RATE,
             wav_dir=config.LOGS_CAPTURE_DIR,
         )
-        wake = OpenWakeWord(
+        wake = build_wake_detector(
             capturer,
+            engine=config.WAKE_ENGINE,
+            classifier_path=config.WAKE_XLSR_MODEL if config.WAKE_ENGINE == "xslr" else None,
             threshold=config.WAKE_THRESHOLD,
-            vad_threshold=config.WAKE_VAD_THRESHOLD,
-            custom=config.WAKE_CUSTOM_MODEL,
         )
         if switch_state is None:
             switch_state = MicSwitch(capturer, lambda: session.switched_off)
     if speaker is None:
-        tts = PiperTTS(
-            piper_bin=config.PIPER_BIN,
-            model=config.PIPER_MODEL,
-            config=config.PIPER_CONFIG,
-            timeout_s=config.TTS_TIMEOUT_S,
-        )
+        if config.TTS_ENGINE == "edge":
+            tts = EdgeTTS(
+                bin_path=config.EDGE_TTS_BIN,
+                voice=config.EDGE_VOICE,
+                timeout_s=config.EDGE_TTS_TIMEOUT_S,
+                rate=config.EDGE_RATE,
+                pitch=config.EDGE_PITCH,
+            )
+        else:  # "piper" offline fallback
+            tts = PiperTTS(
+                piper_bin=config.PIPER_BIN,
+                model=config.PIPER_MODEL,
+                config=config.PIPER_CONFIG,
+                timeout_s=config.TTS_TIMEOUT_S,
+            )
         playback = Playback(player=config.PLAYER_BIN, timeout_s=config.PLAY_TIMEOUT_S)
         speaker = PiperSpeaker(tts, playback, out_dir=config.LOGS_REPLY_DIR)
     if executor is None:

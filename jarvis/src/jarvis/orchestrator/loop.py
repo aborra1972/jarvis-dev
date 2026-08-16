@@ -373,6 +373,15 @@ def build_pipeline(
         speaker = PiperSpeaker(tts, playback, out_dir=config.LOGS_REPLY_DIR)
     if executor is None:
         executor = build_registry()
+
+    # Wire LLM provider for interpreter (ADR-2: LLM-first for non-destructive intents)
+    if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
+        from jarvis.interpreter.llm import DirectProvider
+        _provider = DirectProvider(workdir=cwd, timeout=30.0, model=config.INTERPRETER_LLM_MODEL)
+        def _interpret_with_llm(text: str, _prov=_provider) -> Interpretation:
+            return resolve_intent(text, provider=_prov)
+        interpreter = _interpret_with_llm
+
     return Pipeline(
         clock=RealClock(),
         wake=wake,

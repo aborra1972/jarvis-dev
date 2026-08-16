@@ -137,6 +137,40 @@ class OpenCodeProvider:
             raise RuntimeError(f"opencode returned non-JSON output: {text[:200]}") from exc
 
 
+class DirectProvider:
+    """Direct transport: ``opencode run`` without server (slower but no dependency)."""
+
+    def __init__(
+        self,
+        workdir: str | Path | None = None,
+        timeout: float = 30.0,
+        model: str | None = None,
+        runner: object | None = None,
+    ) -> None:
+        self.workdir = Path(workdir) if workdir else None
+        self.timeout = timeout
+        self.model = model
+        self.runner = runner or subprocess.run
+
+    def resolve(self, prompt: str, system: str) -> dict:
+        command = ["opencode", "run", "--format", "json"]
+        if self.model:
+            command += ["-m", self.model]
+        if self.workdir is not None:
+            command += ["--dir", str(self.workdir)]
+        command.append(f"{system}\n\n{prompt}")
+        result = self.runner(command, capture_output=True, text=True, timeout=self.timeout)
+        if result.returncode != 0:
+            raise RuntimeError(f"opencode run exited {result.returncode}: {result.stderr[:200]}")
+        text = parse_assistant_text(result.stdout)
+        if not text:
+            raise RuntimeError("opencode run returned no assistant text")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"opencode returned non-JSON output: {text[:200]}") from exc
+
+
 def resolve(prompt: str, system: str, provider: IntentProvider) -> schema.Intent:
     """Resolve and validate through the injected provider."""
     payload = provider.resolve(prompt, system)

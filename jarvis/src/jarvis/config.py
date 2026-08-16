@@ -94,3 +94,6 @@ ALLOWED_APPS: set[str] = {
 
 # --- Interpreter (PR2: JSON-only system prompt built from the schema) --------
 INTERPRETER_SYSTEM_PROMPT = build_system_prompt()
+# LLM provider for intent routing (ADR-2: LLM-first for non-destructive intents)
+# None = no LLM (golden gate only); set to a model name to enable
+INTERPRETER_LLM_MODEL: str | None = None  # e.g. "ollama/llama3.2" or "openai/gpt-4o-mini"

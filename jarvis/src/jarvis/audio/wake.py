@@ -128,6 +128,10 @@ class OpenWakeWord:
                 return True
         return False
 
+    def flush(self) -> None:
+        """Reset openwakeword internal state (call after TTS cooldown)."""
+        self._model.reset()
+
 
 class XLSRWakeWord:
     """Custom wake word detector using wav2vec2-XLSR + trained classifier.
@@ -219,6 +223,11 @@ class XLSRWakeWord:
                         drop_samples = 0
 
         return False
+
+    def flush(self) -> None:
+        """Discard accumulated audio buffer (call after TTS cooldown)."""
+        self._buf.clear()
+        self._buf_samples = 0
 
     def _classify(self, audio: np.ndarray) -> float:
         """Run XLSR + ONNX classifier on a2s audio window. Returns score."""

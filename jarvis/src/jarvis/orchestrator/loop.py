@@ -104,6 +104,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.OFF, context
         if _speaker_is_playing(pipeline.speaker):
             # PR6 (item 6): never listen over jarvis's own voice.
+            # Keep mic stopped while TTS plays to prevent feedback loop.
+            if hasattr(pipeline.wake, 'capturer'):
+                pipeline.wake.capturer.stop()
             context.outcome = "speaking"
             return State.IDLE, context
         # Post-TTS cooldown: wait for speaker hardware to fully stop after
@@ -114,6 +117,13 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             if remaining > 0:
                 _time.sleep(remaining)
             context._last_spoke_at = 0.0
+            # Flush wake detector buffer — discard any TTS audio captured
+            # before the mic was restarted.
+            if hasattr(pipeline.wake, 'flush'):
+                pipeline.wake.flush()
+            # Restart mic after cooldown
+            if hasattr(pipeline.wake, 'capturer'):
+                pipeline.wake.capturer.start()
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
             context.outcome = "no_wake"
             return State.IDLE, context

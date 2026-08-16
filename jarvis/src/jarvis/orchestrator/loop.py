@@ -227,6 +227,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     if state is State.SPEAKING:
         import time as _time
         context._last_spoke_at = _time.monotonic()
+        # Close mic immediately while Jarvis speaks to prevent feedback loop
+        if hasattr(pipeline.wake, 'capturer'):
+            pipeline.wake.capturer.stop()
         return State.IDLE, context
 
     if state is State.OFF:

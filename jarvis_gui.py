@@ -388,6 +388,13 @@ class JarvisGUI:
             _send_signal(signal.SIGTERM)
             import time as _t
             _t.sleep(1)
+            # Force kill any remaining jarvis processes
+            import subprocess as _sp
+            _sp.run(["pkill", "-f", "jarvis start"], capture_output=True)
+            _t.sleep(0.5)
+
+        # Ensure state is clean before launching
+        self._reset_switch_state()
 
         self._log("Iniciando Jarvis...")
         self._status_detail.set_text("Iniciando...")

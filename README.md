@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="jarvis-banner.svg" alt="J.A.R.V.I.S. — Voice Assistant for Linux" width="100%">
+</p>
+
 # J.A.R.V.I.S. — Asistente de Voz Local para Linux
 
 Asistente de voz 100% local para desarrollo, inspirado en el JARVIS de Marvel.

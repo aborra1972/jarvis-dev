@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <defs>
+    <!-- Futuristic grid pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#0a3d6b" stroke-width="0.5" opacity="0.3"/>
+    </pattern>
+    <!-- Glow filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Arc reactor gradient -->
+    <radialGradient id="reactor" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0.9"/>
+      <stop offset="40%" style="stop-color:#0099cc;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#003366;stop-opacity:0"/>
+    </radialGradient>
+    <!-- HUD ring gradient -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0.1"/>
+      <stop offset="50%" style="stop-color:#00d4ff;stop-opacity:0.8"/>
+      <stop offset="100%" style="stop-color:#00d4ff;stop-opacity:0.1"/>
+    </linearGradient>
+    <!-- Text gradient -->
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="50%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#00d4ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="400" fill="#0a0e1a"/>
+  <rect width="1200" height="400" fill="url(#grid)"/>
+
+  <!-- HUD scan lines -->
+  <g opacity="0.08">
+    <line x1="0" y1="50" x2="1200" y2="50" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="100" x2="1200" y2="100" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="150" x2="1200" y2="150" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="200" x2="1200" y2="200" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="250" x2="1200" y2="250" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="300" x2="1200" y2="300" stroke="#00d4ff" stroke-width="1"/>
+    <line x1="0" y1="350" x2="1200" y2="350" stroke="#00d4ff" stroke-width="1"/>
+  </g>
+
+  <!-- Arc reactor core -->
+  <circle cx="600" cy="200" r="120" fill="url(#reactor)" opacity="0.3"/>
+  <circle cx="600" cy="200" r="80" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.4"/>
+  <circle cx="600" cy="200" r="60" fill="none" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+
+  <!-- Rotating HUD rings -->
+  <g transform="translate(600,200)" filter="url(#glow)">
+    <!-- Outer ring -->
+    <circle r="140" fill="none" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="12 8" opacity="0.5"/>
+    <circle r="145" fill="none" stroke="#00d4ff" stroke-width="0.5" opacity="0.2"/>
+    <!-- Middle ring -->
+    <circle r="100" fill="none" stroke="#00aaff" stroke-width="1" stroke-dasharray="20 5 5 5" opacity="0.4"/>
+    <!-- Inner ring -->
+    <circle r="70" fill="none" stroke="#00d4ff" stroke-width="0.8" stroke-dasharray="8 4" opacity="0.6"/>
+    <!-- Cross hairs -->
+    <line x1="-160" y1="0" x2="160" y2="0" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+    <line x1="0" y1="-160" x2="0" y2="160" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+    <line x1="-110" y1="-110" x2="110" y2="110" stroke="#00d4ff" stroke-width="0.3" opacity="0.2"/>
+    <line x1="110" y1="-110" x2="-110" y2="110" stroke="#00d4ff" stroke-width="0.3" opacity="0.2"/>
+  </g>
+
+  <!-- Corner brackets (HUD frame) -->
+  <g stroke="#00d4ff" stroke-width="2" fill="none" opacity="0.6">
+    <!-- Top left -->
+    <polyline points="30,60 30,30 60,30"/>
+    <!-- Top right -->
+    <polyline points="1140,30 1170,30 1170,60"/>
+    <!-- Bottom left -->
+    <polyline points="30,340 30,370 60,370"/>
+    <!-- Bottom right -->
+    <polyline points="1140,370 1170,370 1170,340"/>
+  </g>
+
+  <!-- Thin horizontal accent lines -->
+  <line x1="100" y1="90" x2="500" y2="90" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+  <line x1="700" y1="90" x2="1100" y2="90" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+  <line x1="100" y1="310" x2="500" y2="310" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+  <line x1="700" y1="310" x2="1100" y2="310" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+
+  <!-- Side data readouts -->
+  <g font-family="'Courier New', monospace" font-size="10" fill="#00d4ff" opacity="0.4">
+    <text x="45" y="120">SYS.INIT</text>
+    <text x="45" y="135">VOICE.ACTIVE</text>
+    <text x="45" y="150">WAKE.WORD:OK</text>
+    <text x="45" y="165">TTS.READY</text>
+    <text x="45" y="180">STT.READY</text>
+    <text x="45" y="200">STATUS: ONLINE</text>
+    <text x="45" y="280">WHISPER.SMALL</text>
+    <text x="45" y="295">PIPER.ES</text>
+    <text x="45" y="310">XLSR.WAKE</text>
+  </g>
+  <g font-family="'Courier New', monospace" font-size="10" fill="#00d4ff" opacity="0.4" text-anchor="end">
+    <text x="1155" y="120">ARG.ES</text>
+    <text x="1155" y="135">LOCAL-FIRST</text>
+    <text x="1155" y="150">NO-CLOUD</text>
+    <text x="1155" y="165">GTK3.GUI</text>
+    <text x="1155" y="180">ONNX.RUNTIME</text>
+    <text x="1155" y="200">PYTHON 3.11</text>
+    <text x="1155" y="280">WAV2VEC2</text>
+    <text x="1155" y="295">LOGISTIC.REG</text>
+    <text x="1155" y="310">EDGE.TTS</text>
+  </g>
+
+  <!-- J.A.R.V.I.S. main text -->
+  <text x="600" y="190" text-anchor="middle" font-family="'Arial Black', 'Impact', sans-serif" font-size="72" font-weight="900" fill="url(#textGrad)" filter="url(#glow)" letter-spacing="16">J.A.R.V.I.S.</text>
+
+  <!-- Subtitle -->
+  <text x="600" y="225" text-anchor="middle" font-family="'Courier New', monospace" font-size="14" fill="#00d4ff" opacity="0.7" letter-spacing="8">JUST A RATHER VERY INTELLIGENT SYSTEM</text>
+
+  <!-- Bottom tagline -->
+  <text x="600" y="360" text-anchor="middle" font-family="'Courier New', monospace" font-size="12" fill="#00d4ff" opacity="0.5" letter-spacing="3">VOICE ASSISTANT · LOCAL-FIRST · ARGENTINE SPANISH · OPEN SOURCE</text>
+
+  <!-- Small decorative dots -->
+  <circle cx="380" cy="200" r="2" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="820" cy="200" r="2" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="600" cy="140" r="2" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="600" cy="260" r="2" fill="#00d4ff" opacity="0.6"/>
+</svg>

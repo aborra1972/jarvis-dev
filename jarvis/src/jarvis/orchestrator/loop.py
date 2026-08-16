@@ -36,6 +36,7 @@ from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
 TTS_COOLDOWN_S = 3.0  # seconds to wait after speaker stops before listening
+MIC_CLOSE_DELAY_S = 1.5  # seconds after user finishes speaking before closing mic
 
 REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
 REASK_2 = "Lo lamento, señor, sigo sin comprender. ¿Repite una vez más, por favor?"
@@ -141,6 +142,13 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
+        # Close mic 1.5s after user finishes speaking to prevent TTS feedback.
+        # The mic stays open briefly in case the user is trailing off, then
+        # shuts down so Jarvis's own voice doesn't leak into the next capture.
+        import time as _time
+        _time.sleep(MIC_CLOSE_DELAY_S)
+        if hasattr(pipeline.wake, 'capturer'):
+            pipeline.wake.capturer.stop()
         interpretation = pipeline.interpreter(transcript)
         context.transcript = transcript
         context.interpretation = interpretation
@@ -393,15 +401,21 @@ def start() -> int:
     _write_pid()
     try:
         try:
+            # Close mic during announcement to prevent feedback
+            if hasattr(pipeline.wake, 'capturer'):
+                pipeline.wake.capturer.stop()
             pipeline.speaker.speak(ANNOUNCEMENT)
             pipeline.speaker.flush(timeout=10)
         except Exception:
             print(ANNOUNCEMENT, file=sys.stderr)
         # Allow speaker to fully stop before opening the mic to wake detection.
-        # Without this delay the mic captures the TTS audio, self-triggering
-        # the wake word ("Soy Jarvis..." → false positive → reask loop).
         import time as _time
         _time.sleep(3.0)
+        # Flush wake detector buffer and restart mic
+        if hasattr(pipeline.wake, 'flush'):
+            pipeline.wake.flush()
+        if hasattr(pipeline.wake, 'capturer'):
+            pipeline.wake.capturer.start()
         run(pipeline)
     finally:
         _remove_pid()

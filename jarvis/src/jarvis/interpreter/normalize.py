@@ -18,7 +18,7 @@ import unicodedata
 # Includes common Whisper mishearings: charvis, shavis, sharvis, jarves, etc.
 _WAKE_STRIP = re.compile(
     r"^\s*(?:(?:hey|hola|ok|oye|ejem|atencion|disculpa)\s+)?"
-    r"(?:jarvis|charvis|shavis|sharvis|jarves|jarviss|chavis|sharrouiss)\s*"
+    r"(?:jarvis|charvis|shavis|sharvis|jarves|jarviss|chavis|sharrouiss|jorvis|yorvis)\s*"
 )
 _WS = re.compile(r"\s+")
 

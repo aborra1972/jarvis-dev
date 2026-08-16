@@ -24,10 +24,10 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_15_commands_in_5_domains() -> None:
+def test_16_commands_in_5_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 15
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 15
+    assert len(commands) == 16
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 16
     assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle"}
 
 

@@ -3,6 +3,8 @@
 Composes the pure stages into the final Interpretation. Destructive intents
 only ever come from the golden hard gate: if the LLM suggests one without a
 golden match it is rejected (spec: golden rejection wins over LLM suggestion).
+The execute intent is a special case: it generates shell commands via Ollama
+and runs with confirmation (Option A) or auto (Option B).
 """
 
 from __future__ import annotations
@@ -82,6 +84,17 @@ def resolve_intent(
         )
     if intent.intent == "unknown":
         return Interpretation(needs_reask=True, reason="unknown")
+
+    # 3b. Fix LLM routing: if create_artifact includes a command field, reroute to execute
+    if intent.intent == "create_artifact" and intent.entities.get("command"):
+        intent = replace(intent, intent="execute")
+
+    # 4. Execute intent: set confirm_required based on AUTO_EXECUTE config.
+    #    Option A (AUTO_EXECUTE=False): confirm_required=True → orchestrator asks
+    #    Option B (AUTO_EXECUTE=True): confirm_required=False → direct execution
+    if intent.intent == "execute":
+        if not _config.AUTO_EXECUTE:
+            intent = replace(intent, confirm_required=True)
 
     intent = _resolve_active_project(intent)
     if intent.confidence < threshold:

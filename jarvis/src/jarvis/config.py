@@ -98,3 +98,5 @@ INTERPRETER_SYSTEM_PROMPT = build_system_prompt()
 # None = no LLM (golden gate only); set to an Ollama model name to enable
 INTERPRETER_LLM_MODEL: str | None = "qwen2.5:3b"
 OLLAMA_BASE_URL = "http://localhost:11434"
+# Execute mode: False = confirm before any command (Option A), True = auto-execute (Option B)
+AUTO_EXECUTE = False

@@ -63,6 +63,9 @@ def _starts_with(surface: str, phrases: frozenset[str]) -> bool:
 
 
 def confirmation_prompt(intent: Intent) -> str:
+    if intent.intent == "execute":
+        cmd = intent.entities.get("command", "desconocido")
+        return f"¿Ejecuto el comando: {cmd}, señor?"
     return _PROMPTS.get(intent.intent, "¿Confirma esta operación, señor?")
 
 

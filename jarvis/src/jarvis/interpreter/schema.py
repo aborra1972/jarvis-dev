@@ -1,4 +1,4 @@
-"""Intent schema: 15-command allowlist + validation (PR2, task 2.4).
+"""Intent schema: 16-command allowlist + validation (PR2, task 2.4).
 
 The interpreter only ever emits one of the allowlisted intents; executors
 never receive raw transcripts — only validated intents + entities (design
@@ -14,12 +14,12 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-# The 15 commands (5 domains) + "unknown" (the no-intent fallback, not a
+# The 16 commands (6 domains) + "unknown" (the no-intent fallback, not a
 # command — drives the re-ask flow per spec RNF-4).
 ALLOWED_INTENTS: frozenset[str] = frozenset({
     "open_repo", "ask", "configure", "create_artifact", "implement", "review",
     "shutdown", "reboot", "power_off_self", "open_app", "create_doc",
-    "open_file_dir", "web_search", "open_url", "help", "unknown",
+    "open_file_dir", "web_search", "open_url", "help", "unknown", "execute",
 })
 
 # Destructive intents: only the golden hard gate may emit these.
@@ -27,7 +27,7 @@ DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({"shutdown", "reboot", "power_of
 
 DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
     "opencode": ("open_repo", "ask", "configure", "create_artifact", "implement", "review"),
-    "system": ("shutdown", "reboot", "open_app"),
+    "system": ("shutdown", "reboot", "open_app", "execute"),
     "files": ("create_doc", "open_file_dir"),
     "web": ("web_search", "open_url"),
     "lifecycle": ("power_off_self", "help"),
@@ -122,6 +122,7 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
     - ``repo``: reject shell metachars and leading ``-`` (metachar injection).
     - ``app``: must be allowlisted (disallowed app ⇒ rejected, nothing spawned).
     - ``url``: must parse as http/https with a host (malformed URL ⇒ rejected).
+    - ``command``: reject dangerous metachars for execute intent.
     Empty repo is valid for ``open_repo`` when the active project is delegated
     (``use_active_project``).
     """
@@ -145,11 +146,18 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             invalid.append("url")
 
+    # execute: basic safety — reject extremely dangerous patterns
+    if intent.intent == "execute":
+        cmd = entities.get("command", "")
+        # Block rm -rf / and similar catastrophic commands
+        if cmd and re.search(r'\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+/*|/\*)', cmd):
+            invalid.append("command")
+
     return invalid
 
 
 def build_system_prompt() -> str:
-    """JSON-only system prompt: the 15-command allowlist, schema, and rules."""
+    """JSON-only system prompt: the 16-command allowlist, schema, and rules."""
     intent_list = "|".join(sorted(ALLOWED_INTENTS))
     domain_lines = "\n".join(f"- {domain}: {', '.join(values)}" for domain, values in DOMAIN_INTENTS.items())
     return (
@@ -157,15 +165,27 @@ def build_system_prompt() -> str:
         "allowed intent. Reply with ONLY a JSON object — no prose, no markdown, no code fence.\n"
         "Schema:\n"
         '{"intent": "<' + intent_list + '>", "entities": {"repo": "", "app": "", "query": "", '
-        '"text": "", "url": "", "engine": "google"}, "confidence": 0.0}\n'
+        '"text": "", "url": "", "engine": "google", "command": ""}, "confidence": 0.0}\n'
         "Rules:\n"
         "- intent MUST be one of the listed values; never invent commands.\n"
         "- shutdown, reboot and power_off_self are gated by a separate deterministic rule and are "
         "only emitted when the user clearly asks to power down the machine or the assistant itself.\n"
-        "- unknown: the request cannot map to any allowed intent (also delete/edit/execute requests).\n"
+        "- open_app: ONLY for known applications (firefox, terminal, spotify, libreoffice, etc). "
+        "Use entities.app with the app name.\n"
+        "- execute: for ANY command that is NOT an open_app, NOT create_doc, NOT web_search. "
+        "Generate the exact shell command.\n"
+        "  Examples:\n"
+        "  'make build' → intent='execute', command='make build'\n"
+        "  'corré los tests' → intent='execute', command='pytest'\n"
+        "  'abrí vim config.json' → intent='execute', command='vim config.json'\n"
+        "  'creá una carpeta llamada test' → intent='execute', command='mkdir -p test'\n"
+        "  'instalá nginx' → intent='execute', command='sudo apt-get install -y nginx'\n"
+        "  'listá archivos src' → intent='execute', command='ls src'\n"
+        "  'editá el archivo config.json' → intent='execute', command='nano config.json'\n"
+        "- unknown: only when the request truly cannot map to any intent.\n"
         "- entities: fill only fields that apply — query for questions, repo for a repository, app for "
-        "an application, url for a web address, text for free-form content. Keep 'este proyecto' style "
-        "references as repo 'este proyecto'.\n"
+        "an application, url for a web address, text for free-form content, command for execute. "
+        "Keep 'este proyecto' style references as repo 'este proyecto'.\n"
         "- confidence: 0.0-1.0; below 0.6 the assistant must ask again.\n"
         f"Domains:\n{domain_lines}\n"
     )

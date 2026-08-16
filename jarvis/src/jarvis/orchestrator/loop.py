@@ -130,11 +130,22 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.IDLE, context
         pipeline.session.reask_attempts = 0
         context.outcome = "woke"
+        # Stop mic before beep to prevent capturing our own sound
+        if hasattr(pipeline.wake, 'capturer'):
+            pipeline.wake.capturer.stop()
         # Play activation beep so user knows Jarvis is listening
         try:
             pipeline.speaker.playback.play_beep()
         except Exception:
             pass  # best effort — don't block on beep failure
+        # Wait for beep to fully play and speakers to settle
+        import time as _time
+        _time.sleep(0.8)
+        # Flush wake detector buffer and restart mic for command capture
+        if hasattr(pipeline.wake, 'flush'):
+            pipeline.wake.flush()
+        if hasattr(pipeline.wake, 'capturer'):
+            pipeline.wake.capturer.start()
         return State.LISTENING, context
 
     if state is State.LISTENING:

@@ -198,6 +198,7 @@ class JarvisGUI:
         self._apply_css()
 
         if auto_launch:
+            self._reset_switch_state()
             GLib.timeout_add(500, self._launch_jarvis)
 
         GLib.timeout_add(2000, self._poll_status)

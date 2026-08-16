@@ -16,3 +16,4 @@ build/
 # Runtime
 *.log
 logs/
+.codegraph/

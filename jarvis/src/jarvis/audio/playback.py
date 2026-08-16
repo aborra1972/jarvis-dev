@@ -2,18 +2,29 @@
 
 Plays the audio produced by TTS through the system player, picked by file
 suffix: wav via paplay (piper) and mp3 via gst-launch-1.0 playbin (edge-tts).
+Also provides a short activation beep for wake-word confirmation.
 List-args subprocess call, no shell; failures surface as PlaybackError so the
 loop can recover on the next iteration.
 """
 
 from __future__ import annotations
 
+import math
+import struct
 import subprocess
+import tempfile
+import wave
 from pathlib import Path
 
 DEFAULT_PLAYER = "paplay"
 DEFAULT_MP3_PLAYER = "gst-launch-1.0"
 PLAY_TIMEOUT_S = 20.0
+
+# Activation beep parameters
+_BEEP_FREQ_HZ = 880
+_BEEP_DURATION_MS = 150
+_BEEP_SAMPLE_RATE = 16000
+_BEEP_AMPLITUDE = 0.3
 
 
 class PlaybackError(Exception):
@@ -53,3 +64,23 @@ class Playback:
             raise PlaybackError(
                 f"{player_name} exited {proc.returncode}: {proc.stderr.strip()}"
             )
+
+    def play_beep(self) -> None:
+        """Play a short activation beep to confirm wake-word detection."""
+        n_samples = int(_BEEP_SAMPLE_RATE * _BEEP_DURATION_MS / 1000)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            beep_path = Path(f.name)
+        try:
+            with wave.open(str(beep_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(_BEEP_SAMPLE_RATE)
+                for i in range(n_samples):
+                    t = i / _BEEP_SAMPLE_RATE
+                    sample = int(
+                        _BEEP_AMPLITUDE * 32767 * math.sin(2 * math.pi * _BEEP_FREQ_HZ * t)
+                    )
+                    wf.writeframes(struct.pack("<h", sample))
+            self.play(beep_path)
+        finally:
+            beep_path.unlink(missing_ok=True)

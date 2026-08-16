@@ -130,6 +130,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.IDLE, context
         pipeline.session.reask_attempts = 0
         context.outcome = "woke"
+        # Play activation beep so user knows Jarvis is listening
+        try:
+            pipeline.speaker.playback.play_beep()
+        except Exception:
+            pass  # best effort — don't block on beep failure
         return State.LISTENING, context
 
     if state is State.LISTENING:

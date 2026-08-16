@@ -82,5 +82,8 @@ class Playback:
                     )
                     wf.writeframes(struct.pack("<h", sample))
             self.play(beep_path)
+            print("[jarvis] beep played", flush=True)
+        except Exception as exc:
+            print(f"[jarvis] beep failed: {exc}", flush=True)
         finally:
             beep_path.unlink(missing_ok=True)

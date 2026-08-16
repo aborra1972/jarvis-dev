@@ -432,6 +432,9 @@ class JarvisGUI:
                 line = line.strip()
                 if line:
                     GLib.idle_add(self._log, line)
+                    # Update status when Jarvis announces readiness
+                    if "listo" in line.lower() or "jarvis" in line.lower():
+                        GLib.idle_add(self._status_detail.set_text, "Escuchando 'JARVIS'...")
 
     def _on_slider_changed(self, scale) -> None:
         self._threshold = scale.get_value()
@@ -455,7 +458,7 @@ class JarvisGUI:
             self._status_label.set_text("● ACTIVO")
             self._status_label.get_style_context().remove_class("status-inactive")
             self._status_label.get_style_context().add_class("status-active")
-            self._status_detail.set_text("Escuchando 'JARVIS'...")
+            self._status_detail.set_text("Iniciando...")
             self._power_btn.set_label("⏻ APAGAR")
             self._power_btn.get_style_context().remove_class("power-btn")
             self._power_btn.get_style_context().add_class("power-btn-off")

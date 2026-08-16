@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" width="400" height="100">
+  <defs>
+    <pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#0a3d6b" stroke-width="0.3" opacity="0.25"/>
+    </pattern>
+    <filter id="gl">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="r" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0.5"/>
+      <stop offset="100%" style="stop-color:#003366;stop-opacity:0"/>
+    </radialGradient>
+    <linearGradient id="t" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="50%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#00d4ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- BG -->
+  <rect width="400" height="100" fill="#0d1117" rx="8"/>
+  <rect width="400" height="100" fill="url(#g)" rx="8"/>
+
+  <!-- Arc reactor glow -->
+  <circle cx="200" cy="45" r="50" fill="url(#r)"/>
+
+  <!-- HUD rings -->
+  <g transform="translate(200,45)" filter="url(#gl)">
+    <circle r="35" fill="none" stroke="#00d4ff" stroke-width="0.8" stroke-dasharray="6 4" opacity="0.4"/>
+    <circle r="25" fill="none" stroke="#00d4ff" stroke-width="0.5" stroke-dasharray="4 2" opacity="0.3"/>
+    <line x1="-45" y1="0" x2="45" y2="0" stroke="#00d4ff" stroke-width="0.3" opacity="0.2"/>
+    <line x1="0" y1="-45" x2="0" y2="45" stroke="#00d4ff" stroke-width="0.3" opacity="0.2"/>
+  </g>
+
+  <!-- Corner brackets -->
+  <g stroke="#00d4ff" stroke-width="1.2" fill="none" opacity="0.4">
+    <polyline points="8,18 8,8 18,8"/>
+    <polyline points="382,8 392,8 392,18"/>
+    <polyline points="8,82 8,92 18,92"/>
+    <polyline points="382,92 392,92 392,82"/>
+  </g>
+
+  <!-- J.A.R.V.I.S. -->
+  <text x="200" y="48" text-anchor="middle" font-family="'Arial Black','Impact',sans-serif" font-size="28" font-weight="900" fill="url(#t)" filter="url(#gl)" letter-spacing="6">J.A.R.V.I.S.</text>
+
+  <!-- Version -->
+  <text x="200" y="68" text-anchor="middle" font-family="'Courier New',monospace" font-size="10" fill="#00d4ff" opacity="0.6" letter-spacing="2">v1.0 · LOCAL-FIRST · ARGENTINE SPANISH</text>
+
+  <!-- Side dots -->
+  <circle cx="35" cy="45" r="1.5" fill="#00d4ff" opacity="0.5"/>
+  <circle cx="365" cy="45" r="1.5" fill="#00d4ff" opacity="0.5"/>
+</svg>

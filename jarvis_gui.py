@@ -219,27 +219,32 @@ class JarvisGUI:
         main_box.get_style_context().add_class("window-bg")
         self._window.add(main_box)
 
-        # --- Title ---
-        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        title_box.set_margin_start(8)
-        title_box.set_margin_end(8)
-        main_box.pack_start(title_box, False, False, 0)
-
-        title = Gtk.Label(label="J.A.R.V.I.S.")
-        title.get_style_context().add_class("title-label")
-        title.set_margin_top(8)
-        title_box.pack_start(title, False, False, 0)
-
-        version = Gtk.Label(label="v1.0")
-        version.get_style_context().add_class("subtitle-label")
-        version.set_halign(Gtk.Align.END)
-        title_box.pack_end(version, False, False, 0)
-
-        subtitle = Gtk.Label(label="Asistente de Voz Local")
-        subtitle.get_style_context().add_class("subtitle-label")
-        subtitle.set_margin_start(8)
-        subtitle.set_margin_end(8)
-        main_box.pack_start(subtitle, False, False, 0)
+        # --- Banner Image ---
+        banner_path = JARVIS_ROOT / "jarvis-gui-banner.svg"
+        if banner_path.exists():
+            banner_img = Gtk.Image.new_from_file(str(banner_path))
+            banner_img.set_halign(Gtk.Align.CENTER)
+            banner_img.set_valign(Gtk.Align.CENTER)
+            main_box.pack_start(banner_img, False, False, 0)
+        else:
+            # Fallback to text labels
+            title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            title_box.set_margin_start(8)
+            title_box.set_margin_end(8)
+            main_box.pack_start(title_box, False, False, 0)
+            title = Gtk.Label(label="J.A.R.V.I.S.")
+            title.get_style_context().add_class("title-label")
+            title.set_margin_top(8)
+            title_box.pack_start(title, False, False, 0)
+            version = Gtk.Label(label="v1.0")
+            version.get_style_context().add_class("subtitle-label")
+            version.set_halign(Gtk.Align.END)
+            title_box.pack_end(version, False, False, 0)
+            subtitle = Gtk.Label(label="Asistente de Voz Local")
+            subtitle.get_style_context().add_class("subtitle-label")
+            subtitle.set_margin_start(8)
+            subtitle.set_margin_end(8)
+            main_box.pack_start(subtitle, False, False, 0)
 
         # --- Status Card ---
         status_frame = Gtk.Frame()

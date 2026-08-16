@@ -62,7 +62,7 @@ SKELETON_MODULES = (
 # package — no stub callables remain, so test_stub_fails_until_logic_lands was
 # removed too.
 
-CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs")
+CLI_COMMANDS = ("start", "stop", "off", "on", "clean", "logs", "say")
 # Wired in PR3 (start/off/on) or task 6.3 (clean); stop/logs stay skeleton.
 CLI_STUBS = ("stop", "logs")
 

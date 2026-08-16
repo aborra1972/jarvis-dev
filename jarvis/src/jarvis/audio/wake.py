@@ -173,9 +173,11 @@ class XLSRWakeWord:
             from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 
             self._feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
-                model_name
+                model_name, local_files_only=True
             )
-            self._xlsr = Wav2Vec2Model.from_pretrained(model_name)
+            self._xlsr = Wav2Vec2Model.from_pretrained(
+                model_name, local_files_only=True
+            )
             self._xlsr.eval()
 
             self._onnx_session = ort.InferenceSession(str(classifier_path))

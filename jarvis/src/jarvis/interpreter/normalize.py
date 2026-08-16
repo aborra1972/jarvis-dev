@@ -15,7 +15,11 @@ import re
 import unicodedata
 
 # Leading wake-word token(s): optional greeting prefix + "jarvis" (RF-1).
-_WAKE_STRIP = re.compile(r"^\s*(?:(?:hey|hola|ok|oye|ejem|atencion|disculpa)\s+)?jarvis\s*")
+# Includes common Whisper mishearings: charvis, shavis, sharvis, jarves, etc.
+_WAKE_STRIP = re.compile(
+    r"^\s*(?:(?:hey|hola|ok|oye|ejem|atencion|disculpa)\s+)?"
+    r"(?:jarvis|charvis|shavis|sharvis|jarves|jarviss|chavis|sharrouiss)\s*"
+)
 _WS = re.compile(r"\s+")
 
 # Rioplatense variants → canonical infinitive (table-driven).

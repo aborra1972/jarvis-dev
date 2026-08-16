@@ -208,7 +208,7 @@ class JarvisGUI:
         self._window.set_resizable(False)
         self._window.set_keep_above(True)
         self._window.set_position(Gtk.WindowPosition.CENTER)
-        self._window.connect("destroy", Gtk.main_quit)
+        self._window.connect("destroy", self._on_destroy)
 
         # Main container
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -480,6 +480,23 @@ class JarvisGUI:
         # Auto-scroll
         end_iter = buf.get_end_iter()
         self._log_view.scroll_to_iter(end_iter, 0.0, False, 0.0, 0.0)
+
+    def _on_destroy(self, widget) -> None:
+        """Kill jarvis subprocess before closing the GUI."""
+        if self._jarvis_proc and self._jarvis_proc.poll() is None:
+            self._jarvis_proc.terminate()
+            try:
+                self._jarvis_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._jarvis_proc.kill()
+        # Also kill by PID file in case the process was adopted
+        pid = _read_pid()
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+        Gtk.main_quit()
 
     def _on_docs_clicked(self, button) -> None:
         doc_win = Gtk.Window(title="Jarvis — Manual de Comandos")

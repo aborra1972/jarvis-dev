@@ -125,7 +125,7 @@ def test_cli_start_runs_real_pipeline(
     monkeypatch.setattr(
         jarvis.orchestrator.loop,
         "_register_switch_signals",
-        lambda session, switch: signals.append((session, switch)),
+        lambda session, switch, speaker=None: signals.append((session, switch)),
     )
 
     assert jarvis.cli.main(["start"]) == 0

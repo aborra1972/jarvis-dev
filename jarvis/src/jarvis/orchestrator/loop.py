@@ -379,7 +379,7 @@ def start() -> int:
     """
     session = load_state(str(config.STATE_FILE))
     pipeline = build_pipeline(session, cwd=os.getcwd())
-    _register_switch_signals(session, pipeline.switch_state)
+    _register_switch_signals(session, pipeline.switch_state, pipeline.speaker)
     _write_pid()
     try:
         try:
@@ -441,12 +441,17 @@ def clean() -> int:
 # persist state.json AND signal the running loop (SIGUSR1/SIGUSR2); a spoken
 # wake word can never reactivate it because no mic is open while OFF.
 
-def _register_switch_signals(session: Session, switch_state) -> None:
+def _register_switch_signals(session: Session, switch_state, speaker=None) -> None:
     """Install SIGUSR1 (off) / SIGUSR2 (on) handlers for the running loop."""
 
     def _flip(off: bool) -> None:
         session.switched_off = off
         session.save()
+        if off and speaker is not None:
+            # Stop any in-progress TTS playback immediately
+            close_fn = getattr(speaker, "close", None)
+            if callable(close_fn):
+                close_fn()
         if switch_state is not None:
             switch_state()  # MicSwitch: stop/start the mic immediately
 

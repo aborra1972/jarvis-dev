@@ -79,7 +79,32 @@ ls spike/ggml-small.bin
 
 Si falta, compilá whisper.cpp desde `spike/` (ver `spike/` para recetas).
 
-### 4. Verificar la instalación
+### 4. Instalar Ollama (cerebro LLM)
+
+Ollama es el cerebro de Jarvis para interpretar comandos. Instalación sin sudo:
+
+```bash
+# Instalar Ollama en ~/.local/bin (sin sudo)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Iniciar el servidor
+~/.local/bin/ollama serve &
+
+# Descargar el modelo qwen2.5:3b (~1.9GB, optimizado para voz)
+~/.local/bin/ollama pull qwen2.5:3b
+```
+
+Verificar:
+
+```bash
+~/.local/bin/ollama list          # Debe mostrar qwen2.5:3b
+curl http://localhost:11434/api/tags  # API del servidor
+```
+
+**Nota**: El modelo 3B es suficiente para routing de intents (1.4s por comando).
+Si preferís más precisión, podés usar `qwen2.5:7b` (~4.7GB, ~3.5s por comando).
+
+### 5. Verificar la instalación
 
 ```bash
 # Test de importación
@@ -291,7 +316,7 @@ pytest jarvis/tests/e2e -m e2e          # e2e con binarios reales
 ```
 spike/                  whisper.cpp / piper / modelos / binarios
 jarvis/src/jarvis/
-  config.py             paths, allowlists, parámetros de audio
+  config.py             paths, allowlists, parámetros de audio, Ollama
   __main__.py           python -m jarvis entry point
   cli.py                jarvis start/off/on/clean
   audio/
@@ -305,7 +330,7 @@ jarvis/src/jarvis/
     normalize.py        normalización rioplatense (voseo → infinitivo)
     golden.py           gate determinístico (destructivos + fast-path)
     schema.py           15 comandos, validación de entidades
-    llm.py              fallback LLM (opcional)
+    llm.py              OllamaProvider (HTTP directo a localhost:11434)
   orchestrator/
     loop.py             FSM: wake → listen → interpret → execute → speak
     session.py          estado persistente (session + off switch)
@@ -328,7 +353,8 @@ Micrófono → sounddevice (16kHz mono)
   → wav2vec2-XLSR detecta "jarvis" (~350ms)
   → Whisper transcribe a texto (~4s)
   → Normalizador rioplatense ("abrí" → "abrir")
-  → Golden gate: matchea patrón regex o LLM
+  → Golden gate: matchea patrón regex (destructivos)
+  → Ollama (qwen2.5:3b): intent routing (~1.4s, local)
   → Executor ejecuta la acción
   → Edge TTS sintetiza respuesta
   → paplay reproduce audio
@@ -353,6 +379,15 @@ Micrófono → sounddevice (16kHz mono)
 
 ### "No entiendo" a todo
 Verificá que `ALLOWED_APPS` en `config.py` incluya las apps que querés abrir.
+Si el problema persiste, verificá que Ollama esté corriendo:
+```bash
+curl http://localhost:11434/api/tags
+```
+
+### Ollama no responde
+1. Iniciar el servidor: `~/.local/bin/ollama serve &`
+2. Verificar: `~/.local/bin/ollama list`
+3. Si el modelo no está: `~/.local/bin/ollama pull qwen2.5:3b`
 
 ### El panel no responde
 Cerrá y volvé a abrir. Verificá que no haya otro proceso jarvis corriendo:

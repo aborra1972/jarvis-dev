@@ -89,7 +89,7 @@ ALLOWED_APPS: set[str] = {
     "firefox",
     "terminal", "gnome-terminal", "nemo", "nautilus", "libreoffice",
     "code", "codium", "vim", "nano", "htop",
-    "opencode", "explorador",
+    "opencode", "explorador", "spotify",
 }
 
 # --- Interpreter (PR2: JSON-only system prompt built from the schema) --------

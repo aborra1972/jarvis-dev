@@ -29,6 +29,7 @@ _APP_COMMANDS: dict[str, str] = {
     "nano": "gnome-terminal",
     "htop": "gnome-terminal",
     "opencode": "opencode",
+    "spotify": "spotify",
 }
 
 

@@ -49,11 +49,11 @@ def test_reboot_runs_systemctl_reboot(monkeypatch) -> None:
     assert commands == [["systemctl", "reboot"]]
 
 
-def test_open_app_allowlisted_spawns_xdg_open(monkeypatch) -> None:
+def test_open_app_allowlisted_spawns_command(monkeypatch) -> None:
     commands = _monkeypatch_safe_run(monkeypatch)
     result = system.open_app(_intent("open_app", {"app": "firefox"}), None)
     assert result.ok is True
-    assert commands == [["xdg-open", "firefox"]]
+    assert commands == [["firefox"]]
 
 
 def test_open_app_disallowed_is_rejected_and_never_spawns(monkeypatch) -> None:

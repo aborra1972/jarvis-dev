@@ -465,7 +465,7 @@ def test_loop_dispatches_open_app_through_real_registry(
     )
     outcome = run(pipeline, iterations=4)
     assert outcome == "executed"
-    assert commands == [["xdg-open", "firefox"]]
+    assert commands == [["firefox"]]
 
 
 def _build_registry():

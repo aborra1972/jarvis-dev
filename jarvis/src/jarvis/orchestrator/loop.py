@@ -35,6 +35,7 @@ from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
+TTS_COOLDOWN_S = 3.0  # seconds to wait after speaker stops before listening
 
 REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
 REASK_2 = "Lo lamento, señor, sigo sin comprender. ¿Repite una vez más, por favor?"
@@ -72,6 +73,7 @@ class _Context:
     transcript: str = ""
     interpretation: Interpretation | None = None
     outcome: str = ""
+    _last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -104,6 +106,14 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # PR6 (item 6): never listen over jarvis's own voice.
             context.outcome = "speaking"
             return State.IDLE, context
+        # Post-TTS cooldown: wait for speaker hardware to fully stop after
+        # the last reply so the mic doesn't capture residual audio.
+        import time as _time
+        if context._last_spoke_at:
+            remaining = TTS_COOLDOWN_S - (_time.monotonic() - context._last_spoke_at)
+            if remaining > 0:
+                _time.sleep(remaining)
+            context._last_spoke_at = 0.0
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
             context.outcome = "no_wake"
             return State.IDLE, context
@@ -197,6 +207,8 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.SPEAKING, context
 
     if state is State.SPEAKING:
+        import time as _time
+        context._last_spoke_at = _time.monotonic()
         return State.IDLE, context
 
     if state is State.OFF:
@@ -372,8 +384,14 @@ def start() -> int:
     try:
         try:
             pipeline.speaker.speak(ANNOUNCEMENT)
+            pipeline.speaker.flush(timeout=10)
         except Exception:
             print(ANNOUNCEMENT, file=sys.stderr)
+        # Allow speaker to fully stop before opening the mic to wake detection.
+        # Without this delay the mic captures the TTS audio, self-triggering
+        # the wake word ("Soy Jarvis..." → false positive → reask loop).
+        import time as _time
+        _time.sleep(3.0)
         run(pipeline)
     finally:
         _remove_pid()

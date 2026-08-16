@@ -41,6 +41,7 @@ VARIANT_MAP: dict[str, str] = {
     "podrias apagar": "apagar",
     # --- word-level: voseo/imperative → infinitive ---
     "abri": "abrir",
+    "abril": "abrir",  # Whisper commonly mishears "abrí" as "abril"
     "abrime": "abrir",
     "abrite": "abrir",
     "abrelo": "abrir",

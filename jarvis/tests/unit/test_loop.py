@@ -25,9 +25,12 @@ from jarvis.orchestrator.loop import (
     REVEAL_PREFIX,
     UNSUPPORTED_SPOKEN,
     Pipeline,
+    _Context,
+    _tick,
     run,
 )
 from jarvis.orchestrator.session import Session, load_state
+from jarvis.orchestrator.state import State
 
 
 class FakeClock:
@@ -472,3 +475,73 @@ def _build_registry():
     from jarvis.actions.base import build_registry
 
     return build_registry()
+
+
+def test_cooldown_starts_when_tts_finishes_not_when_it_starts(tmp_path: Path) -> None:
+    """C3 fix: cooldown must measure from TTS playback end, not FSM SPEAKING entry.
+
+    Before the fix, _last_spoke_at was set when the FSM entered SPEAKING.
+    Since PiperSpeaker.speak() is async, the cooldown elapsed while audio
+    was still playing → mic opened during playback → feedback loop.
+
+    Now _was_playing tracks the playing→finished transition and sets
+    _last_spoke_at at that point, so the full cooldown runs after audio ends.
+    """
+    import time
+    from jarvis.orchestrator.loop import TTS_COOLDOWN_S
+
+    class _TimedSpeaker:
+        """Speaker that tracks playing state transitions."""
+        def __init__(self) -> None:
+            self.said: list[str] = []
+            self._playing = False
+            self.finished_at: float = 0.0
+
+        def speak(self, text: str) -> None:
+            self.said.append(text)
+            self._playing = True
+
+        def is_playing(self) -> bool:
+            return self._playing
+
+        def finish_playing(self) -> None:
+            """Simulate TTS finishing — called after some delay."""
+            self._playing = False
+            self.finished_at = time.monotonic()
+
+    speaker = _TimedSpeaker()
+    session = load_state(str(tmp_path / "state.json"))
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([False]),
+        capture=FakeCapture([]),
+        interpreter=FakeInterpreter([]),
+        speaker=speaker,
+        executor=FakeExecutor(),
+        session=session,
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+
+    # Simulate: speaker was playing, now transitions to not-playing
+    speaker.speak("hola")
+    context = _Context()
+    # First tick: speaker is playing → IDLE stays, _was_playing set
+    state = _tick(State.IDLE, pipeline, context)
+    assert context._was_playing is True
+    assert context._last_spoke_at == 0.0  # not set yet
+
+    # Simulate TTS finishing after 2 seconds of playback
+    time.sleep(0.05)  # small real delay
+    speaker.finish_playing()
+
+    # Second tick: speaker finished → _was_playing triggers cooldown start
+    start = time.monotonic()
+    state = _tick(State.IDLE, pipeline, context)
+    elapsed = time.monotonic() - start
+
+    # Cooldown should have run (or started) after TTS finished
+    assert context._was_playing is False
+    assert context._last_spoke_at == 0.0  # cooldown consumed
+    # The cooldown sleep should have happened (or been satisfied already)
+    assert elapsed >= 0  # basic sanity

@@ -76,6 +76,7 @@ class _Context:
     interpretation: Interpretation | None = None
     outcome: str = ""
     _last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
+    _was_playing: bool = False  # tracks TTS playing state for accurate cooldown
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -107,19 +108,26 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if _is_switched_off(pipeline):
             context.outcome = "switched_off"
             return State.OFF, context
-        if _speaker_is_playing(pipeline.speaker):
+        playing = _speaker_is_playing(pipeline.speaker)
+        if playing:
             # PR6 (item 6): never listen over jarvis's own voice.
             # Keep mic stopped while TTS plays to prevent feedback loop.
             if hasattr(pipeline.wake, 'capturer'):
                 pipeline.wake.capturer.stop()
+            context._was_playing = True
             context.outcome = "speaking"
             return State.IDLE, context
+        # TTS just finished — start cooldown from the actual playback end,
+        # not from when the FSM entered SPEAKING (which was seconds earlier).
+        if context._was_playing:
+            context._last_spoke_at = time.monotonic()
+            context._was_playing = False
         # Post-TTS cooldown: wait for speaker hardware to fully stop after
         # the last reply so the mic doesn't capture residual audio.
         if context._last_spoke_at:
             remaining = TTS_COOLDOWN_S - (time.monotonic() - context._last_spoke_at)
             if remaining > 0:
-                    time.sleep(remaining)
+                time.sleep(remaining)
             context._last_spoke_at = 0.0
             # Flush wake detector buffer — discard any TTS audio captured
             # before the mic was restarted.
@@ -249,8 +257,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.SPEAKING, context
 
     if state is State.SPEAKING:
-        context._last_spoke_at = time.monotonic()
-        # Close mic immediately while Jarvis speaks to prevent feedback loop
+        # Close mic immediately while Jarvis speaks to prevent feedback loop.
+        # Cooldown timing is handled by IDLE detecting the playing→finished
+        # transition (context._was_playing), not here.
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
         return State.IDLE, context

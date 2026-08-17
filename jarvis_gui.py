@@ -161,12 +161,42 @@ CSS = b"""
     font-weight: bold;
 }
 
-.combo-provider {
+/* --- Segmented pill selector --- */
+.provider-pill-box {
     background-color: #0f3460;
-    color: white;
-    border-radius: 4px;
-    padding: 4px 8px;
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.provider-pill {
+    background-color: transparent;
+    color: #a0a0b0;
     font-size: 11px;
+    font-weight: bold;
+    border-radius: 6px;
+    padding: 6px 12px;
+    border: none;
+    min-width: 80px;
+}
+
+.provider-pill:hover {
+    color: white;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.provider-pill-active {
+    background-color: #00b894;
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 6px;
+    padding: 6px 12px;
+    border: none;
+    min-width: 80px;
+}
+
+.provider-pill-active:hover {
+    background-color: #00a884;
 }
 
 .log-card {
@@ -351,18 +381,33 @@ class JarvisGUI:
         provider_title.get_style_context().add_class("provider-label")
         provider_box.pack_start(provider_title, False, False, 0)
 
-        provider_hint = Gtk.Label(label="Local (offline) / Gemini (nube) / Auto (Gemini → local)")
+        provider_hint = Gtk.Label(label="Seleccioná dónde procesar las órdenes")
         provider_hint.get_style_context().add_class("provider-hint")
         provider_box.pack_start(provider_hint, False, False, 0)
 
-        # ComboBox for provider selection
-        self._provider_combo = Gtk.ComboBoxText()
-        self._provider_combo.append("local", "🏠 IA Local (Ollama)")
-        self._provider_combo.append("gemini", "☁️  Gemini (Google)")
-        self._provider_combo.append("auto", "🔄 Auto (Gemini → Local)")
-        self._provider_combo.set_id_column(0)
-        self._provider_combo.connect("changed", self._on_provider_changed)
-        provider_box.pack_start(self._provider_combo, False, False, 0)
+        # --- Segmented pill selector ---
+        pill_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        pill_box.get_style_context().add_class("provider-pill-box")
+        pill_box.set_halign(Gtk.Align.CENTER)
+        provider_box.pack_start(pill_box, False, False, 0)
+
+        self._provider_buttons: dict[str, Gtk.RadioButton] = {}
+        self._provider_labels: dict[str, Gtk.Label] = {}
+        first_btn = None
+        for pid, icon, text in [
+            ("local", "🏠", "Local"),
+            ("gemini", "☁️", "Gemini"),
+            ("auto", "🔄", "Auto"),
+        ]:
+            btn = Gtk.RadioButton.new_with_label_from_widget(first_btn, f"{icon} {text}")
+            if first_btn is None:
+                first_btn = btn
+            btn._provider_id = pid  # attach ID for handler
+            btn.get_style_context().add_class("provider-pill")
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.connect("toggled", self._on_provider_toggled)
+            pill_box.pack_start(btn, True, True, 0)
+            self._provider_buttons[pid] = btn
 
         # Status label for active provider
         self._provider_status = Gtk.Label()
@@ -451,18 +496,26 @@ class JarvisGUI:
 
     def _launch_jarvis(self) -> bool:
         import subprocess as _sp
+        import time as _t
         if _is_running():
             # Kill stale process tree and start fresh
             self._log("Matando procesos Jarvis viejos...")
+            # Kill our subprocess group
+            if self._jarvis_proc and self._jarvis_proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(self._jarvis_proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
+            # Kill by PID file
             pid = _read_pid()
             if pid is not None:
                 try:
-                    os.kill(-pid, signal.SIGTERM)
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
                 except (ProcessLookupError, OSError):
                     pass
-            _sp.run(["pkill", "-9", "-f", "jarvis start"], capture_output=True)
-            _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True)
-            import time as _t
+            # Force-kill children
+            _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
+            _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
             _t.sleep(1)
 
         # Ensure state is clean before launching
@@ -518,29 +571,33 @@ class JarvisGUI:
         return False  # don't repeat timer
 
     def _stop_jarvis(self) -> None:
-        """Kill Jarvis and ALL its child processes (whisper-cli, gst, etc.)."""
+        """Kill Jarvis subprocess and ALL its children (whisper-cli, gst, etc.)."""
         import subprocess as _sp
+        import time as _t
         killed = False
-        # Kill by PID file — the whole process tree
+
+        # 1. Kill the process group of our direct subprocess (catches all children)
+        if self._jarvis_proc and self._jarvis_proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(self._jarvis_proc.pid), signal.SIGTERM)
+                killed = True
+            except (ProcessLookupError, OSError):
+                pass
+
+        # 2. Kill by PID file (in case process was adopted or we don't own it)
         pid = _read_pid()
         if pid is not None:
             try:
-                # Kill the process group (negative PID = kill group)
-                os.kill(-pid, signal.SIGTERM)
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
                 killed = True
             except (ProcessLookupError, OSError):
                 pass
-        # Also kill our direct subprocess if we own it
-        if self._jarvis_proc and self._jarvis_proc.poll() is None:
-            try:
-                os.kill(-self._jarvis_proc.pid, signal.SIGTERM)
-                killed = True
-            except (ProcessLookupError, OSError):
-                pass
-        # Nuclear option: kill any remaining jarvis-related processes
-        _sp.run(["pkill", "-f", "jarvis"], capture_output=True)
-        _sp.run(["pkill", "-f", "whisper-cli"], capture_output=True)
-        _sp.run(["pkill", "-f", "gst-launch.*jarvis"], capture_output=True)
+
+        # 3. Wait briefly, then force-kill stragglers (only whisper-cli, NOT jarvis_gui)
+        _t.sleep(0.5)
+        _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
+        _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
+
         if killed:
             self._log("Jarvis + hijos terminados")
         else:
@@ -577,41 +634,58 @@ class JarvisGUI:
 
     def _load_provider_preference(self) -> None:
         """Load saved LLM provider preference from state.json."""
+        saved = "local"
         try:
             if STATE_FILE.exists():
                 state = json.loads(STATE_FILE.read_text())
                 saved = state.get("llm_provider", "local")
-                self._provider_combo.set_active_id(saved)
-                self._update_provider_status(saved)
-            else:
-                self._provider_combo.set_active_id("local")
-                self._update_provider_status("local")
         except Exception:
-            self._provider_combo.set_active_id("local")
-            self._update_provider_status("local")
+            pass
+        self._set_provider(saved, from_load=True)
 
-    def _on_provider_changed(self, combo) -> None:
-        """Handle LLM provider selection change."""
-        provider_id = combo.get_active_id()
-        if provider_id is None:
+    def _on_provider_toggled(self, button) -> None:
+        """Handle pill toggle — only react to the button being activated."""
+        if not button.get_active():
             return
-        try:
-            state = {}
-            if STATE_FILE.exists():
-                state = json.loads(STATE_FILE.read_text())
-            state["llm_provider"] = provider_id
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(json.dumps(state, indent=2))
-            self._update_provider_status(provider_id)
-            self._log(f"IA Provider: {provider_id}")
-        except Exception as e:
-            self._log(f"Error provider: {e}")
+        pid = getattr(button, "_provider_id", None)
+        if pid is None:
+            return
+        self._set_provider(pid)
+
+    def _set_provider(self, pid: str, *, from_load: bool = False) -> None:
+        """Update UI, CSS classes, and persist selection."""
+        # Update radio button states
+        for key, btn in self._provider_buttons.items():
+            btn.handler_block_by_func(self._on_provider_toggled)
+            btn.set_active(key == pid)
+            btn.handler_unblock_by_func(self._on_provider_toggled)
+            # Swap CSS class: active vs inactive
+            ctx = btn.get_style_context()
+            ctx.remove_class("provider-pill")
+            ctx.remove_class("provider-pill-active")
+            ctx.add_class("provider-pill-active" if key == pid else "provider-pill")
+
+        # Update status label
+        self._update_provider_status(pid)
+
+        # Persist (skip on initial load to avoid redundant write)
+        if not from_load:
+            try:
+                state = {}
+                if STATE_FILE.exists():
+                    state = json.loads(STATE_FILE.read_text())
+                state["llm_provider"] = pid
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STATE_FILE.write_text(json.dumps(state, indent=2))
+                self._log(f"IA Provider: {pid}")
+            except Exception as e:
+                self._log(f"Error provider: {e}")
 
     def _update_provider_status(self, provider: str) -> None:
         """Update the provider status label."""
         labels = {
             "local": "🏠 Solo IA local (sin conexión)",
-            "gemini": "☁️  Gemini (nube — requiere API key)",
+            "gemini": "☁️ Gemini (nube — requiere API key)",
             "auto": "🔄 Auto (Gemini primero, fallback local)",
         }
         self._provider_status.set_text(labels.get(provider, provider))
@@ -661,20 +735,24 @@ class JarvisGUI:
         self._log_view.scroll_to_iter(end_iter, 0.0, False, 0.0, 0.0)
 
     def _on_destroy(self, widget) -> None:
-        """Kill jarvis subprocess before closing the GUI."""
+        """Kill jarvis subprocess tree before closing the GUI."""
+        import subprocess as _sp
+        # Kill process group of our direct subprocess
         if self._jarvis_proc and self._jarvis_proc.poll() is None:
-            self._jarvis_proc.terminate()
             try:
-                self._jarvis_proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self._jarvis_proc.kill()
-        # Also kill by PID file in case the process was adopted
+                os.killpg(os.getpgid(self._jarvis_proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+        # Kill by PID file
         pid = _read_pid()
         if pid is not None:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
             except (ProcessLookupError, OSError):
                 pass
+        # Force-kill children
+        _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
+        _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
         Gtk.main_quit()
 
     def _on_docs_clicked(self, button) -> None:

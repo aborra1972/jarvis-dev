@@ -226,12 +226,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 return State.IDLE, context
 
         # Auto-activate dictation mode if code editor is focused
-        if pipeline.dictation is not None and is_code_editor_focused():
+        # But STILL process the current utterance as a command — only
+        # future utterances go to the editor.
+        if pipeline.dictation is not None and is_code_editor_focused() and not pipeline.dictation.is_active:
             pipeline.dictation.activate()
             pipeline.speaker.speak("modo dictado activado")
-            _write_fsm_state("speaking")
-            context.outcome = "dictation_activated"
-            return State.SPEAKING, context
+            # Fall through to normal command processing for this utterance
 
         # --- END DICTATION MODE CHECK ---
         # the 60ms audio delay + speaker hardware latency.

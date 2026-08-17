@@ -138,8 +138,8 @@ INTERPRETER_SYSTEM_PROMPT = build_system_prompt()
 INTERPRETER_LLM_MODEL: str | None = "qwen2.5:3b"
 OLLAMA_BASE_URL = "http://localhost:11434"
 # Ollama needs more time than Gemini for first request (model loads into VRAM).
-# 15s covers cold start; subsequent requests are fast (~1-2s).
-OLLAMA_TIMEOUT_S: float = 15.0
+# 30s covers cold start; subsequent requests are fast (~1-2s).
+OLLAMA_TIMEOUT_S: float = 30.0
 # Execute mode: False = confirm before any command (Option A), True = auto-execute (Option B)
 AUTO_EXECUTE = False
 

@@ -121,7 +121,7 @@ class GeminiProvider:
         self.timeout = timeout
 
     def resolve(self, prompt: str, system: str) -> dict:
-        url = f"{self._ENDPOINT}/{self.model}:generateContent?key={self.api_key}"
+        url = f"{self._ENDPOINT}/{self.model}:generateContent"
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "systemInstruction": {"parts": [{"text": system}]},
@@ -135,7 +135,10 @@ class GeminiProvider:
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
             method="POST",
         )
 

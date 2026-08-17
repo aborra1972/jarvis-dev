@@ -211,8 +211,31 @@ def test_utterance_capture_returns_transcript(tmp_path: Path) -> None:
     assert capture.capture() == "abrí firefox"
     assert len(stt.calls) == 1
     wav, duration = stt.calls[0]
-    assert wav.is_file()
+    assert wav.suffix == ".wav"
     assert duration == pytest.approx(0.4)
+
+
+def test_utterance_capture_cleans_wav_after_transcription(tmp_path: Path) -> None:
+    """Capture WAV files must be deleted after STT to avoid disk fill."""
+    capturer = FakeCapturer([_speech(), _silence()])
+    stt = FakeSTT("hola")
+    capture = UtteranceCapture(capturer, stt, _vad(), wav_dir=tmp_path)
+
+    capture.capture()
+    wav_files = list(tmp_path.glob("jarvis-capture-*.wav"))
+    assert wav_files == [], f"WAVs should be cleaned up, found: {wav_files}"
+
+
+def test_utterance_capture_cleans_wav_on_stt_error(tmp_path: Path) -> None:
+    """Capture WAV must be cleaned even when STT raises."""
+    capturer = FakeCapturer([_speech(), _silence()])
+    stt = FakeSTT("", error=True)
+    capture = UtteranceCapture(capturer, stt, _vad(), wav_dir=tmp_path)
+
+    with pytest.raises(CaptureError):
+        capture.capture()
+    wav_files = list(tmp_path.glob("jarvis-capture-*.wav"))
+    assert wav_files == [], f"WAVs should be cleaned on error, found: {wav_files}"
 
 
 def test_utterance_capture_returns_none_on_pure_silence(tmp_path: Path) -> None:
@@ -251,7 +274,39 @@ def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
 
     assert tts.texts == ["hecho"]
     assert playback.played == tts.outs
-    assert tts.outs[0].is_file()
+
+
+def test_piper_speaker_cleans_media_after_playback(tmp_path: Path) -> None:
+    """TTS media files must be deleted after playback to avoid disk fill."""
+    tts = FakeTTS()
+    playback = FakePlayback()
+    speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
+
+    speaker.speak("hecho")
+    speaker.flush()
+
+    media_files = list(tmp_path.glob("jarvis-reply-*"))
+    assert media_files == [], f"Media files should be cleaned up, found: {media_files}"
+
+
+def test_piper_speaker_cleans_media_on_tts_error(tmp_path: Path) -> None:
+    """TTS media must be cleaned even when TTS fails."""
+    speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
+    speaker.speak("falla")
+    speaker.flush()
+
+    media_files = list(tmp_path.glob("jarvis-reply-*"))
+    assert media_files == [], f"Media files should be cleaned on error, found: {media_files}"
+
+
+def test_piper_speaker_cleans_media_on_playback_error(tmp_path: Path) -> None:
+    """TTS media must be cleaned even when playback fails."""
+    speaker = PiperSpeaker(FakeTTS(), FakePlayback(error=True), out_dir=tmp_path)
+    speaker.speak("falla")
+    speaker.flush()
+
+    media_files = list(tmp_path.glob("jarvis-reply-*"))
+    assert media_files == [], f"Media files should be cleaned on error, found: {media_files}"
 
 
 def test_piper_speaker_writes_mp3_when_tts_extension_is_mp3(tmp_path: Path) -> None:
@@ -263,7 +318,6 @@ def test_piper_speaker_writes_mp3_when_tts_extension_is_mp3(tmp_path: Path) -> N
     speaker.flush()
 
     assert tts.outs[0].suffix == ".mp3"
-    assert tts.outs[0].read_bytes() == b"MP3"
     assert playback.played == tts.outs
 
 

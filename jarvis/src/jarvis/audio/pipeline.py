@@ -67,6 +67,8 @@ class UtteranceCapture:
             return self.stt.transcribe(wav_path, duration_s)
         except STTError as exc:
             raise CaptureError(str(exc)) from exc
+        finally:
+            wav_path.unlink(missing_ok=True)
 
 
 class PiperSpeaker:
@@ -120,6 +122,8 @@ class PiperSpeaker:
             self.playback.play(media_path)
         except (TTSError, PlaybackError):
             pass  # loop keeps running; the human can retry
+        finally:
+            media_path.unlink(missing_ok=True)
 
     def speak(self, text: str) -> None:
         if self._closed:

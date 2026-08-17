@@ -177,6 +177,7 @@ def test_gemini_provider_builds_correct_request() -> None:
     captured = {}
     def fake_urlopen(req, timeout=None):
         captured["url"] = req.full_url
+        captured["headers"] = dict(req.header_items())
         captured["body"] = json.loads(req.data.decode())
         return FakeResp(gemini_response)
 
@@ -187,7 +188,11 @@ def test_gemini_provider_builds_correct_request() -> None:
         provider = GeminiProvider(api_key="test-key-123", model="gemini-2.0-flash")
         result = provider.resolve("abrir firefox", "system prompt here")
         assert result["intent"] == "help"
-        assert "test-key-123" in captured["url"]
+        # API key must be in header, NOT in URL (security: avoid leaking in logs/proxies)
+        assert "test-key-123" not in captured["url"]
+        # Python capitalizes header keys: x-goog-api-key → X-goog-api-key
+        header_vals = [v for k, v in captured["headers"].items() if "key" in k.lower()]
+        assert "test-key-123" in header_vals
         assert "gemini-2.0-flash" in captured["url"]
         assert captured["body"]["generationConfig"]["temperature"] == 0.1
     finally:

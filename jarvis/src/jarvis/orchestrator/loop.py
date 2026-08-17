@@ -38,7 +38,7 @@ from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
-TTS_COOLDOWN_S = 0.5  # reduced from 1.5s — speaker hardware settles faster
+TTS_COOLDOWN_S = 2.0  # increased from 0.5s — prevent wake word detection from TTS audio
 MIC_CLOSE_DELAY_S = 0.3  # reduced from 1.5s — close mic quickly after user stops talking
 
 

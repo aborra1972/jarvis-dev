@@ -80,7 +80,7 @@ STT_USE_TINY = False
 # PR6 gate 5.6: a trained jarvis.onnx (see docs/wake-word-training.md); None =
 # the packaged hey_jarvis_v0.1.onnx.
 WAKE_CUSTOM_MODEL: Path | None = None
-WAKE_THRESHOLD = 0.5
+WAKE_THRESHOLD = 0.7  # increased from 0.5 — prevent false activations from noise
 WAKE_VAD_THRESHOLD = 0.5
 # Gate 5.6: wake word engine selection — "openwakeword" (default) or "xslr"
 # (custom wav2vec2-XLSR + LogisticRegression trained on operator voice).

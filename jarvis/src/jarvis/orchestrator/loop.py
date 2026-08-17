@@ -14,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -99,6 +100,9 @@ def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
 
 
 def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _Context]:
+    # Process any pending SIGUSR1/SIGUSR2 before checking state.
+    # This runs in the main loop (not a signal handler) so I/O is safe.
+    _apply_switch(pipeline.session, pipeline.switch_state, pipeline.speaker)
     if state is State.IDLE:
         if _is_switched_off(pipeline):
             context.outcome = "switched_off"
@@ -112,11 +116,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.IDLE, context
         # Post-TTS cooldown: wait for speaker hardware to fully stop after
         # the last reply so the mic doesn't capture residual audio.
-        import time as _time
         if context._last_spoke_at:
-            remaining = TTS_COOLDOWN_S - (_time.monotonic() - context._last_spoke_at)
+            remaining = TTS_COOLDOWN_S - (time.monotonic() - context._last_spoke_at)
             if remaining > 0:
-                _time.sleep(remaining)
+                    time.sleep(remaining)
             context._last_spoke_at = 0.0
             # Flush wake detector buffer — discard any TTS audio captured
             # before the mic was restarted.
@@ -139,8 +142,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         except Exception:
             pass  # best effort — don't block on beep failure
         # Wait for beep to fully play and speakers to settle
-        import time as _time
-        _time.sleep(0.8)
+        time.sleep(0.8)
         # Flush wake detector buffer and restart mic for command capture
         if hasattr(pipeline.wake, 'flush'):
             pipeline.wake.flush()
@@ -161,8 +163,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # Close mic quickly after user finishes speaking to prevent TTS feedback.
         # 0.3s is enough for the user to trail off; keeps mic open just long
         # enough to avoid clipping the tail of the utterance.
-        import time as _time
-        _time.sleep(MIC_CLOSE_DELAY_S)
+        time.sleep(MIC_CLOSE_DELAY_S)
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
         # Ack beep: instant feedback that Jarvis heard the command and is
@@ -248,8 +249,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.SPEAKING, context
 
     if state is State.SPEAKING:
-        import time as _time
-        context._last_spoke_at = _time.monotonic()
+        context._last_spoke_at = time.monotonic()
         # Close mic immediately while Jarvis speaks to prevent feedback loop
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
@@ -446,7 +446,6 @@ def _ensure_ollama_running() -> None:
     """Start Ollama if not running. Blocks until healthy or timeout."""
     import socket
     import subprocess
-    import time as _time
 
     host, port = "127.0.0.1", 11434
 
@@ -476,7 +475,7 @@ def _ensure_ollama_running() -> None:
 
     # Wait up to 15s for Ollama to become healthy
     for _ in range(30):
-        _time.sleep(0.5)
+        time.sleep(0.5)
         try:
             with socket.create_connection((host, port), timeout=2):
                 print("[jarvis] Ollama listo ✓", flush=True)
@@ -514,8 +513,7 @@ def start() -> int:
         except Exception:
             print(ANNOUNCEMENT, file=sys.stderr)
         # Allow speaker to fully stop before opening the mic to wake detection.
-        import time as _time
-        _time.sleep(3.0)
+        time.sleep(3.0)
         # Flush wake detector buffer and restart mic
         if hasattr(pipeline.wake, 'flush'):
             pipeline.wake.flush()
@@ -569,23 +567,50 @@ def clean() -> int:
 # diagram d); these handlers make the switch cross-process. `jarvis off`/`on`
 # persist state.json AND signal the running loop (SIGUSR1/SIGUSR2); a spoken
 # wake word can never reactivate it because no mic is open while OFF.
+#
+# Signal safety: handlers only set a flag — all I/O and hardware manipulation
+# happens in _apply_switch() which runs in the main loop. This prevents
+# corrupted state.json from interrupted writes and avoids hardware races.
+
+_switch_pending: bool | None = None  # SIGUSR1→True (off), SIGUSR2→False (on)
+
 
 def _register_switch_signals(session: Session, switch_state, speaker=None) -> None:
-    """Install SIGUSR1 (off) / SIGUSR2 (on) handlers for the running loop."""
+    """Install SIGUSR1 (off) / SIGUSR2 (on) handlers for the running loop.
+
+    The handler only sets a flag; the main loop calls _apply_switch() to
+    execute the real work (session save, mic control) safely.
+    """
 
     def _flip(off: bool) -> None:
-        session.switched_off = off
-        session.save()
-        if off and speaker is not None:
-            # Stop any in-progress TTS playback immediately
-            close_fn = getattr(speaker, "close", None)
-            if callable(close_fn):
-                close_fn()
-        if switch_state is not None:
-            switch_state()  # MicSwitch: stop/start the mic immediately
+        global _switch_pending
+        _switch_pending = off
 
     signal.signal(signal.SIGUSR1, lambda *_: _flip(True))
     signal.signal(signal.SIGUSR2, lambda *_: _flip(False))
+
+
+def _apply_switch(session: Session, switch_state=None, speaker=None) -> None:
+    """Process any pending switch signal in the main loop (safe: no signal context).
+
+    Called at the top of each _tick() to apply SIGUSR1/SIGUSR2 without
+    doing I/O or hardware manipulation inside a signal handler.
+    """
+    global _switch_pending
+    if _switch_pending is None:
+        return
+    off = _switch_pending
+    _switch_pending = None
+
+    session.switched_off = off
+    session.save()
+    if off and speaker is not None:
+        # Stop any in-progress TTS playback immediately
+        close_fn = getattr(speaker, "close", None)
+        if callable(close_fn):
+            close_fn()
+    if switch_state is not None:
+        switch_state()  # MicSwitch: stop/start the mic immediately
 
 
 def _signal_running(sig: int, pid_file: Path | None = None) -> None:

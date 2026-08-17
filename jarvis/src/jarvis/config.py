@@ -14,7 +14,12 @@ from pathlib import Path
 
 
 def _load_env() -> None:
-    """Load .env file from repo root into os.environ (no-op if missing)."""
+    """Load .env file from repo root into os.environ (no-op if missing).
+
+    Handles: ``KEY=VALUE``, ``export KEY=VALUE``, ``#`` comments, single/double
+    quotes, whitespace. Does not overwrite existing env vars. Intentionally
+    does NOT handle multiline values (not needed for API keys).
+    """
     env_path = Path(__file__).resolve().parents[3] / ".env"
     if not env_path.exists():
         return
@@ -22,11 +27,17 @@ def _load_env() -> None:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        # Strip optional 'export ' prefix
+        if line.startswith("export "):
+            line = line[len("export "):]
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip('"').strip("'")
+        # Skip inline comments (e.g. KEY=value  # comment)
+        if " " in value:
+            value = value.split("#")[0].strip()
         if key and key not in os.environ:
             os.environ[key] = value
 

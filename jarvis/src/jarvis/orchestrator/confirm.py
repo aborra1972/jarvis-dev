@@ -10,14 +10,22 @@ aborts, only an explicit affirmative proceeds.
 
 from __future__ import annotations
 
+import logging
+import time
 from enum import Enum
 
 from jarvis.interpreter.normalize import normalize
 from jarvis.interpreter.schema import Intent
 
+logger = logging.getLogger("jarvis.orchestrator")
+
 CONFIRM_TIMEOUT_S = 15.0
 CONFIRM_CANCEL_SPOKEN = "Muy bien, señor. Cancelo y no ejecuto nada."
 CONFIRM_TIMEOUT_SPOKEN = "No confirmó a tiempo, señor. He cancelado la operación."
+
+# Safety multiplier: if the loop runs this many times longer than the nominal
+# timeout, something is broken (clock not advancing, capture stuck). Force exit.
+_HARD_SAFETY_MULTIPLIER = 3.0
 
 
 class Confirmation(Enum):
@@ -77,11 +85,29 @@ def confirm(
     speaker,
     timeout: float = CONFIRM_TIMEOUT_S,
 ) -> Confirmation:
-    """Ask for verbal confirmation within ``timeout`` seconds (M6)."""
+    """Ask for verbal confirmation within ``timeout`` seconds (M6).
+
+    Uses the injectable clock for the nominal timeout. A hard safety timeout
+    using real wall-clock time (``time.monotonic``) forces exit if the loop
+    runs 3x longer than expected — catches broken clocks or stuck captures.
+    Any exception from ``capture()`` is treated as silence (logged, not raised)
+    so the confirmation loop survives transient mic errors.
+    """
     speaker.speak(confirmation_prompt(intent))
     deadline = clock.now() + timeout
+    hard_deadline = time.monotonic() + (timeout * _HARD_SAFETY_MULTIPLIER)
     while True:
-        transcript = capture()
+        try:
+            transcript = capture()
+        except Exception as exc:
+            # CaptureError propagates to the loop (which speaks STT_ERROR_SPOKEN).
+            # Any other exception (OSError from mic, etc.) is treated as silence
+            # so the confirmation loop survives transient hardware errors.
+            from jarvis.orchestrator.contracts import CaptureError
+            if isinstance(exc, CaptureError):
+                raise
+            logger.warning("capture() failed during confirmation: %s", exc)
+            transcript = None
         if transcript is not None:
             verdict = classify_response(transcript)
             if verdict is Confirmation.CONFIRMED:
@@ -90,5 +116,12 @@ def confirm(
                 speaker.speak(CONFIRM_CANCEL_SPOKEN)
                 return Confirmation.ABORTED
         if clock.now() >= deadline:
+            speaker.speak(CONFIRM_TIMEOUT_SPOKEN)
+            return Confirmation.TIMED_OUT
+        if time.monotonic() >= hard_deadline:
+            logger.warning(
+                "confirm() hard safety timeout: clock did not advance in %.1fs",
+                timeout * _HARD_SAFETY_MULTIPLIER,
+            )
             speaker.speak(CONFIRM_TIMEOUT_SPOKEN)
             return Confirmation.TIMED_OUT

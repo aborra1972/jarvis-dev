@@ -1,6 +1,6 @@
 """Intent schema tests (PR2, task 2.4).
 
-The interpreter only emits the 15-command allowlist (5 domains); schema
+The interpreter only emits the 18-command allowlist (8 domains); schema
 validation is pure and table-driven. Entity validation encodes the design
 threat matrix (repo metachars, disallowed app, malformed URL).
 """
@@ -24,11 +24,11 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_17_commands_in_6_domains() -> None:
+def test_18_commands_in_8_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 17
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 17
-    assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle", "conversation"}
+    assert len(commands) == 18
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 18
+    assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle", "conversation", "voice"}
 
 
 def test_destructive_intents_are_gated() -> None:

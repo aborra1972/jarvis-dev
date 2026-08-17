@@ -1,4 +1,4 @@
-"""Intent schema: 17-command allowlist + validation (PR2, task 2.4).
+"""Intent schema: 18-command allowlist + validation (PR2, task 2.4).
 
 The interpreter only ever emits one of the allowlisted intents; executors
 never receive raw transcripts — only validated intents + entities (design
@@ -15,13 +15,13 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-# The 17 commands (7 domains) + "unknown" (the no-intent fallback, not a
+# The 18 commands (8 domains) + "unknown" (the no-intent fallback, not a
 # command — drives the re-ask flow per spec RNF-4).
 ALLOWED_INTENTS: frozenset[str] = frozenset({
     "open_repo", "ask", "configure", "create_artifact", "implement", "review",
     "shutdown", "reboot", "power_off_self", "open_app", "create_doc",
     "open_file_dir", "web_search", "open_url", "help", "unknown", "execute",
-    "general_qa",
+    "general_qa", "register_voice",
 })
 
 # Destructive intents: only the golden hard gate may emit these.
@@ -34,6 +34,7 @@ DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
     "web": ("web_search", "open_url"),
     "lifecycle": ("power_off_self", "help"),
     "conversation": ("general_qa",),
+    "voice": ("register_voice",),
 }
 
 INTENT_DOMAIN: dict[str, str] = {
@@ -205,7 +206,7 @@ def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None
 
 
 def build_system_prompt() -> str:
-    """JSON-only system prompt: the 17-command allowlist, schema, and rules."""
+    """JSON-only system prompt: the 18-command allowlist, schema, and rules."""
     intent_list = "|".join(sorted(ALLOWED_INTENTS))
     domain_lines = "\n".join(f"- {domain}: {', '.join(values)}" for domain, values in DOMAIN_INTENTS.items())
     return (
@@ -241,6 +242,12 @@ def build_system_prompt() -> str:
         "  '¿qué tiempo hace hoy?' → intent='general_qa', query='qué tiempo hace hoy'\n"
         "  'explicame la física cuántica' → intent='general_qa', query='explicame la física cuántica'\n"
         "  'contame un chiste' → intent='general_qa', query='contame un chiste'\n"
+        "- register_voice: for voice enrollment/registration commands. "
+        "Use when the user wants to register their voice.\n"
+        "  Examples:\n"
+        "  'registrar mi voz' → intent='register_voice'\n"
+        "  'guardar mi voz' → intent='register_voice'\n"
+        "  'aprender mi voz' → intent='register_voice'\n"
         "- unknown: only when the request truly cannot map to any intent.\n"
         "- entities: fill only fields that apply — query for questions, repo for a repository, app for "
         "an application, url for a web address, text for free-form content, command for execute. "

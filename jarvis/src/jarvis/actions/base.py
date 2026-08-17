@@ -86,7 +86,7 @@ class Registry:
 
 
 def build_registry() -> Registry:
-    """Wire every executor handler (7 domains, 17 intents) into one registry."""
+    """Wire every executor handler (8 domains, 18 intents) into one registry."""
     from jarvis.actions import assistant_lifecycle, files, opencode, system, web
 
     registry = Registry()
@@ -105,4 +105,5 @@ def build_registry() -> Registry:
     registry.register("power_off_self", assistant_lifecycle.power_off_self)
     registry.register("help", assistant_lifecycle.handle_help)
     registry.register("general_qa", assistant_lifecycle.handle_general_qa)
+    registry.register("register_voice", assistant_lifecycle.handle_register_voice)
     return registry

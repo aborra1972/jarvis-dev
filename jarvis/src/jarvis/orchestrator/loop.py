@@ -41,6 +41,18 @@ WAKE_TIMEOUT_S = 30.0
 TTS_COOLDOWN_S = 0.5  # reduced from 1.5s — speaker hardware settles faster
 MIC_CLOSE_DELAY_S = 0.3  # reduced from 1.5s — close mic quickly after user stops talking
 
+
+def _init_speaker_verifier():
+    """Initialize speaker verifier if enrollment exists."""
+    try:
+        from jarvis.speaker import get_verifier
+        verifier = get_verifier()
+        if verifier.is_enrolled():
+            return verifier
+    except Exception:
+        pass
+    return None
+
 REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
 REASK_2 = "Lo lamento, señor, sigo sin comprender. ¿Repite una vez más, por favor?"
 REVEAL_PREFIX = "Lo lamento, señor, sigo sin comprender. Esto fue lo que capté: "
@@ -72,6 +84,7 @@ class Pipeline:
     transcript_log: object | None = None
     ollama_provider: object | None = None  # for keepalive
     dictation: DictationManager | None = None  # voice-to-text injection
+    speaker_verifier: object | None = None  # speaker verification
 
 
 @dataclass
@@ -173,6 +186,19 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
+
+        # --- SPEAKER VERIFICATION ---
+        # Check if the voice matches the enrolled speaker
+        if pipeline.speaker_verifier is not None and pipeline.speaker_verifier.is_enrolled():
+            # Get the audio that was just captured
+            audio = pipeline.capture.last_audio()
+            if audio is not None:
+                is_match, similarity = pipeline.speaker_verifier.verify(audio)
+                if not is_match:
+                    logger.info("Speaker mismatch: similarity=%.3f, ignoring", similarity)
+                    context.outcome = "wrong_speaker"
+                    return State.IDLE, context
+
         # Close mic quickly after user finishes speaking to prevent TTS feedback.
         # 0.3s is enough for the user to trail off; keeps mic open just long
         # enough to avoid clipping the tail of the utterance.
@@ -490,6 +516,7 @@ def build_pipeline(
         transcript_log=transcript_log,
         ollama_provider=_ollama if interpreter is not resolve_intent else None,
         dictation=DictationManager(),
+        speaker_verifier=_init_speaker_verifier(),
     )
 
 

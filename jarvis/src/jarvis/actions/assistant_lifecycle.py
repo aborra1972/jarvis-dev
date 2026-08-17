@@ -2,8 +2,9 @@
 
 Design (binding: single location): power_off_self lives ONLY here and is
 golden-gated + 15s-confirmed by the orchestrator; the executor only logs and
-acknowledges. handle_help enumerates the 17-command allowlist. handle_general_qa
-provides direct LLM responses for general knowledge questions.
+acknowledges. handle_help enumerates the 18-command allowlist. handle_general_qa
+provides direct LLM responses for general knowledge questions. handle_register_voice
+enrolls the user's voice for speaker verification.
 """
 
 from __future__ import annotations
@@ -26,6 +27,51 @@ def power_off_self(intent: Intent, session: object) -> ActionResult:
 def handle_help(intent: Intent, session: object) -> ActionResult:
     commands = ", ".join(sorted(ALLOWED_INTENTS - {"unknown"}))
     return ActionResult(ok=True, spoken=f"A su disposición, señor. Puedo: {commands}")
+
+
+def handle_register_voice(intent: Intent, session: object) -> ActionResult:
+    """Enroll the current speaker's voice for verification.
+
+    Records audio from the microphone, extracts speaker embedding, and saves it.
+    """
+    try:
+        from jarvis.speaker import get_verifier
+
+        verifier = get_verifier()
+
+        if verifier.is_enrolled():
+            return ActionResult(
+                ok=True,
+                spoken="Ya tengo registrado mi voz, señor. Si quiere actualizarla, "
+                       "primero debe borrar el archivo speaker_embedding.json y "
+                       "volver a registrar."
+            )
+
+        # Record and enroll
+        logger.info("Starting voice enrollment...")
+        success = verifier.enroll_from_mic(duration=10)
+
+        if success:
+            logger.info("Voice enrollment successful")
+            return ActionResult(
+                ok=True,
+                spoken="Perfecto, señor. Ya tengo registrada mi voz. "
+                       "Ahora solo responderé a usted."
+            )
+        else:
+            return ActionResult(
+                ok=True,
+                spoken="No pude registrar mi voz, señor. "
+                       "Asegúrese de que el micrófono funciona y "
+                       "hable durante al menos 5 segundos."
+            )
+
+    except Exception as exc:
+        logger.error("Voice enrollment failed: %s", exc)
+        return ActionResult(
+            ok=True,
+            spoken="Error al registrar mi voz, señor. Intente de nuevo."
+        )
 
 
 def handle_general_qa(intent: Intent, session: object) -> ActionResult:

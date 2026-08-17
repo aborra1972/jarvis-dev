@@ -21,6 +21,8 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
+
 from jarvis.audio.capture import SAMPLE_RATE, Capturer, SilenceVAD, gather_utterance, write_wav
 from jarvis.audio.playback import PlaybackError
 from jarvis.audio.stt import STTError
@@ -59,6 +61,7 @@ class UtteranceCapture:
         self.sample_rate = sample_rate
         self.read_timeout = read_timeout
         self.wav_dir = Path(wav_dir) if wav_dir else Path(tempfile.gettempdir())
+        self._last_audio: np.ndarray | None = None
 
     def _next_wav(self) -> Path:
         return self.wav_dir / f"jarvis-capture-{uuid.uuid4().hex}.wav"
@@ -69,6 +72,8 @@ class UtteranceCapture:
         )
         if not blocks or not any(self.vad.is_speech(block) for block in blocks):
             return None
+        # Store audio for speaker verification (before STT deletes the file)
+        self._last_audio = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
         wav_path = self._next_wav()
         write_wav(wav_path, blocks, sample_rate=self.sample_rate)
         try:
@@ -77,6 +82,14 @@ class UtteranceCapture:
             raise CaptureError(str(exc)) from exc
         finally:
             wav_path.unlink(missing_ok=True)
+
+    def last_audio(self) -> np.ndarray | None:
+        """Return the last captured audio array (float32, 16kHz mono).
+
+        Used by the orchestrator for speaker verification. Returns None
+        if no audio has been captured yet.
+        """
+        return self._last_audio
 
 
 class PiperSpeaker:

@@ -41,6 +41,9 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
     try:
         # Build provider from config (same as interpreter)
         from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
+        import json
+        import urllib.request
+        import urllib.error
 
         provider_mode = config.LLM_PROVIDER
         ollama = OllamaProvider(
@@ -65,20 +68,57 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
         else:
             provider = ollama
 
-        # Use the LLM to generate a response
+        # Call LLM directly for plain text (not JSON routing)
         system_prompt = (
             "Sos un asistente virtual útil y amigable. Respondé en español rioplatense, "
             "breve y directo. Máximo 2-3 oraciones. No uses markdown ni formato especial."
         )
-        result = provider.resolve(query, system_prompt)
 
-        # Extract the text response
-        text = result.get("text", result.get("response", ""))
-        if not text:
-            return ActionResult(ok=True, spoken="No tengo una respuesta para eso, señor.")
+        # Direct call to Ollama for plain text response
+        if hasattr(provider, 'base_url'):
+            # OllamaProvider - call directly for text
+            url = f"{provider.base_url}/api/generate"
+            payload = json.dumps({
+                "model": provider.model,
+                "prompt": query,
+                "system": system_prompt,
+                "stream": False,
+                "options": {
+                    "num_ctx": 1024,
+                    "temperature": 0.7,
+                    "num_predict": 150,
+                },
+            }).encode("utf-8")
 
-        logger.info("general_qa response: %s", text[:100])
-        return ActionResult(ok=True, spoken=text)
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            with urllib.request.urlopen(req, timeout=provider.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            text = data.get("response", "").strip()
+            if not text:
+                return ActionResult(ok=True, spoken="No tengo una respuesta para eso, señor.")
+
+            logger.info("general_qa response: %s", text[:100])
+            return ActionResult(ok=True, spoken=text)
+
+        else:
+            # Gemini/Fallback - use resolve with a special prompt
+            result = provider.resolve(
+                f"Respondé esta pregunta directamente (no como JSON, solo texto plano):\n{query}",
+                system_prompt
+            )
+            text = result.get("text", result.get("response", ""))
+            if not text:
+                return ActionResult(ok=True, spoken="No tengo una respuesta para eso, señor.")
+
+            logger.info("general_qa response: %s", text[:100])
+            return ActionResult(ok=True, spoken=text)
 
     except Exception as exc:
         logger.error("general_qa failed: %s", exc)

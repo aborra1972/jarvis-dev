@@ -354,7 +354,8 @@ def test_persists_session_state_after_run(tmp_path: Path) -> None:
     )
     run(pipeline, iterations=4)
     reloaded = load_state(str(tmp_path / "state.json"))
-    assert reloaded.active_project == "chromium"
+    # M7 fix: open_app no longer switches active_project (app name ≠ project)
+    assert reloaded.active_project != "chromium"
     assert reloaded.repos == {"chromium": 0}
 
 

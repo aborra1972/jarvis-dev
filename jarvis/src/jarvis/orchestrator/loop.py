@@ -293,9 +293,11 @@ def _resolve_repo(pipeline: Pipeline, context: _Context) -> str | None:
     repo = pipeline.session.resolve_repo(context.interpretation.intent)
     if repo is None:
         return None
-    # Explicit switch: only when the intent specifies an app entity.
-    # resolve_repo no longer mutates active_project (M3 fix).
-    if "app" in context.interpretation.intent.entities:
+    # Explicit switch: only for intents that need project context.
+    # open_app uses "app" as the application name, not a project — switching
+    # active_project to "firefox" or "chrome" is confusing UX (M7 fix).
+    intent_name = context.interpretation.intent.intent
+    if "app" in context.interpretation.intent.entities and intent_name != "open_app":
         pipeline.session.switch_active_project(repo)
     pipeline.session.allocate(repo, pipeline.base_port)
     return repo

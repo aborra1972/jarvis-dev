@@ -156,6 +156,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             pipeline.wake.flush()
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.start()
+        _write_fsm_state("listening")
         return State.LISTENING, context
 
     if state is State.LISTENING:
@@ -177,6 +178,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # Ack beep DISABLED — visual feedback in GUI is sufficient and avoids
         # the 60ms audio delay + speaker hardware latency.
         # To re-enable, uncomment: pipeline.speaker.playback.play_ack_beep()
+        _write_fsm_state("thinking", transcript[:50])
         interpretation = pipeline.interpreter(transcript)
         context.transcript = transcript
         context.interpretation = interpretation
@@ -189,9 +191,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             )
         if step == "execute":
             context.outcome = "execute"
+            intent_name = interpretation.intent.intent if interpretation.intent else ""
+            _write_fsm_state("executing", intent_name)
             return State.EXECUTING, context
         if step == "confirm":
             context.outcome = "confirm"
+            _write_fsm_state("confirming")
             return State.CONFIRMING, context
         if step == "reask":
             attempt = pipeline.session.reask_attempts
@@ -241,6 +246,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if _needs_repo(intent.intent) and _resolve_repo(pipeline, context) is None:
             pipeline.speaker.speak(NO_ACTIVE_PROJECT)
             context.outcome = "rejected"
+            _write_fsm_state("speaking")
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(LONG_OPERATION_ACK)
@@ -250,6 +256,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             context.outcome = "powered_off"
             return State.STOPPED, context
         context.outcome = "executed" if result.ok else "failed"
+        _write_fsm_state("speaking")
         return State.SPEAKING, context
 
     if state is State.SPEAKING:
@@ -258,6 +265,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # transition (context.was_playing), not here.
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
+        _write_fsm_state("idle")
         return State.IDLE, context
 
     if state is State.OFF:
@@ -653,9 +661,24 @@ def _write_pid() -> None:
     config.PID_FILE.write_text(str(os.getpid()))
 
 
+def _write_fsm_state(state: str, detail: str = "") -> None:
+    """Write FSM state to a lightweight file for GUI real-time display.
+
+    Format: ``state:detail`` on a single line (e.g. ``listening:``,
+    ``executing:open_app firefox``). The GUI polls this file and maps
+    states to labels.
+    """
+    config.RUN_DIR.mkdir(parents=True, exist_ok=True)
+    config.FSM_STATE_FILE.write_text(f"{state}:{detail}")
+
+
 def _remove_pid() -> None:
     try:
         config.PID_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        config.FSM_STATE_FILE.unlink(missing_ok=True)
     except OSError:
         pass
 

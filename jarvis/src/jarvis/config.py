@@ -116,6 +116,7 @@ LOGS_CAPTURE_DIR = LOGS_DIR / "capture"   # utterance wavs (audio logs)
 LOGS_REPLY_DIR = LOGS_DIR / "reply"       # TTS reply wavs (audio logs)
 TRANSCRIPTS_FILE = LOGS_DIR / "transcripts.jsonl"  # handled transcripts
 PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
+FSM_STATE_FILE = RUN_DIR / "fsm_state"    # real-time FSM state for GUI
 
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
 ALLOWED_APPS: set[str] = {

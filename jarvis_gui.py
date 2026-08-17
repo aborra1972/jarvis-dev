@@ -33,8 +33,20 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 JARVIS_ROOT = Path(__file__).resolve().parent
 VENV_PY = JARVIS_ROOT / "jarvis" / ".venv" / "bin" / "python"
 PID_FILE = Path.home() / ".local" / "state" / "jarvis" / "jarvis.pid"
+FSM_STATE_FILE = Path.home() / ".local" / "state" / "jarvis" / "fsm_state"
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
 DOCS_FILE = JARVIS_ROOT / "jarvis" / "docs" / "comandos_jarvis.md"
+
+# FSM state → GUI label mapping
+_FSM_LABELS = {
+    "idle": ("● ESCUCHANDO", "Esperando 'JARVIS'...", "status-active"),
+    "listening": ("● ESCUCHANDO", "Hable ahora...", "status-active"),
+    "thinking": ("● PENSANDO", "Procesando...", "status-active"),
+    "executing": ("● EJECUTANDO", "", "status-active"),
+    "confirming": ("● CONFIRmando", "Esperando confirmación...", "status-active"),
+    "speaking": ("● HABLANDO", "Jarvis responde...", "status-active"),
+    "off": ("● APAGADO", "Modo off — diga 'jarvis on'", "status-inactive"),
+}
 
 # --- CSS ---
 CSS = b"""
@@ -719,7 +731,35 @@ class JarvisGUI:
             if running != self._is_on:
                 self._is_on = running
                 self._update_ui()
+        # Read FSM state for real-time status display
+        if running:
+            self._update_fsm_display()
         return True  # keep polling
+
+    def _update_fsm_display(self) -> None:
+        """Read FSM state file and update status labels."""
+        try:
+            if not FSM_STATE_FILE.exists():
+                return
+            raw = FSM_STATE_FILE.read_text().strip()
+            if ":" not in raw:
+                return
+            state, detail = raw.split(":", 1)
+            state = state.strip()
+            label_text, detail_text, css_class = _FSM_LABELS.get(
+                state, ("● ACTIVO", "", "status-active")
+            )
+            # Append detail (transcript or intent) if present
+            if detail:
+                label_text = f"{label_text}: {detail[:40]}"
+            self._status_label.set_text(label_text)
+            self._status_label.get_style_context().remove_class("status-active")
+            self._status_label.get_style_context().remove_class("status-inactive")
+            self._status_label.get_style_context().add_class(css_class)
+            if detail_text:
+                self._status_detail.set_text(detail_text)
+        except Exception:
+            pass  # best-effort — never crash the GUI
 
     def _log(self, msg: str) -> None:
         ts = time.strftime("%H:%M:%S")

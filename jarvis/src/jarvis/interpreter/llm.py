@@ -9,6 +9,7 @@ as a fallback; tests use FakeProvider.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import urllib.request
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Protocol
 
 from jarvis.interpreter import schema
+
+logger = logging.getLogger("jarvis.llm")
 
 
 class IntentProvider(Protocol):
@@ -196,7 +199,8 @@ class FallbackProvider:
             result = self._primary.resolve(prompt, system)
             self.last_provider = "primary"
             return result
-        except Exception:
+        except Exception as exc:
+            logger.warning("Primary provider failed, falling back to secondary: %s", exc)
             result = self._secondary.resolve(prompt, system)
             self.last_provider = "secondary"
             return result

@@ -12,6 +12,7 @@ config at E2E (PR6); these adapters only depend on the audio interfaces.
 
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import tempfile
@@ -25,6 +26,13 @@ from jarvis.audio.playback import PlaybackError
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
 from jarvis.orchestrator.contracts import CaptureError
+
+logger = logging.getLogger("jarvis.audio")
+
+# After this many consecutive TTS/playback failures, surface a visible warning.
+# A single failure is normal (network blip); 3+ means something is systematically
+# wrong (edge-tts binary missing, network down, speakers broken).
+_MAX_CONSECUTIVE_TTS_FAILURES = 3
 
 
 class UtteranceCapture:
@@ -96,6 +104,7 @@ class PiperSpeaker:
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._closed = False
         self._playing = False
+        self._consecutive_tts_failures: int = 0
         self._thread = threading.Thread(target=self._worker, name="jarvis-piper", daemon=True)
         self._thread.start()
 
@@ -120,8 +129,24 @@ class PiperSpeaker:
         try:
             media_path = self.tts.synthesize(text, media_path)
             self.playback.play(media_path)
-        except (TTSError, PlaybackError):
-            pass  # loop keeps running; the human can retry
+            self._consecutive_tts_failures = 0  # reset on success
+        except (TTSError, PlaybackError) as exc:
+            self._consecutive_tts_failures += 1
+            logger.warning(
+                "TTS/playback failure (%d consecutive): %s",
+                self._consecutive_tts_failures, exc,
+            )
+            if self._consecutive_tts_failures >= _MAX_CONSECUTIVE_TTS_FAILURES:
+                logger.error(
+                    "TTS failing repeatedly (%d times). Check edge-tts binary, "
+                    "network connection, and speaker hardware.",
+                    self._consecutive_tts_failures,
+                )
+                # Surface to stderr so `jarvis start` output shows the problem
+                print(
+                    f"[jarvis] TTS failing repeatedly ({self._consecutive_tts_failures} times): {exc}",
+                    flush=True,
+                )
         finally:
             media_path.unlink(missing_ok=True)
 

@@ -12,6 +12,7 @@ import pytest
 
 from jarvis.interpreter.llm import (
     FakeProvider,
+    FallbackProvider,
     OpenCodeProvider,
     build_opencode_command,
     parse_assistant_text,
@@ -288,3 +289,18 @@ class FailingProvider:
     """Provider that always raises RuntimeError."""
     def resolve(self, prompt, system):
         raise RuntimeError("always fails")
+
+
+def test_fallback_provider_logs_primary_failure(caplog) -> None:
+    """FallbackProvider must log the primary exception before falling back."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="jarvis.llm"):
+        fb = FallbackProvider(
+            primary=FailingProvider(),
+            secondary=FakeProvider([{"intent": "help", "entities": {}, "confidence": 0.9}]),
+        )
+        result = fb.resolve("ayuda", "sys")
+
+    assert result["intent"] == "help"
+    assert "Primary provider failed" in caplog.text
+    assert "always fails" in caplog.text

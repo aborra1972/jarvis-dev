@@ -596,3 +596,57 @@ def test_loop_off_releases_mic_and_never_consults_wake(
     assert outcome in ("woke", "no_wake")
     assert wake.calls == 1
     assert capturer.started >= 1
+
+
+# --- H2: TTS failure logging and escalation -----------------------------------
+def test_piper_speaker_logs_tts_failure(tmp_path: Path, caplog) -> None:
+    """TTS failures must be logged, not silently swallowed."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="jarvis.audio"):
+        speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
+        speaker.speak("falla")
+        speaker.flush()
+
+    assert "TTS/playback failure" in caplog.text
+    assert "1 consecutive" in caplog.text
+
+
+def test_piper_speaker_logs_consecutive_failures(tmp_path: Path, caplog) -> None:
+    """Consecutive TTS failures must be counted and logged."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="jarvis.audio"):
+        speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
+        speaker.speak("falla1")
+        speaker.speak("falla2")
+        speaker.flush()
+
+    assert "2 consecutive" in caplog.text
+
+
+def test_piper_speaker_escalates_after_n_failures(tmp_path: Path, caplog, capsys) -> None:
+    """After 3+ consecutive failures, an error must be surfaced to stderr."""
+    import logging
+    with caplog.at_level(logging.ERROR, logger="jarvis.audio"):
+        speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
+        speaker.speak("f1")
+        speaker.speak("f2")
+        speaker.speak("f3")
+        speaker.flush()
+
+    assert "TTS failing repeatedly" in caplog.text
+    captured = capsys.readouterr()
+    assert "TTS failing repeatedly" in captured.out
+
+
+def test_piper_speaker_resets_failure_count_on_success(tmp_path: Path, caplog) -> None:
+    """A successful TTS must reset the consecutive failure counter."""
+    import logging
+    flaky = _FlakyTTS()  # fails once, then succeeds
+    with caplog.at_level(logging.WARNING, logger="jarvis.audio"):
+        speaker = PiperSpeaker(flaky, FakePlayback(), out_dir=tmp_path)
+        speaker.speak("falla")   # fails
+        speaker.speak("sigue")   # succeeds
+        speaker.flush()
+
+    # Only 1 failure logged (the successful one reset the counter)
+    assert caplog.text.count("TTS/playback failure") == 1

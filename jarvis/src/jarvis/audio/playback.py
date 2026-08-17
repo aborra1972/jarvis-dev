@@ -36,6 +36,30 @@ class PlaybackError(Exception):
     """The player binary failed to play the audio file."""
 
 
+def _generate_beep(
+    freq_hz: float,
+    amplitude: float,
+    duration_ms: int,
+    sample_rate: int = _BEEP_SAMPLE_RATE,
+) -> Path:
+    """Generate a sine-wave beep and return the temp WAV path.
+
+    Caller is responsible for deleting the file (or using the returned path
+    with ``unlink(missing_ok=True)``).
+    """
+    n_samples = int(sample_rate * duration_ms / 1000)
+    beep_path = Path(tempfile.mktemp(suffix=".wav"))
+    with wave.open(str(beep_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        for i in range(n_samples):
+            t = i / sample_rate
+            sample = int(amplitude * 32767 * math.sin(2 * math.pi * freq_hz * t))
+            wf.writeframes(struct.pack("<h", sample))
+    return beep_path
+
+
 class Playback:
     def __init__(
         self,
@@ -72,20 +96,8 @@ class Playback:
 
     def play_beep(self) -> None:
         """Play a short activation beep to confirm wake-word detection."""
-        n_samples = int(_BEEP_SAMPLE_RATE * _BEEP_DURATION_MS / 1000)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            beep_path = Path(f.name)
+        beep_path = _generate_beep(_BEEP_FREQ_HZ, _BEEP_AMPLITUDE, _BEEP_DURATION_MS)
         try:
-            with wave.open(str(beep_path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(_BEEP_SAMPLE_RATE)
-                for i in range(n_samples):
-                    t = i / _BEEP_SAMPLE_RATE
-                    sample = int(
-                        _BEEP_AMPLITUDE * 32767 * math.sin(2 * math.pi * _BEEP_FREQ_HZ * t)
-                    )
-                    wf.writeframes(struct.pack("<h", sample))
             self.play(beep_path)
             print("[jarvis] beep played", flush=True)
         except Exception as exc:
@@ -99,20 +111,8 @@ class Playback:
         This is shorter and higher-pitched than the activation beep to give
         instant feedback that Jarvis heard the command and is processing it.
         """
-        n_samples = int(_BEEP_SAMPLE_RATE * _ACK_BEEP_DURATION_MS / 1000)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            beep_path = Path(f.name)
+        beep_path = _generate_beep(_ACK_BEEP_FREQ_HZ, _ACK_BEEP_AMPLITUDE, _ACK_BEEP_DURATION_MS)
         try:
-            with wave.open(str(beep_path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(_BEEP_SAMPLE_RATE)
-                for i in range(n_samples):
-                    t = i / _BEEP_SAMPLE_RATE
-                    sample = int(
-                        _ACK_BEEP_AMPLITUDE * 32767 * math.sin(2 * math.pi * _ACK_BEEP_FREQ_HZ * t)
-                    )
-                    wf.writeframes(struct.pack("<h", sample))
             self.play(beep_path)
         except Exception:
             pass  # ack beep is best-effort, never block

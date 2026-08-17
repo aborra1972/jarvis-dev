@@ -84,6 +84,12 @@ class ServerProcess:
     def stop(self) -> None:
         if self.is_alive():
             self._process.terminate()
+            try:
+                self._process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                # Process didn't die from SIGTERM — force kill
+                self._process.kill()
+                self._process.wait(timeout=3.0)
 
 
 def _spawn_server(port: int, repo: Path, host: str) -> ServerProcess:

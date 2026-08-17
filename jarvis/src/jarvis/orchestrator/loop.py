@@ -28,6 +28,8 @@ from jarvis.audio.stt import WhisperSTT
 from jarvis.audio.tts import EdgeTTS, PiperTTS
 from jarvis.audio.wake import build_wake_detector
 from jarvis.interpreter import Interpretation, resolve_intent
+from jarvis.interpreter.dictation import DictationManager
+from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
 from jarvis.orchestrator.contracts import CaptureError
 from jarvis.orchestrator.logs import TranscriptLog, clean_logs
@@ -69,6 +71,7 @@ class Pipeline:
     switch_state: Callable[[], bool] | None = None
     transcript_log: object | None = None
     ollama_provider: object | None = None  # for keepalive
+    dictation: DictationManager | None = None  # voice-to-text injection
 
 
 @dataclass
@@ -177,6 +180,32 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
         # Ack beep DISABLED — visual feedback in GUI is sufficient and avoids
+
+        # --- DICTATION MODE CHECK ---
+        # If dictation is active and a code editor is focused, handle dictation
+        # instead of normal command processing.
+        if pipeline.dictation is not None and pipeline.dictation.is_active:
+            should_respond, response_text = pipeline.dictation.process_transcript(transcript)
+            if should_respond:
+                pipeline.speaker.speak(response_text)
+                _write_fsm_state("speaking")
+                context.outcome = "dictation_" + response_text.replace(" ", "_")
+                return State.SPEAKING, context
+            else:
+                # Text was typed into the focused window, continue listening
+                context.outcome = "dictated"
+                # Don't write FSM state — user is still dictating
+                return State.IDLE, context
+
+        # Auto-activate dictation mode if code editor is focused
+        if pipeline.dictation is not None and is_code_editor_focused():
+            pipeline.dictation.activate()
+            pipeline.speaker.speak("modo dictado activado")
+            _write_fsm_state("speaking")
+            context.outcome = "dictation_activated"
+            return State.SPEAKING, context
+
+        # --- END DICTATION MODE CHECK ---
         # the 60ms audio delay + speaker hardware latency.
         # To re-enable, uncomment: pipeline.speaker.playback.play_ack_beep()
         _write_fsm_state("thinking", transcript[:50])
@@ -460,6 +489,7 @@ def build_pipeline(
         switch_state=switch_state,
         transcript_log=transcript_log,
         ollama_provider=_ollama if interpreter is not resolve_intent else None,
+        dictation=DictationManager(),
     )
 
 

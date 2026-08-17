@@ -24,11 +24,11 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_16_commands_in_5_domains() -> None:
+def test_17_commands_in_6_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 16
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 16
-    assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle"}
+    assert len(commands) == 17
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 17
+    assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle", "conversation"}
 
 
 def test_destructive_intents_are_gated() -> None:

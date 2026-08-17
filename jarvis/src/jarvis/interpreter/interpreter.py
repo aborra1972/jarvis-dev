@@ -10,6 +10,7 @@ and runs with confirmation (Option A) or auto (Option B).
 from __future__ import annotations
 
 import collections
+import difflib
 import hashlib
 import logging
 import re
@@ -19,6 +20,7 @@ from dataclasses import dataclass, replace
 
 from jarvis import config as _config
 from jarvis.interpreter import golden, llm, schema
+from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.interpreter.normalize import normalize
 
 logger = logging.getLogger("jarvis.interpreter")
@@ -252,6 +254,13 @@ def resolve_intent(
     # 3b. Fix LLM routing: if create_artifact includes a command field, reroute to execute
     if intent.intent == "create_artifact" and intent.entities.get("command"):
         intent = replace(intent, intent="execute")
+
+    # 3c. Route general_qa: if code editor is focused, reroute to ask (OpenCode)
+    #     Otherwise keep as general_qa for direct LLM response
+    if intent.intent == "general_qa":
+        if is_code_editor_focused():
+            logger.info("code editor focused — routing general_qa to ask (OpenCode)")
+            intent = replace(intent, intent="ask")
 
     # 4. Execute intent: set confirm_required based on AUTO_EXECUTE config.
     #    Option A (AUTO_EXECUTE=False): confirm_required=True → orchestrator asks

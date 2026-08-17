@@ -43,6 +43,9 @@ GOLDEN_CORPUS: list[dict] = [
     # help
     {"raw": "ayuda", "intent": "help"},
     {"raw": "que podes hacer", "intent": "help"},
+    # create_doc golden fast path
+    {"raw": "creá un documento con el resumen del sprint", "intent": "create_doc",
+     "entities": {"text": "con el resumen del sprint"}},
 ]
 
 
@@ -73,8 +76,6 @@ LLM_CORPUS: list[dict] = [
      "payload": {"intent": "implement", "entities": {"text": "que implemente la migracion 076 con tdd"}, "confidence": 0.9}},
     {"raw": "que revise el último commit y me diga los riesgos", "intent": "review",
      "payload": {"intent": "review", "entities": {"text": "que revise el ultimo commit y me diga los riesgos"}, "confidence": 0.9}},
-    {"raw": "creá un documento con el resumen del sprint", "intent": "create_doc",
-     "payload": {"intent": "create_doc", "entities": {"text": "un documento con el resumen del sprint"}, "confidence": 0.9}},
 ]
 
 

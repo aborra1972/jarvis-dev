@@ -8,9 +8,12 @@ open question resolved in this slice). No match → ``gate`` returns ``None`` an
 the interpreter delegates to the LLM — and any destructive intent the LLM
 suggests without a golden match is rejected upstream.
 
-All patterns are full-string anchored and match the NORMALIZED transcript
-(canonical infinitive forms produced by normalize.py): minimal surface, no
-trailing words, no shell.
+Anchoring rules:
+- Destructive patterns are full-string anchored (``^...$``) for safety:
+  "apagar la luz" must NOT trigger shutdown.
+- Non-destructive patterns are prefix-anchored (``^...``) only, allowing
+  trailing text: "abrir el proyecto y limpiar" matches open_repo, and
+  entity validation catches bad extractions downstream.
 """
 
 from __future__ import annotations
@@ -58,17 +61,30 @@ DESTRUCTIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 # --- canonical non-destructive fast-path patterns ---------------------------
+# Prefix-anchored (^...) only — trailing text is allowed. Entity validation
+# downstream catches bad extractions (e.g. "abrir el repo; rm -rf /").
 _OPEN_REPO_PROJECT = re.compile(
-    rf"^{_verb_alt('abrir')} (?:el |la |este |mi |nuestro |ese )?(?:proyecto|repo|repositorio)(?: (.+))?$"
+    rf"^{_verb_alt('abrir')} (?:el |la |este |mi |nuestro |ese )?(?:proyecto|repo|repositorio)(?: (.*))?$"
 )
 _OPEN_REPO_OPENCODE = re.compile(
-    rf"^{_verb_alt('abrir')} opencode(?: en el (?:repo|repositorio|proyecto))?(?: (.+))?$"
+    rf"^{_verb_alt('abrir')} opencode(?: en el (?:repo|repositorio|proyecto))?(?: (.*))?$"
 )
 _OPEN_REPO_POINTER = re.compile(rf"^{_verb_alt('abrir')} (?:el |la )?(?:este|aca|aqui)$")
 _OPEN_APP = re.compile(rf"^{_verb_alt('abrir')} (.+)$")
 _WEB_SEARCH = re.compile(rf"^{_verb_alt('buscar')} (.+)$")
 _ASK = re.compile(rf"^{_verb_alt('preguntar')}(?: a opencode)? (.+)$")
 _HELP = re.compile(rf"^(?:{_verb_alt('ayudar')}|que podes hacer|que sabes hacer|que puede hacer)$")
+
+# Create-doc patterns: common verbs that map to create_doc intent.
+# These extract free-text content (the LLM generates the document, not a shell cmd).
+# The noun (documento/doc/archivo/nota/txt) must be present to avoid matching
+# "crear un script" which should go to the LLM for execute intent.
+_CREATE_DOC = re.compile(
+    rf"^{_verb_alt('crear')} (?:un |una |el |la )?(?:documento|doc|archivo|nota|txt)(?: (.*))?$"
+)
+_CREATE_DOC_WRITE = re.compile(
+    rf"^{_verb_alt('escribir')} (?:un |una |el |la )?(?:documento|doc|archivo|nota|txt)(?: (.*))?$"
+)
 
 
 def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
@@ -92,6 +108,8 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_OPEN_REPO_PROJECT, "open_repo", _repo_from_match),
     (_OPEN_REPO_OPENCODE, "open_repo", _repo_from_match),
     (_OPEN_REPO_POINTER, "open_repo", lambda m: {"repo": ""}),
+    (_CREATE_DOC, "create_doc", _single_group("text")),
+    (_CREATE_DOC_WRITE, "create_doc", _single_group("text")),
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),

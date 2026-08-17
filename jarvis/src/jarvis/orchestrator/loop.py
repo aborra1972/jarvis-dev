@@ -68,6 +68,7 @@ class Pipeline:
     base_port: int = config.OPCODE_BASE_PORT
     switch_state: Callable[[], bool] | None = None
     transcript_log: object | None = None
+    ollama_provider: object | None = None  # for keepalive
 
 
 @dataclass
@@ -417,6 +418,7 @@ def build_pipeline(
         executor = build_registry()
 
     # Wire LLM provider for interpreter (ADR-2: Ollama = Jarvis's brain)
+    _ollama = None
     if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
         from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
         provider_mode = config.LLM_PROVIDER
@@ -454,10 +456,10 @@ def build_pipeline(
         executor=executor,
         session=session,
         cwd=cwd,
-        git_runner=git_runner or _git_root,
-        base_port=config.OPCODE_BASE_PORT,
+        git_runner=git_runner,
         switch_state=switch_state,
         transcript_log=transcript_log,
+        ollama_provider=_ollama if interpreter is not resolve_intent else None,
     )
 
 
@@ -508,6 +510,34 @@ def _ensure_ollama_running() -> None:
     print("[jarvis] WARN: Ollama no respondió en 15s — modo local puede fallar", flush=True)
 
 
+# --- Ollama keepalive (prevents model unloading) ----------------------------
+_KEEPALIVE_INTERVAL_S = 300  # 5 minutes
+
+
+def _start_ollama_keepalive(pipeline: Pipeline) -> None:
+    """Start a background thread that pings Ollama every 5 minutes.
+
+    This prevents Ollama from unloading the model after idle timeout,
+    avoiding cold-start latency on the next voice command.
+    """
+    import threading
+
+    ollama = pipeline.ollama_provider
+    if ollama is None or not hasattr(ollama, 'keepalive'):
+        return  # no Ollama provider, skip keepalive
+
+    def _keepalive_loop():
+        while True:
+            time.sleep(_KEEPALIVE_INTERVAL_S)
+            try:
+                ollama.keepalive()
+            except Exception:
+                pass  # best-effort — never crash
+
+    thread = threading.Thread(target=_keepalive_loop, daemon=True)
+    thread.start()
+
+
 def start() -> int:
     """``jarvis start``: run the orchestrator loop with the REAL voice pipeline.
 
@@ -523,6 +553,8 @@ def start() -> int:
     if provider_mode in ("local", "auto"):
         _ensure_ollama_running()
     pipeline = build_pipeline(session, cwd=os.getcwd())
+    # Start Ollama keepalive thread to prevent model unloading
+    _start_ollama_keepalive(pipeline)
     _register_switch_signals(session, pipeline.switch_state, pipeline.speaker)
     # SIGTERM: clean exit with state saved. The try/finally in run() saves
     # session and flushes speaker; the outer try/finally removes PID file.

@@ -103,6 +103,33 @@ class OllamaProvider:
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Ollama returned non-JSON: {text[:200]}") from exc
 
+    def keepalive(self) -> bool:
+        """Send a minimal request to keep the model loaded in VRAM.
+
+        Returns True if the model is alive, False otherwise. Called
+        periodically by a background thread to prevent Ollama from
+        unloading the model after idle timeout.
+        """
+        url = f"{self.base_url}/api/generate"
+        payload = json.dumps({
+            "model": self.model,
+            "prompt": "hi",
+            "stream": False,
+            "options": {"num_predict": 1, "temperature": 0},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp.read()
+            return True
+        except Exception:
+            return False
+
 
 class GeminiProvider:
     """Google Gemini API (v1beta) for intent routing — cloud LLM provider.

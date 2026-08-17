@@ -85,6 +85,15 @@ class Session:
         self._allocated[repo] = allocated
         return allocated
 
+    def invalidate(self, repo: str) -> None:
+        """Remove cached allocation so the next allocate() creates a fresh one.
+
+        Call this when the server for a repo is known to be dead (connection
+        failure, crash, OOM) so the next request gets a new port/session.
+        """
+        self._allocated.pop(repo, None)
+        self.work_sessions.pop(repo, None)
+
     def next_step(self, interpretation: Interpretation) -> str:
         intent = interpretation.intent
         if intent is not None:

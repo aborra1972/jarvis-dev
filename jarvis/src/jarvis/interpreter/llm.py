@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import subprocess
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -123,7 +124,7 @@ class GeminiProvider:
         self.model = model
         self.timeout = timeout
 
-    def resolve(self, prompt: str, system: str) -> dict:
+    def resolve(self, prompt: str, system: str, retried: bool = False) -> dict:
         url = f"{self._ENDPOINT}/{self.model}:generateContent"
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
@@ -150,9 +151,11 @@ class GeminiProvider:
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")[:200]
-            # 429 = rate limit / quota exhausted → fall back, don't crash
-            if exc.code == 429:
-                raise RuntimeError(f"Gemini quota exhausted: {body}") from exc
+            # 429 = rate limit / quota exhausted → backoff + retry once, then fall back
+            if exc.code == 429 and not retried:
+                logger.warning("Gemini 429 rate limit — retrying in 2s")
+                time.sleep(2.0)
+                return self.resolve(prompt, system, retried=True)
             raise RuntimeError(f"Gemini HTTP {exc.code}: {body}") from exc
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Gemini request failed: {exc}") from exc

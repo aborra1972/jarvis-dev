@@ -200,12 +200,16 @@ def test_gemini_provider_builds_correct_request() -> None:
         urllib.request.urlopen = original
 
 
-def test_gemini_provider_raises_on_http_429() -> None:
-    """GeminiProvider raises RuntimeError on 429 (quota exhausted)."""
+def test_gemini_provider_raises_on_http_429_after_retry() -> None:
+    """GeminiProvider retries once on 429, then raises RuntimeError."""
     from jarvis.interpreter.llm import GeminiProvider
     import urllib.error
 
+    call_count = 0
+
     def fake_urlopen(req, timeout=None):
+        nonlocal call_count
+        call_count += 1
         raise urllib.error.HTTPError(req.full_url, 429, "Quota exceeded", {}, None)
 
     import urllib.request
@@ -213,8 +217,9 @@ def test_gemini_provider_raises_on_http_429() -> None:
     urllib.request.urlopen = fake_urlopen
     try:
         provider = GeminiProvider(api_key="test-key", model="gemini-2.0-flash")
-        with pytest.raises(RuntimeError, match="quota"):
+        with pytest.raises(RuntimeError, match="429"):
             provider.resolve("test", "sys")
+        assert call_count == 2  # 1 original + 1 retry
     finally:
         urllib.request.urlopen = original
 

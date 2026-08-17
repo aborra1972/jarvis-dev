@@ -372,7 +372,7 @@ def build_pipeline(
         )
         stt = WhisperSTT(
             whisper_cli=config.WHISPER_CLI,
-            model_small=config.WHISPER_MODEL,
+            model_small=config.WHISPER_MODEL_TINY if config.STT_USE_TINY else config.WHISPER_MODEL,
             model_medium=config.WHISPER_MODEL_MEDIUM if config.STT_MEDIUM_PROMOTED else None,
             prompt=config.WHISPER_PROMPT,
             language="es",

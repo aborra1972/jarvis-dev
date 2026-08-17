@@ -55,6 +55,7 @@ REPO_ROOT = _THIS.parents[3]  # repo root (contains spike/)
 SPIKE = REPO_ROOT / "spike"
 WHISPER_CLI = SPIKE / "whisper.cpp" / "build" / "bin" / "whisper-cli"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
+WHISPER_MODEL_TINY = SPIKE / "ggml-tiny.bin"
 WHISPER_MODEL_MEDIUM = SPIKE / "ggml-medium.bin"
 PIPER_BIN = SPIKE / ".venv" / "bin" / "piper"
 PIPER_MODEL = SPIKE / "es_MX-ald-medium.onnx"
@@ -72,6 +73,10 @@ WHISPER_VAD_MODEL: Path | None = None
 # PR6 gate 5.5: medium (fp16) exceeds the latency budget and q5-medium is not
 # available in spike, so the promote stays OFF until a quantized model lands.
 STT_MEDIUM_PROMOTED = False
+# Use tiny model for faster STT (~2-5x faster than small, ~15% less accurate).
+# Good enough for voice commands; download from:
+#   wget -P spike/ https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+STT_USE_TINY = False
 # PR6 gate 5.6: a trained jarvis.onnx (see docs/wake-word-training.md); None =
 # the packaged hey_jarvis_v0.1.onnx.
 WAKE_CUSTOM_MODEL: Path | None = None

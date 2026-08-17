@@ -17,3 +17,6 @@ build/
 *.log
 logs/
 .codegraph/
+
+# Environment secrets (API keys)
+.env

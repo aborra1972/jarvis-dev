@@ -138,6 +138,37 @@ CSS = b"""
     background-color: #1a4a7a;
 }
 
+.provider-card {
+    background-color: #16213e;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.provider-label {
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.provider-hint {
+    color: #a0a0b0;
+    font-size: 10px;
+}
+
+.provider-active {
+    color: #00b894;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.combo-provider {
+    background-color: #0f3460;
+    color: white;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
 .log-card {
     background-color: #0a1628;
     border-radius: 6px;
@@ -304,6 +335,43 @@ class JarvisGUI:
         self._slider.connect("value-changed", self._on_slider_changed)
         slider_box.pack_start(self._slider, False, False, 0)
 
+        # --- LLM Provider Selector ---
+        provider_frame = Gtk.Frame()
+        provider_frame.get_style_context().add_class("provider-card")
+        main_box.pack_start(provider_frame, False, False, 0)
+
+        provider_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        provider_box.set_margin_start(10)
+        provider_box.set_margin_end(10)
+        provider_box.set_margin_top(8)
+        provider_box.set_margin_bottom(8)
+        provider_frame.add(provider_box)
+
+        provider_title = Gtk.Label(label="IA Provider")
+        provider_title.get_style_context().add_class("provider-label")
+        provider_box.pack_start(provider_title, False, False, 0)
+
+        provider_hint = Gtk.Label(label="Local (offline) / Gemini (nube) / Auto (Gemini → local)")
+        provider_hint.get_style_context().add_class("provider-hint")
+        provider_box.pack_start(provider_hint, False, False, 0)
+
+        # ComboBox for provider selection
+        self._provider_combo = Gtk.ComboBoxText()
+        self._provider_combo.append("local", "🏠 IA Local (Ollama)")
+        self._provider_combo.append("gemini", "☁️  Gemini (Google)")
+        self._provider_combo.append("auto", "🔄 Auto (Gemini → Local)")
+        self._provider_combo.set_id_column(0)
+        self._provider_combo.connect("changed", self._on_provider_changed)
+        provider_box.pack_start(self._provider_combo, False, False, 0)
+
+        # Status label for active provider
+        self._provider_status = Gtk.Label()
+        self._provider_status.get_style_context().add_class("provider-active")
+        provider_box.pack_start(self._provider_status, False, False, 0)
+
+        # Load saved provider preference
+        self._load_provider_preference()
+
         # --- Buttons Row ---
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         btn_box.set_margin_start(8)
@@ -396,16 +464,43 @@ class JarvisGUI:
         # Ensure state is clean before launching
         self._reset_switch_state()
 
+        # Read LLM provider preference from state.json
+        llm_provider = "local"
+        try:
+            if STATE_FILE.exists():
+                state = json.loads(STATE_FILE.read_text())
+                llm_provider = state.get("llm_provider", "local")
+        except Exception:
+            pass
+
+        # Read Gemini API key from .env if present
+        gemini_key = ""
+        try:
+            env_file = JARVIS_ROOT / ".env"
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    line = line.strip()
+                    if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
+                        gemini_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
+
         self._log("Iniciando Jarvis...")
         self._status_detail.set_text("Iniciando...")
 
         try:
+            env = os.environ.copy()
+            env["JARVIS_LLM_PROVIDER"] = llm_provider
+            if gemini_key:
+                env["GEMINI_API_KEY"] = gemini_key
             self._jarvis_proc = subprocess.Popen(
                 [str(VENV_PY), "-m", "jarvis", "start"],
                 cwd=str(JARVIS_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                env=env,
             )
             self._is_on = True
             self._log(f"Jarvis PID: {self._jarvis_proc.pid}")
@@ -452,6 +547,47 @@ class JarvisGUI:
             self._log(f"Sensibilidad: {self._threshold:.2f}")
         except Exception as e:
             self._log(f"Error umbral: {e}")
+
+    def _load_provider_preference(self) -> None:
+        """Load saved LLM provider preference from state.json."""
+        try:
+            if STATE_FILE.exists():
+                state = json.loads(STATE_FILE.read_text())
+                saved = state.get("llm_provider", "local")
+                self._provider_combo.set_active_id(saved)
+                self._update_provider_status(saved)
+            else:
+                self._provider_combo.set_active_id("local")
+                self._update_provider_status("local")
+        except Exception:
+            self._provider_combo.set_active_id("local")
+            self._update_provider_status("local")
+
+    def _on_provider_changed(self, combo) -> None:
+        """Handle LLM provider selection change."""
+        provider_id = combo.get_active_id()
+        if provider_id is None:
+            return
+        try:
+            state = {}
+            if STATE_FILE.exists():
+                state = json.loads(STATE_FILE.read_text())
+            state["llm_provider"] = provider_id
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps(state, indent=2))
+            self._update_provider_status(provider_id)
+            self._log(f"IA Provider: {provider_id}")
+        except Exception as e:
+            self._log(f"Error provider: {e}")
+
+    def _update_provider_status(self, provider: str) -> None:
+        """Update the provider status label."""
+        labels = {
+            "local": "🏠 Solo IA local (sin conexión)",
+            "gemini": "☁️  Gemini (nube — requiere API key)",
+            "auto": "🔄 Auto (Gemini primero, fallback local)",
+        }
+        self._provider_status.set_text(labels.get(provider, provider))
 
     def _update_ui(self) -> None:
         if self._is_on:

@@ -9,7 +9,29 @@ executors/allowlists (PR4), voice pipeline (PR5).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+
+def _load_env() -> None:
+    """Load .env file from repo root into os.environ (no-op if missing)."""
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env()
 
 from jarvis.interpreter.schema import build_system_prompt  # PR2: real prompt
 
@@ -100,3 +122,12 @@ INTERPRETER_LLM_MODEL: str | None = "qwen2.5:3b"
 OLLAMA_BASE_URL = "http://localhost:11434"
 # Execute mode: False = confirm before any command (Option A), True = auto-execute (Option B)
 AUTO_EXECUTE = False
+
+# --- LLM provider selection (local / gemini / auto) -------------------------
+# "local"  = Ollama only (default, offline)
+# "gemini" = Google Gemini API only (requires GEMINI_API_KEY)
+# "auto"   = Gemini first, fallback to Ollama on failure (best of both)
+LLM_PROVIDER: str = os.environ.get("JARVIS_LLM_PROVIDER", "local")
+GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL: str = "gemini-3.6-flash"
+GEMINI_TIMEOUT_S: float = 5.0

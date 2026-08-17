@@ -26,6 +26,11 @@ _BEEP_DURATION_MS = 150
 _BEEP_SAMPLE_RATE = 16000
 _BEEP_AMPLITUDE = 0.3
 
+# Ack beep parameters (shorter than activation beep for instant feedback)
+_ACK_BEEP_FREQ_HZ = 1200
+_ACK_BEEP_DURATION_MS = 60
+_ACK_BEEP_AMPLITUDE = 0.2
+
 
 class PlaybackError(Exception):
     """The player binary failed to play the audio file."""
@@ -85,5 +90,31 @@ class Playback:
             print("[jarvis] beep played", flush=True)
         except Exception as exc:
             print(f"[jarvis] beep failed: {exc}", flush=True)
+        finally:
+            beep_path.unlink(missing_ok=True)
+
+    def play_ack_beep(self) -> None:
+        """Play a very short ack beep to confirm utterance was captured.
+
+        This is shorter and higher-pitched than the activation beep to give
+        instant feedback that Jarvis heard the command and is processing it.
+        """
+        n_samples = int(_BEEP_SAMPLE_RATE * _ACK_BEEP_DURATION_MS / 1000)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            beep_path = Path(f.name)
+        try:
+            with wave.open(str(beep_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(_BEEP_SAMPLE_RATE)
+                for i in range(n_samples):
+                    t = i / _BEEP_SAMPLE_RATE
+                    sample = int(
+                        _ACK_BEEP_AMPLITUDE * 32767 * math.sin(2 * math.pi * _ACK_BEEP_FREQ_HZ * t)
+                    )
+                    wf.writeframes(struct.pack("<h", sample))
+            self.play(beep_path)
+        except Exception:
+            pass  # ack beep is best-effort, never block
         finally:
             beep_path.unlink(missing_ok=True)

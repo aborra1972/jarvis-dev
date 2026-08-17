@@ -52,7 +52,7 @@ class OllamaProvider:
         self,
         model: str = "qwen2.5:3b",
         base_url: str = "http://localhost:11434",
-        timeout: float = 10.0,
+        timeout: float = 5.0,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -98,6 +98,105 @@ class OllamaProvider:
             return json.loads(text)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Ollama returned non-JSON: {text[:200]}") from exc
+
+
+class GeminiProvider:
+    """Google Gemini API (v1beta) for intent routing — cloud LLM provider.
+
+    Uses the Generative Language REST API with a short timeout for voice
+    interaction. Raises RuntimeError on any failure so the caller can fall
+    back to the local provider.
+    """
+
+    _ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-2.0-flash",
+        timeout: float = 5.0,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+
+    def resolve(self, prompt: str, system: str) -> dict:
+        url = f"{self._ENDPOINT}/{self.model}:generateContent?key={self.api_key}"
+        payload = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "systemInstruction": {"parts": [{"text": system}]},
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 64,
+                "responseMimeType": "application/json",
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")[:200]
+            # 429 = rate limit / quota exhausted → fall back, don't crash
+            if exc.code == 429:
+                raise RuntimeError(f"Gemini quota exhausted: {body}") from exc
+            raise RuntimeError(f"Gemini HTTP {exc.code}: {body}") from exc
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Gemini request failed: {exc}") from exc
+
+        # Extract text from candidates
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini returned no candidates")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            raise RuntimeError("Gemini returned empty response")
+
+        # Strip markdown code fences: ```json ... ``` → raw JSON
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+        # If text still isn't pure JSON, try to extract the JSON object
+        if not text.startswith("{"):
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                text = match.group(0)
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Gemini returned non-JSON: {text[:200]}") from exc
+
+
+class FallbackProvider:
+    """Try primary provider first, fall back to secondary on any failure.
+
+    Used for auto mode: Gemini (fast, cloud) → Ollama (local, offline).
+    """
+
+    def __init__(self, primary: IntentProvider, secondary: IntentProvider) -> None:
+        self._primary = primary
+        self._secondary = secondary
+        self.last_provider: str = "primary"
+
+    def resolve(self, prompt: str, system: str) -> dict:
+        try:
+            result = self._primary.resolve(prompt, system)
+            self.last_provider = "primary"
+            return result
+        except Exception:
+            result = self._secondary.resolve(prompt, system)
+            self.last_provider = "secondary"
+            return result
 
 
 def build_opencode_command(

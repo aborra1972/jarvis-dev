@@ -152,3 +152,134 @@ def test_open_code_provider_fails_on_non_json_output() -> None:
     provider = OpenCodeProvider("http://127.0.0.1:32111", "interp-1", runner=TextRunner())
     with pytest.raises(RuntimeError, match="non-JSON"):
         provider.resolve("p", "sys")
+
+
+# --- GeminiProvider ---------------------------------------------------------
+def test_gemini_provider_builds_correct_request() -> None:
+    """GeminiProvider builds a valid REST request to the Generative Language API."""
+    from jarvis.interpreter.llm import GeminiProvider
+    import json
+
+    class FakeResp:
+        def __init__(self, data):
+            self._data = json.dumps(data).encode()
+        def read(self):
+            return self._data
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    gemini_response = {
+        "candidates": [{"content": {"parts": [{"text": '{"intent":"help","entities":{},"confidence":0.95}'}]}}]
+    }
+
+    captured = {}
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode())
+        return FakeResp(gemini_response)
+
+    import urllib.request
+    original = urllib.request.urlopen
+    urllib.request.urlopen = fake_urlopen
+    try:
+        provider = GeminiProvider(api_key="test-key-123", model="gemini-2.0-flash")
+        result = provider.resolve("abrir firefox", "system prompt here")
+        assert result["intent"] == "help"
+        assert "test-key-123" in captured["url"]
+        assert "gemini-2.0-flash" in captured["url"]
+        assert captured["body"]["generationConfig"]["temperature"] == 0.1
+    finally:
+        urllib.request.urlopen = original
+
+
+def test_gemini_provider_raises_on_http_429() -> None:
+    """GeminiProvider raises RuntimeError on 429 (quota exhausted)."""
+    from jarvis.interpreter.llm import GeminiProvider
+    import urllib.error
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 429, "Quota exceeded", {}, None)
+
+    import urllib.request
+    original = urllib.request.urlopen
+    urllib.request.urlopen = fake_urlopen
+    try:
+        provider = GeminiProvider(api_key="test-key", model="gemini-2.0-flash")
+        with pytest.raises(RuntimeError, match="quota"):
+            provider.resolve("test", "sys")
+    finally:
+        urllib.request.urlopen = original
+
+
+def test_gemini_provider_strips_code_fences() -> None:
+    """GeminiProvider strips markdown code fences from response."""
+    from jarvis.interpreter.llm import GeminiProvider
+    import json
+
+    class FakeResp:
+        def __init__(self, data):
+            self._data = json.dumps(data).encode()
+        def read(self):
+            return self._data
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    gemini_response = {
+        "candidates": [{"content": {"parts": [{"text": '```json\n{"intent":"help","entities":{},"confidence":0.9}\n```'}]}}]
+    }
+
+    def fake_urlopen(req, timeout=None):
+        return FakeResp(gemini_response)
+
+    import urllib.request
+    original = urllib.request.urlopen
+    urllib.request.urlopen = fake_urlopen
+    try:
+        provider = GeminiProvider(api_key="key", model="gemini-2.0-flash")
+        result = provider.resolve("ayuda", "sys")
+        assert result["intent"] == "help"
+    finally:
+        urllib.request.urlopen = original
+
+
+# --- FallbackProvider -------------------------------------------------------
+def test_fallback_uses_primary_on_success() -> None:
+    """FallbackProvider uses primary when it succeeds."""
+    from jarvis.interpreter.llm import FallbackProvider
+    primary = FakeProvider([{"intent": "help", "entities": {}, "confidence": 0.9}])
+    secondary = FakeProvider([{"intent": "open_repo", "entities": {}, "confidence": 0.8}])
+    fb = FallbackProvider(primary=primary, secondary=secondary)
+    result = fb.resolve("ayuda", "sys")
+    assert result["intent"] == "help"
+    assert fb.last_provider == "primary"
+    assert len(primary.calls) == 1
+    assert len(secondary.calls) == 0
+
+
+def test_fallback_falls_to_secondary_on_primary_failure() -> None:
+    """FallbackProvider falls back to secondary when primary fails."""
+    from jarvis.interpreter.llm import FallbackProvider
+    primary = FakeProvider([])  # will raise RuntimeError
+    secondary = FakeProvider([{"intent": "help", "entities": {}, "confidence": 0.9}])
+    fb = FallbackProvider(primary=primary, secondary=secondary)
+    # Exhaust primary to trigger RuntimeError
+    with pytest.raises(RuntimeError, match="exhausted"):
+        primary.resolve("test", "sys")
+    # Now test the fallback path properly
+    fb2 = FallbackProvider(
+        primary=FailingProvider(),
+        secondary=FakeProvider([{"intent": "help", "entities": {}, "confidence": 0.9}]),
+    )
+    result = fb2.resolve("ayuda", "sys")
+    assert result["intent"] == "help"
+    assert fb2.last_provider == "secondary"
+
+
+class FailingProvider:
+    """Provider that always raises RuntimeError."""
+    def resolve(self, prompt, system):
+        raise RuntimeError("always fails")

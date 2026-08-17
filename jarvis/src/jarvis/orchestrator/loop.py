@@ -35,8 +35,8 @@ from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
-TTS_COOLDOWN_S = 3.0  # seconds to wait after speaker stops before listening
-MIC_CLOSE_DELAY_S = 1.5  # seconds after user finishes speaking before closing mic
+TTS_COOLDOWN_S = 1.5  # reduced from 3.0s — speaker hardware settles faster
+MIC_CLOSE_DELAY_S = 0.3  # reduced from 1.5s — close mic quickly after user stops talking
 
 REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
 REASK_2 = "Lo lamento, señor, sigo sin comprender. ¿Repite una vez más, por favor?"
@@ -158,13 +158,20 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
-        # Close mic 1.5s after user finishes speaking to prevent TTS feedback.
-        # The mic stays open briefly in case the user is trailing off, then
-        # shuts down so Jarvis's own voice doesn't leak into the next capture.
+        # Close mic quickly after user finishes speaking to prevent TTS feedback.
+        # 0.3s is enough for the user to trail off; keeps mic open just long
+        # enough to avoid clipping the tail of the utterance.
         import time as _time
         _time.sleep(MIC_CLOSE_DELAY_S)
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
+        # Ack beep: instant feedback that Jarvis heard the command and is
+        # processing it. Best-effort; failures are silent.
+        try:
+            if hasattr(pipeline.speaker, 'playback') and hasattr(pipeline.speaker.playback, 'play_ack_beep'):
+                pipeline.speaker.playback.play_ack_beep()
+        except Exception:
+            pass
         interpretation = pipeline.interpreter(transcript)
         context.transcript = transcript
         context.interpretation = interpretation
@@ -392,12 +399,29 @@ def build_pipeline(
 
     # Wire LLM provider for interpreter (ADR-2: Ollama = Jarvis's brain)
     if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
-        from jarvis.interpreter.llm import OllamaProvider
-        _provider = OllamaProvider(
+        from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
+        provider_mode = config.LLM_PROVIDER
+        _ollama = OllamaProvider(
             model=config.INTERPRETER_LLM_MODEL,
             base_url=config.OLLAMA_BASE_URL,
-            timeout=10.0,
+            timeout=config.GEMINI_TIMEOUT_S,
         )
+        if provider_mode == "gemini" and config.GEMINI_API_KEY:
+            _provider = GeminiProvider(
+                api_key=config.GEMINI_API_KEY,
+                model=config.GEMINI_MODEL,
+                timeout=config.GEMINI_TIMEOUT_S,
+            )
+        elif provider_mode == "auto" and config.GEMINI_API_KEY:
+            _gemini = GeminiProvider(
+                api_key=config.GEMINI_API_KEY,
+                model=config.GEMINI_MODEL,
+                timeout=config.GEMINI_TIMEOUT_S,
+            )
+            _provider = FallbackProvider(primary=_gemini, secondary=_ollama)
+        else:
+            # "local" or gemini without API key → Ollama
+            _provider = _ollama
         def _interpret_with_llm(text: str, _prov=_provider) -> Interpretation:
             return resolve_intent(text, provider=_prov)
         interpreter = _interpret_with_llm
@@ -418,6 +442,51 @@ def build_pipeline(
     )
 
 
+def _ensure_ollama_running() -> None:
+    """Start Ollama if not running. Blocks until healthy or timeout."""
+    import socket
+    import subprocess
+    import time as _time
+
+    host, port = "127.0.0.1", 11434
+
+    # Quick check: is Ollama already listening?
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return  # already running
+    except OSError:
+        pass
+
+    print("[jarvis] Ollama no está corriendo — iniciando...", flush=True)
+
+    # Try to start ollama serve in background
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        print("[jarvis] WARN: 'ollama' no encontrado en PATH — instálalo de https://ollama.com", flush=True)
+        return
+    except Exception as exc:
+        print(f"[jarvis] WARN: no pude iniciar ollama: {exc}", flush=True)
+        return
+
+    # Wait up to 15s for Ollama to become healthy
+    for _ in range(30):
+        _time.sleep(0.5)
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                print("[jarvis] Ollama listo ✓", flush=True)
+                return
+        except OSError:
+            continue
+
+    print("[jarvis] WARN: Ollama no respondió en 15s — modo local puede fallar", flush=True)
+
+
 def start() -> int:
     """``jarvis start``: run the orchestrator loop with the REAL voice pipeline.
 
@@ -428,6 +497,10 @@ def start() -> int:
     power_off_self (PR6).
     """
     session = load_state(str(config.STATE_FILE))
+    # Ensure Ollama is running before building the LLM pipeline
+    provider_mode = config.LLM_PROVIDER
+    if provider_mode in ("local", "auto"):
+        _ensure_ollama_running()
     pipeline = build_pipeline(session, cwd=os.getcwd())
     _register_switch_signals(session, pipeline.switch_state, pipeline.speaker)
     _write_pid()

@@ -92,7 +92,7 @@ def validate(payload: Any) -> Intent:
     if intent_name not in ALLOWED_INTENTS:
         raise SchemaError("unknown_intent", f"intent {intent_name!r} not in allowlist")
 
-    confidence = payload.get("confidence", 0.0)
+    confidence = payload.get("confidence", 0.9)
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise SchemaError("bad_confidence", f"confidence must be a number, got {confidence!r}")
     confidence = float(confidence)

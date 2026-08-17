@@ -518,6 +518,9 @@ def start() -> int:
         _ensure_ollama_running()
     pipeline = build_pipeline(session, cwd=os.getcwd())
     _register_switch_signals(session, pipeline.switch_state, pipeline.speaker)
+    # SIGTERM: clean exit with state saved. The try/finally in run() saves
+    # session and flushes speaker; the outer try/finally removes PID file.
+    signal.signal(signal.SIGTERM, lambda *_: (_remove_pid(), sys.exit(0)))
     _write_pid()
     try:
         try:

@@ -481,12 +481,12 @@ def _build_registry():
 def test_cooldown_starts_when_tts_finishes_not_when_it_starts(tmp_path: Path) -> None:
     """C3 fix: cooldown must measure from TTS playback end, not FSM SPEAKING entry.
 
-    Before the fix, _last_spoke_at was set when the FSM entered SPEAKING.
+    Before the fix, last_spoke_at was set when the FSM entered SPEAKING.
     Since PiperSpeaker.speak() is async, the cooldown elapsed while audio
     was still playing → mic opened during playback → feedback loop.
 
-    Now _was_playing tracks the playing→finished transition and sets
-    _last_spoke_at at that point, so the full cooldown runs after audio ends.
+    Now was_playing tracks the playing→finished transition and sets
+    last_spoke_at at that point, so the full cooldown runs after audio ends.
     """
     import time
     from jarvis.orchestrator.loop import TTS_COOLDOWN_S
@@ -527,22 +527,22 @@ def test_cooldown_starts_when_tts_finishes_not_when_it_starts(tmp_path: Path) ->
     # Simulate: speaker was playing, now transitions to not-playing
     speaker.speak("hola")
     context = _Context()
-    # First tick: speaker is playing → IDLE stays, _was_playing set
+    # First tick: speaker is playing → IDLE stays, was_playing set
     state = _tick(State.IDLE, pipeline, context)
-    assert context._was_playing is True
-    assert context._last_spoke_at == 0.0  # not set yet
+    assert context.was_playing is True
+    assert context.last_spoke_at == 0.0  # not set yet
 
     # Simulate TTS finishing after 2 seconds of playback
     time.sleep(0.05)  # small real delay
     speaker.finish_playing()
 
-    # Second tick: speaker finished → _was_playing triggers cooldown start
+    # Second tick: speaker finished → was_playing triggers cooldown start
     start = time.monotonic()
     state = _tick(State.IDLE, pipeline, context)
     elapsed = time.monotonic() - start
 
     # Cooldown should have run (or started) after TTS finished
-    assert context._was_playing is False
-    assert context._last_spoke_at == 0.0  # cooldown consumed
+    assert context.was_playing is False
+    assert context.last_spoke_at == 0.0  # cooldown consumed
     # The cooldown sleep should have happened (or been satisfied already)
     assert elapsed >= 0  # basic sanity

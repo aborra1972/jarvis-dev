@@ -75,8 +75,8 @@ class _Context:
     transcript: str = ""
     interpretation: Interpretation | None = None
     outcome: str = ""
-    _last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
-    _was_playing: bool = False  # tracks TTS playing state for accurate cooldown
+    last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
+    was_playing: bool = False  # tracks TTS playing state for accurate cooldown
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -114,21 +114,21 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # Keep mic stopped while TTS plays to prevent feedback loop.
             if hasattr(pipeline.wake, 'capturer'):
                 pipeline.wake.capturer.stop()
-            context._was_playing = True
+            context.was_playing = True
             context.outcome = "speaking"
             return State.IDLE, context
         # TTS just finished — start cooldown from the actual playback end,
         # not from when the FSM entered SPEAKING (which was seconds earlier).
-        if context._was_playing:
-            context._last_spoke_at = time.monotonic()
-            context._was_playing = False
+        if context.was_playing:
+            context.last_spoke_at = time.monotonic()
+            context.was_playing = False
         # Post-TTS cooldown: wait for speaker hardware to fully stop after
         # the last reply so the mic doesn't capture residual audio.
-        if context._last_spoke_at:
-            remaining = TTS_COOLDOWN_S - (time.monotonic() - context._last_spoke_at)
+        if context.last_spoke_at:
+            remaining = TTS_COOLDOWN_S - (time.monotonic() - context.last_spoke_at)
             if remaining > 0:
                 time.sleep(remaining)
-            context._last_spoke_at = 0.0
+            context.last_spoke_at = 0.0
             # Flush wake detector buffer — discard any TTS audio captured
             # before the mic was restarted.
             if hasattr(pipeline.wake, 'flush'):
@@ -259,7 +259,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     if state is State.SPEAKING:
         # Close mic immediately while Jarvis speaks to prevent feedback loop.
         # Cooldown timing is handled by IDLE detecting the playing→finished
-        # transition (context._was_playing), not here.
+        # transition (context.was_playing), not here.
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
         return State.IDLE, context

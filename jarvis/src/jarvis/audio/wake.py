@@ -23,8 +23,8 @@ import numpy as np
 
 from jarvis.audio.capture import BLOCK_MS, SAMPLE_RATE, Capturer
 
-DEFAULT_THRESHOLD = 0.5
-DEFAULT_VAD_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = 0.7
+DEFAULT_VAD_THRESHOLD = 0.6
 HEY_JARVIS_MODEL = "hey_jarvis_v0.1.onnx"
 
 # XLSR wake word constants

@@ -450,16 +450,20 @@ class JarvisGUI:
             pass
 
     def _launch_jarvis(self) -> bool:
+        import subprocess as _sp
         if _is_running():
-            # Kill stale process and start fresh so GUI owns the subprocess
-            self._log("Reiniciando Jarvis...")
-            _send_signal(signal.SIGTERM)
+            # Kill stale process tree and start fresh
+            self._log("Matando procesos Jarvis viejos...")
+            pid = _read_pid()
+            if pid is not None:
+                try:
+                    os.kill(-pid, signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
+            _sp.run(["pkill", "-9", "-f", "jarvis start"], capture_output=True)
+            _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True)
             import time as _t
             _t.sleep(1)
-            # Force kill any remaining jarvis processes
-            import subprocess as _sp
-            _sp.run(["pkill", "-f", "jarvis start"], capture_output=True)
-            _t.sleep(0.5)
 
         # Ensure state is clean before launching
         self._reset_switch_state()
@@ -501,6 +505,7 @@ class JarvisGUI:
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
+                preexec_fn=os.setsid,  # own process group for clean tree kill
             )
             self._is_on = True
             self._log(f"Jarvis PID: {self._jarvis_proc.pid}")
@@ -513,11 +518,33 @@ class JarvisGUI:
         return False  # don't repeat timer
 
     def _stop_jarvis(self) -> None:
-        if _send_signal(signal.SIGUSR1):
-            self._log("Señal SIGUSR1 enviada (off)")
-        elif self._jarvis_proc:
-            self._jarvis_proc.terminate()
-            self._log("Proceso terminado")
+        """Kill Jarvis and ALL its child processes (whisper-cli, gst, etc.)."""
+        import subprocess as _sp
+        killed = False
+        # Kill by PID file — the whole process tree
+        pid = _read_pid()
+        if pid is not None:
+            try:
+                # Kill the process group (negative PID = kill group)
+                os.kill(-pid, signal.SIGTERM)
+                killed = True
+            except (ProcessLookupError, OSError):
+                pass
+        # Also kill our direct subprocess if we own it
+        if self._jarvis_proc and self._jarvis_proc.poll() is None:
+            try:
+                os.kill(-self._jarvis_proc.pid, signal.SIGTERM)
+                killed = True
+            except (ProcessLookupError, OSError):
+                pass
+        # Nuclear option: kill any remaining jarvis-related processes
+        _sp.run(["pkill", "-f", "jarvis"], capture_output=True)
+        _sp.run(["pkill", "-f", "whisper-cli"], capture_output=True)
+        _sp.run(["pkill", "-f", "gst-launch.*jarvis"], capture_output=True)
+        if killed:
+            self._log("Jarvis + hijos terminados")
+        else:
+            self._log("No había procesos Jarvis activos")
         self._is_on = False
         self._update_ui()
 

@@ -138,13 +138,27 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
         app_raw = entities.get("app", "")
         # Strip common Spanish articles/determiners so "la terminal" → "terminal"
         app_clean = re.sub(r"^(el|los?|las?|un|unos?|unas?)\s+", "", app_raw).strip()
-        if app_clean not in app_allowlist:
+        # Reject overly long app names (likely LLM hallucinated text)
+        if len(app_clean) > 30:
+            invalid.append("app")
+        elif app_clean not in app_allowlist:
             invalid.append("app")
 
     if intent.intent == "open_url":
-        parsed = urlparse(entities.get("url", ""))
+        url = entities.get("url", "")
+        parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             invalid.append("url")
+        else:
+            # Extract hostname (strip port) for domain checks
+            host = parsed.netloc.split(":")[0]
+            # Reject URLs that are just random text with no real domain
+            # Allow localhost but require dot for other domains
+            if "." not in host and host != "localhost":
+                invalid.append("url")
+            # Reject suspiciously long URLs (likely LLM hallucinated text)
+            elif len(url) > 200:
+                invalid.append("url")
 
     # execute: basic safety — reject extremely dangerous patterns
     if intent.intent == "execute":

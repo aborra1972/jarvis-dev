@@ -413,7 +413,7 @@ def build_pipeline(
         _ollama = OllamaProvider(
             model=config.INTERPRETER_LLM_MODEL,
             base_url=config.OLLAMA_BASE_URL,
-            timeout=config.GEMINI_TIMEOUT_S,
+            timeout=config.OLLAMA_TIMEOUT_S,
         )
         if provider_mode == "gemini" and config.GEMINI_API_KEY:
             _provider = GeminiProvider(

@@ -20,3 +20,4 @@ logs/
 
 # Environment secrets (API keys)
 .env
+speaker_embedding.json

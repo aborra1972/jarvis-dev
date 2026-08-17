@@ -459,8 +459,11 @@ def _ensure_ollama_running() -> None:
     """Start Ollama if not running. Blocks until healthy or timeout."""
     import socket
     import subprocess
+    from urllib.parse import urlparse
 
-    host, port = "127.0.0.1", 11434
+    parsed = urlparse(config.OLLAMA_BASE_URL)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 11434
 
     # Quick check: is Ollama already listening?
     try:

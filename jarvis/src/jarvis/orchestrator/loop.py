@@ -36,7 +36,7 @@ from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
 
 WAKE_TIMEOUT_S = 30.0
-TTS_COOLDOWN_S = 1.5  # reduced from 3.0s — speaker hardware settles faster
+TTS_COOLDOWN_S = 0.5  # reduced from 1.5s — speaker hardware settles faster
 MIC_CLOSE_DELAY_S = 0.3  # reduced from 1.5s — close mic quickly after user stops talking
 
 REASK_1 = "Disculpe, señor, no comprendí. ¿Podría repetir?"
@@ -150,7 +150,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         except Exception:
             pass  # best effort — don't block on beep failure
         # Wait for beep to fully play and speakers to settle
-        time.sleep(0.8)
+        time.sleep(0.2)
         # Flush wake detector buffer and restart mic for command capture
         if hasattr(pipeline.wake, 'flush'):
             pipeline.wake.flush()
@@ -174,13 +174,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         time.sleep(MIC_CLOSE_DELAY_S)
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
-        # Ack beep: instant feedback that Jarvis heard the command and is
-        # processing it. Best-effort; failures are silent.
-        try:
-            if hasattr(pipeline.speaker, 'playback') and hasattr(pipeline.speaker.playback, 'play_ack_beep'):
-                pipeline.speaker.playback.play_ack_beep()
-        except Exception:
-            pass
+        # Ack beep DISABLED — visual feedback in GUI is sufficient and avoids
+        # the 60ms audio delay + speaker hardware latency.
+        # To re-enable, uncomment: pipeline.speaker.playback.play_ack_beep()
         interpretation = pipeline.interpreter(transcript)
         context.transcript = transcript
         context.interpretation = interpretation

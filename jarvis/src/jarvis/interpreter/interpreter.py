@@ -65,6 +65,14 @@ def resolve_intent(
     # 2. LLM fallback for everything else (non-destructive).
     if provider is None:
         return Interpretation(needs_reask=True, reason="no_provider")
+
+    # Truncate long transcripts to avoid feeding noise/radio to the LLM.
+    # 200 chars is enough for any real voice command; anything longer is
+    # likely background noise that Whisper captured by mistake.
+    MAX_TRANSCRIPT_CHARS = 200
+    if len(surface) > MAX_TRANSCRIPT_CHARS:
+        surface = surface[:MAX_TRANSCRIPT_CHARS]
+
     try:
         intent = llm.resolve(surface, schema.build_system_prompt(), provider)
     except schema.SchemaError as exc:

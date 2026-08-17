@@ -40,6 +40,10 @@ _APP_COMMANDS: dict[str, str] = {
     "spotify": "spotify",
 }
 
+# Apps that need to run INSIDE a terminal (not just open gnome-terminal).
+# The executor uses "gnome-terminal -- <app>" for these.
+_TERMINAL_APPS: frozenset[str] = frozenset({"vim", "nano", "htop"})
+
 # --- Execute security: allowlist + operator blocklist -------------------------
 
 # Safe binaries the LLM is allowed to generate commands for.
@@ -96,9 +100,12 @@ def open_app(intent: Intent, session: object) -> ActionResult:
     invalid = schema.validate_entities(intent, config.ALLOWED_APPS)
     if invalid:
         return ActionResult(ok=False, spoken="Esa aplicación no está permitida, señor.")
-    # Resolve friendly name to actual command
-    command = _APP_COMMANDS.get(app, app)
-    code, _ = base.safe_run([command])
+    # Terminal apps: run inside gnome-terminal, not just open an empty terminal
+    if app in _TERMINAL_APPS:
+        code, _ = base.safe_run(["gnome-terminal", "--", app])
+    else:
+        command = _APP_COMMANDS.get(app, app)
+        code, _ = base.safe_run([command])
     if code != 0:
         return ActionResult(ok=False, spoken="Lo lamento, señor, no pude abrir esa aplicación.")
     return ActionResult(ok=True, spoken=f"Abriendo {app}, señor.")

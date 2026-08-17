@@ -83,6 +83,7 @@ class Pipeline:
     switch_state: Callable[[], bool] | None = None
     transcript_log: object | None = None
     ollama_provider: object | None = None  # for keepalive
+    llm_provider: object | None = None  # for fallback notification
     dictation: DictationManager | None = None  # voice-to-text injection
     speaker_verifier: object | None = None  # speaker verification
 
@@ -190,8 +191,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # --- SPEAKER VERIFICATION ---
         # Check if the voice matches the enrolled speaker
         if pipeline.speaker_verifier is not None and pipeline.speaker_verifier.is_enrolled():
-            # Get the audio that was just captured
-            audio = pipeline.capture.last_audio()
+            # Get the audio that was just captured (duck-typed for fakes)
+            last_audio_fn = getattr(pipeline.capture, "last_audio", None)
+            audio = last_audio_fn() if callable(last_audio_fn) else None
             if audio is not None:
                 is_match, similarity = pipeline.speaker_verifier.verify(audio)
                 if not is_match:
@@ -236,6 +238,20 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # To re-enable, uncomment: pipeline.speaker.playback.play_ack_beep()
         _write_fsm_state("thinking", transcript[:50])
         interpretation = pipeline.interpreter(transcript)
+
+        # --- FALLBACK NOTIFICATION ---
+        # Check if LLM provider fell back (e.g. Gemini quota → Ollama)
+        if pipeline.llm_provider is not None:
+            from jarvis.interpreter.llm import FallbackProvider
+            if isinstance(pipeline.llm_provider, FallbackProvider):
+                if pipeline.llm_provider._fallback_notified:
+                    # Notify once, then reset flag
+                    pipeline.llm_provider._fallback_notified = False
+                    pipeline.speaker.speak(
+                        "Señor, se agotaron los créditos de Gemini. "
+                        "Estoy usando inteligencia local ahora."
+                    )
+
         context.transcript = transcript
         context.interpretation = interpretation
         step = pipeline.session.next_step(interpretation)
@@ -474,6 +490,7 @@ def build_pipeline(
 
     # Wire LLM provider for interpreter (ADR-2: Ollama = Jarvis's brain)
     _ollama = None
+    _llm_provider = None
     if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
         from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
         provider_mode = config.LLM_PROVIDER
@@ -501,6 +518,7 @@ def build_pipeline(
         def _interpret_with_llm(text: str, _prov=_provider) -> Interpretation:
             return resolve_intent(text, provider=_prov)
         interpreter = _interpret_with_llm
+        _llm_provider = _provider  # store for fallback notification
 
     return Pipeline(
         clock=RealClock(),
@@ -515,6 +533,7 @@ def build_pipeline(
         switch_state=switch_state,
         transcript_log=transcript_log,
         ollama_provider=_ollama if interpreter is not resolve_intent else None,
+        llm_provider=_llm_provider if interpreter is not resolve_intent else None,
         dictation=DictationManager(),
         speaker_verifier=_init_speaker_verifier(),
     )

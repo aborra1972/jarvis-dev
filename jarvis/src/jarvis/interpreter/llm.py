@@ -217,12 +217,20 @@ class FallbackProvider:
     """Try primary provider first, fall back to secondary on any failure.
 
     Used for auto mode: Gemini (fast, cloud) → Ollama (local, offline).
+    Notifies via callback when fallback happens (for TTS notification).
     """
 
-    def __init__(self, primary: IntentProvider, secondary: IntentProvider) -> None:
+    def __init__(
+        self,
+        primary: IntentProvider,
+        secondary: IntentProvider,
+        on_fallback: callable = None,
+    ) -> None:
         self._primary = primary
         self._secondary = secondary
+        self._on_fallback = on_fallback
         self.last_provider: str = "primary"
+        self._fallback_notified: bool = False
 
     def resolve(self, prompt: str, system: str) -> dict:
         try:
@@ -231,9 +239,20 @@ class FallbackProvider:
             return result
         except Exception as exc:
             logger.warning("Primary provider failed, falling back to secondary: %s", exc)
+            # Notify once (not every request)
+            if self._on_fallback and not self._fallback_notified:
+                self._fallback_notified = True
+                try:
+                    self._on_fallback(str(exc))
+                except Exception:
+                    pass  # don't fail on notification
             result = self._secondary.resolve(prompt, system)
             self.last_provider = "secondary"
             return result
+
+    def reset_fallback_notification(self) -> None:
+        """Reset fallback notification flag (e.g. when quota resets)."""
+        self._fallback_notified = False
 
 
 def build_opencode_command(

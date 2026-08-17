@@ -141,7 +141,12 @@ def gather_utterance(
 
 
 def write_wav(path, blocks: list[np.ndarray], sample_rate: int = SAMPLE_RATE) -> None:
-    """Write float32 blocks to a mono 16-bit WAV file."""
+    """Write float32 blocks to a mono 16-bit WAV file.
+
+    No-op if blocks is empty (guards against silence-only captures).
+    """
+    if not blocks:
+        return
     data = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
     pcm = np.clip(data, -1.0, 1.0)
     pcm16 = (pcm * 32767).astype(np.int16)

@@ -128,3 +128,53 @@ def test_ask_query_with_verb_inside_entity() -> None:
     assert intent is not None
     assert intent.intent == "ask"
     assert intent.entities["query"] == "como se configura el agente"
+
+
+# --- golden gate expansion: common git/dev commands ---------------------------
+def test_git_status_fast_path() -> None:
+    intent = _g("mostrá el estado")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "git status"}
+
+
+def test_git_status_variant() -> None:
+    intent = _g("mirá el estado")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "git status"}
+
+
+def test_git_commit_with_message() -> None:
+    intent = _g('creá un commit fix login')
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": 'git commit -m "fix login"'}
+
+
+def test_git_commit_no_message() -> None:
+    intent = _g("creá un commit")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "git commit"}
+
+
+def test_git_push_fast_path() -> None:
+    intent = _g("subí los cambios")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "git push"}
+
+
+def test_make_clean_fast_path() -> None:
+    intent = _g("limpiá")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "make clean"}
+
+
+def test_make_build_fast_path() -> None:
+    intent = _g("compilá")
+    assert intent is not None
+    assert intent.intent == "execute"
+    assert intent.entities == {"command": "make build"}

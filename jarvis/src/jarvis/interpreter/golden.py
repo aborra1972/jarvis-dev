@@ -86,6 +86,25 @@ _CREATE_DOC_WRITE = re.compile(
     rf"^{_verb_alt('escribir')} (?:un |una |el |la )?(?:documento|doc|archivo|nota|txt)(?: (.*))?$"
 )
 
+# --- common git/dev commands (fast-path to avoid LLM) -----------------------
+# These are common enough to warrant golden patterns; saves ~1-5s per call.
+_GIT_STATUS = re.compile(
+    rf"^(?:{_verb_alt('mostrar')} (?:el )?estado|{_verb_alt('mirar')} (?:el )?estado"
+    rf"|{_verb_alt('chequear')} (?:el )?estado)$"
+)
+_GIT_COMMIT = re.compile(
+    rf"^{_verb_alt('crear')} (?:un )?(?:commit|commitear)(?: (.*))?$"
+)
+_GIT_PUSH = re.compile(
+    rf"^{_verb_alt('subir')} (?:los )?(?:cambios|commits|el código)(?: (.*))?$"
+)
+_MAKE_CLEAN = re.compile(
+    rf"^{_verb_alt('limpiar')}(?: (?:todo|el proyecto|build))?$"
+)
+_MAKE_BUILD = re.compile(
+    rf"^{_verb_alt('compilar')}(?: (?:el proyecto|todo))?$"
+)
+
 
 def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
     # Empty repo means "the active project" (delegated to orchestrator, PR3).
@@ -102,6 +121,29 @@ def _single_group(key: str) -> Callable[[re.Match[str]], dict[str, str]]:
     return extract
 
 
+def _git_status_extract(m: re.Match[str]) -> dict[str, str]:
+    return {"command": "git status"}
+
+
+def _git_commit_extract(m: re.Match[str]) -> dict[str, str]:
+    msg = m.group(1).strip() if m.group(1) else ""
+    if msg:
+        return {"command": f'git commit -m "{msg}"'}
+    return {"command": "git commit"}
+
+
+def _git_push_extract(m: re.Match[str]) -> dict[str, str]:
+    return {"command": "git push"}
+
+
+def _make_clean_extract(m: re.Match[str]) -> dict[str, str]:
+    return {"command": "make clean"}
+
+
+def _make_build_extract(m: re.Match[str]) -> dict[str, str]:
+    return {"command": "make build"}
+
+
 # (pattern, intent, entity extractor) — first match wins; repo patterns must
 # precede open_app so "abrir el repo X" never falls into the app fast path.
 FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], dict[str, str]]], ...] = (
@@ -110,6 +152,11 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_OPEN_REPO_POINTER, "open_repo", lambda m: {"repo": ""}),
     (_CREATE_DOC, "create_doc", _single_group("text")),
     (_CREATE_DOC_WRITE, "create_doc", _single_group("text")),
+    (_GIT_STATUS, "execute", _git_status_extract),
+    (_GIT_COMMIT, "execute", _git_commit_extract),
+    (_GIT_PUSH, "execute", _git_push_extract),
+    (_MAKE_CLEAN, "execute", _make_clean_extract),
+    (_MAKE_BUILD, "execute", _make_build_extract),
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),

@@ -29,11 +29,12 @@
 - 🎯 Wake word personalizado "jarvis" con tu pronunciación
 
 **Stack tecnológico:**
-- **STT**: Whisper.cpp (whisper small/medium)
+- **STT**: Whisper.cpp (tiny/small/medium) — tiny para máxima velocidad
 - **TTS**: Edge TTS (es-MX-JorgeNeural) + Piper (offline fallback)
+- **LLM**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
 - **Wake Word**: wav2vec2-XLSR + LogisticRegression (ONNX)
 - **Acciones**: OpenCode serve + Python executors
-- **GUI**: tkinter (panel de control flotante)
+- **GUI**: GTK3 (panel de control con estado en tiempo real)
 
 ---
 
@@ -173,11 +174,17 @@ El panel de control es una ventana flotante que aparece en la esquina superior d
 - **Media (0.4-0.6)**: Balance entre sensibilidad y falsos positivos (recomendado)
 - **Alta (0.7-0.9)**: Detecta fácil pero puede activarse con ruido
 
-### Indicador de estado
+### Indicador de estado en tiempo real
 
-- **● ACTIVO** (verde): Jarvis está escuchando
-- **● INACTIVO** (rojo): Jarvis está detenido
-- **Iniciando...**: Esperando que Jarvis arranque
+El panel muestra qué está haciendo Jarvis:
+
+- **● ESCUCHANDO**: Esperando wake word "JARVIS"
+- **● ESCUCHANDO: [texto]**: Grabando tu comando
+- **● PENSANDO**: Procesando tu comando (LLM)
+- **● EJECUTANDO: [comando]**: Ejecutando la acción
+- **● CONFIRMANDO**: Esperando confirmación para acción destructiva
+- **● HABLANDO**: Jarvis está hablando
+- **● APAGADO**: Modo off — diga "jarvis on"
 
 ---
 
@@ -239,7 +246,7 @@ Algunos comandos destructivos piden confirmación:
 
 ### Archivo de configuración
 
-`jarvis/src/jarvis/config.py` contiene todas las opciones:
+`jarvis/src/jarvis/config.py` contiene todas las opciones. Podés sobreescribirlas con `.env` en la raíz del repo:
 
 ```python
 # Wake word
@@ -259,6 +266,12 @@ EDGE_VOICE = "es-MX-JorgeNeural"
 # STT (Whisper)
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1               # Beam size (1=rápido, 5=preciso)
+STT_USE_TINY = False           # True: usa ggml-tiny.bin (~2-5x más rápido)
+
+# LLM (opciones de proveedor)
+LLM_PROVIDER = "local"         # "local" | "gemini" | "auto"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_TIMEOUT_S = 15.0        # cold start necesita tiempo
 ```
 
 ### Cambiar la sensibilidad

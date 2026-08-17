@@ -9,6 +9,7 @@ URL).
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -170,6 +171,37 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
     return invalid
 
 
+def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None) -> Intent:
+    """Fuzzy-correct the ``app`` entity for open_app intents.
+
+    Uses ``difflib.get_close_matches`` with a high cutoff (0.6) to match
+    Whisper misheard app names (e.g. "chromio" → "chromium"). Only the
+    ``app`` entity is corrected; other entities pass through unchanged.
+    Returns a NEW Intent (frozen dataclass). If no close match is found,
+    the intent is returned unchanged (``validate_entities`` will reject it).
+    """
+    if intent.intent != "open_app" or app_allowlist is None:
+        return intent
+
+    app_raw = intent.entities.get("app", "")
+    # Strip common Spanish articles/determiners
+    app_clean = re.sub(r"^(el|los?|las?|un|unos?|unas?)\s+", "", app_raw).strip()
+
+    # Already valid — no correction needed
+    if app_clean in app_allowlist:
+        return intent
+
+    # Try fuzzy match with high cutoff
+    matches = difflib.get_close_matches(app_clean, app_allowlist, n=1, cutoff=0.6)
+    if matches:
+        corrected = matches[0]
+        new_entities = {**intent.entities, "app": corrected}
+        from dataclasses import replace
+        return replace(intent, entities=new_entities)
+
+    return intent
+
+
 def build_system_prompt() -> str:
     """JSON-only system prompt: the 16-command allowlist, schema, and rules."""
     intent_list = "|".join(sorted(ALLOWED_INTENTS))
@@ -196,10 +228,17 @@ def build_system_prompt() -> str:
         "  'instalá nginx' → intent='execute', command='sudo apt-get install -y nginx'\n"
         "  'listá archivos src' → intent='execute', command='ls src'\n"
         "  'editá el archivo config.json' → intent='execute', command='nano config.json'\n"
+        "  'poné en marcha el servidor' → intent='execute', command='make run'\n"
+        "  'mandale un commit' → intent='execute', command='git commit'\n"
+        "  'haceme un backup' → intent='execute', command='cp -r . .backup'\n"
+        "  'tirá todo' → intent='execute', command='rm -rf *'\n"
         "- unknown: only when the request truly cannot map to any intent.\n"
         "- entities: fill only fields that apply — query for questions, repo for a repository, app for "
         "an application, url for a web address, text for free-form content, command for execute. "
         "Keep 'este proyecto' style references as repo 'este proyecto'.\n"
         "- confidence: 0.0-1.0; below 0.6 the assistant must ask again.\n"
+        "Rioplatense verbs: abrí/abrir, cerrá/cerrar, busqué/buscar, creá/crear, borrá/borrar, "
+        "corré/correr, instalá/instalar, listá/listar, editá/editar, tirá/tirar, mandá/mandar, "
+        "hacé/hacer, poné/poner, sacá/sacar, andá/andar.\n"
         f"Domains:\n{domain_lines}\n"
     )

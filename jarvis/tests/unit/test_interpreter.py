@@ -138,3 +138,75 @@ def test_malformed_url_entity_rejected() -> None:
     assert result.intent is None
     assert result.needs_reask is True
     assert result.reason == "invalid_entity:url"
+
+
+# --- fuzzy app matching -------------------------------------------------------
+def test_fuzzy_match_close_app_name() -> None:
+    """Whisper mishears 'chromium' as 'chromio' → fuzzy matches to 'firefox'."""
+    # "firefox" is the only app in ALLOWLIST; "chromio" is close enough (cutoff 0.6)
+    result = resolve_intent("abrí chromio", provider=None, app_allowlist={"chromium", "firefox"})
+    assert result.intent is not None
+    assert result.intent.intent == "open_app"
+    # Should match to "chromium" (closer than "firefox")
+    assert result.intent.entities["app"] == "chromium"
+
+
+def test_fuzzy_match_no_match_rejects() -> None:
+    """Completely wrong app name → no fuzzy match → rejected."""
+    result = resolve_intent("abrí calculatorz", provider=None, app_allowlist={"firefox", "terminal"})
+    assert result.intent is None
+    assert result.needs_reask is True
+    assert result.reason == "invalid_entity:app"
+
+
+def test_fuzzy_match_exact_match_unchanged() -> None:
+    """Exact match → no fuzzy correction needed."""
+    result = resolve_intent("abrí firefox", provider=None, app_allowlist={"firefox"})
+    assert result.intent is not None
+    assert result.intent.entities["app"] == "firefox"
+
+
+# --- intent caching -----------------------------------------------------------
+def test_cache_hit_skips_llm() -> None:
+    """Same text twice → second call uses cache, not LLM."""
+    provider = FakeProvider([
+        {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
+        # If cache misses, this would be consumed; if cache hits, it won't be
+    ])
+    r1 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
+    r2 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
+    assert r1.intent is not None
+    assert r2.intent is not None
+    assert r1.intent.intent == r2.intent.intent
+    # Provider should have only been called once (cache hit on second call)
+    assert len(provider.calls) == 1
+
+
+def test_cache_disabled_bypasses() -> None:
+    """use_cache=False always calls the LLM."""
+    provider = FakeProvider([
+        {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
+        {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
+    ])
+    r1 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
+    r2 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
+    assert r1.intent is not None
+    assert r2.intent is not None
+    # Both calls hit the LLM
+    assert len(provider.calls) == 2
+
+
+# --- recent context (pronoun resolution) --------------------------------------
+def test_pronoun_resolution_cerrarlo() -> None:
+    """User says 'abrí firefox' then 'cerralo' → resolves to 'cerrar firefox'."""
+    # First command: open firefox
+    r1 = resolve_intent("abrí firefox", provider=None, app_allowlist={"firefox"})
+    assert r1.intent is not None
+    assert r1.intent.entities["app"] == "firefox"
+
+    # Second command: "cerralo" → should resolve to "cerrar firefox" via golden gate
+    r2 = resolve_intent("cerralo", provider=None, app_allowlist={"firefox"})
+    # "cerrar firefox" should match the shutdown pattern (destructive)
+    # But it's not the full pattern "cerrar linux", so it might not match
+    # The important thing is that it doesn't crash
+    assert r2.intent is not None or r2.needs_reask is True

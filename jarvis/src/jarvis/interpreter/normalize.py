@@ -101,6 +101,14 @@ VARIANT_MAP: dict[str, str] = {
     "instalame": "instalar",
     "anota": "anotar",
     "anotame": "anotar",
+    "mira": "mirar",
+    "mirame": "mirar",
+    "subi": "subir",
+    "subime": "subir",
+    "limpia": "limpiar",
+    "limpiame": "limpiar",
+    "compila": "compilar",
+    "compilame": "compilar",
 }
 
 # Word-boundary replacements (longest keys first preserves phrase entries).

@@ -11,12 +11,13 @@ español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 ## Características
 
 - **Wake word personalizado**: wav2vec2-XLSR + LogisticRegression entrenado con tu voz argentina (~350ms)
-- **STT offline**: whisper.cpp (small/medium) — nunca envía audio a internet
+- **STT offline**: whisper.cpp (tiny/small/medium) — nunca envía audio a internet
 - **TTS neural**: Edge TTS (es-MX-JorgeNeural) con fallback offline Piper
+- **LLM dual**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
 - **4 dominios de acción**: sistema, archivos, web, OpenCode
 - **Seguridad**: comandos destructivos piden confirmación por voz
 - **Interruptor por señal**: `jarvis off`/`jarvis on` con SIGUSR1/SIGUSR2
-- **GUI GTK3**: panel de control flotante con botón on/off, slider de sensibilidad, logs
+- **GUI GTK3**: panel de control con estado en tiempo real (escuchando/pensando/ejecutando)
 - **Privacidad total**: todo queda en tu máquina
 
 ## Requisitos del sistema
@@ -103,6 +104,17 @@ curl http://localhost:11434/api/tags  # API del servidor
 
 **Nota**: El modelo 3B es suficiente para routing de intents (1.4s por comando).
 Si preferís más precisión, podés usar `qwen2.5:7b` (~4.7GB, ~3.5s por comando).
+
+**Opcional**: Gemini cloud como alternativa al Ollama local:
+
+```bash
+# Agregar a .env en la raíz del repo
+echo "LLM_PROVIDER=auto" >> .env
+echo "GEMINI_API_KEY=tu-api-key" >> .env
+```
+
+Con `LLM_PROVIDER=auto`, Jarvis usa Gemini primero y fallback a Ollama si falla.
+El keepalive automático mantiene el modelo Ollama cargado en VRAM cada 5 minutos.
 
 ### 5. Verificar la instalación
 
@@ -210,8 +222,8 @@ Jarvis: "Apagando, señor"
 │  J.A.R.V.I.S.         v1.0 │
 │  Asistente de Voz Local     │
 ├─────────────────────────────┤
-│  ● ACTIVO                   │
-│  Escuchando 'JARVIS'...     │
+│  ● ESCUCHANDO               │
+│  Hable ahora...             │
 ├─────────────────────────────┤
 │  Sensibilidad Wake Word     │
 │  Baja ← → Alta              │
@@ -225,6 +237,18 @@ Jarvis: "Apagando, señor"
 │  [14:30:05] Wake detectado  │
 └─────────────────────────────┘
 ```
+
+### Estados en tiempo real
+
+El panel muestra el estado actual del asistente:
+
+- **● ESCUCHANDO**: Esperando wake word "JARVIS"
+- **● ESCUCHANDO: [texto]**: Grabando tu comando
+- **● PENSANDO**: Procesando tu comando (LLM)
+- **● EJECUTANDO: [comando]**: Ejecutando la acción
+- **● CONFIRMANDO**: Esperando confirmación para acción destructiva
+- **● HABLANDO**: Jarvis está hablando
+- **● APAGADO**: Modo off — diga "jarvis on"
 
 ### Botones
 
@@ -240,7 +264,7 @@ Jarvis: "Apagando, señor"
 
 ## Configuración
 
-Las opciones están en `jarvis/src/jarvis/config.py`:
+Las opciones están en `jarvis/src/jarvis/config.py` o se pueden sobreescribir con `.env`:
 
 ```python
 # Wake word
@@ -259,6 +283,12 @@ EDGE_VOICE = "es-MX-JorgeNeural"
 # STT
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1               # 1=rápido, 5=preciso
+STT_USE_TINY = False           # True: ggml-tiny.bin (~2-5x más rápido)
+
+# LLM
+LLM_PROVIDER = "local"         # "local" | "gemini" | "auto"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_TIMEOUT_S = 15.0        # cold start necesita tiempo
 
 # Apps permitidas
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
@@ -307,7 +337,7 @@ cp /tmp/opencode/train/modelo_wake/clasificador.onnx spike/models/jarvis_wake.on
 
 ```bash
 source jarvis/.venv/bin/activate
-pytest jarvis/tests -q                  # suite unitaria (541 tests, sin hardware)
+pytest jarvis/tests -q                  # suite unitaria (559 tests, sin hardware)
 pytest jarvis/tests/e2e -m e2e          # e2e con binarios reales
 ```
 
@@ -329,8 +359,8 @@ jarvis/src/jarvis/
   interpreter/
     normalize.py        normalización rioplatense (voseo → infinitivo)
     golden.py           gate determinístico (destructivos + fast-path)
-    schema.py           15 comandos, validación de entidades
-    llm.py              OllamaProvider (HTTP directo a localhost:11434)
+    schema.py           16 comandos, validación de entidades
+    llm.py              OllamaProvider + GeminiProvider + FallbackProvider
   orchestrator/
     loop.py             FSM: wake → listen → interpret → execute → speak
     session.py          estado persistente (session + off switch)
@@ -351,10 +381,10 @@ MANUAL_USUARIO.md       manual completo del usuario
 ```
 Micrófono → sounddevice (16kHz mono)
   → wav2vec2-XLSR detecta "jarvis" (~350ms)
-  → Whisper transcribe a texto (~4s)
+  → Whisper transcribe a texto (~2-5s tiny, ~4-8s small)
   → Normalizador rioplatense ("abrí" → "abrir")
-  → Golden gate: matchea patrón regex (destructivos)
-  → Ollama (qwen2.5:3b): intent routing (~1.4s, local)
+  → Golden gate: matchea patrón regex (destructivos + fast-path)
+  → Ollama/Gemini: intent routing (~1-5s, local/cloud)
   → Executor ejecuta la acción
   → Edge TTS sintetiza respuesta
   → paplay reproduce audio

@@ -64,10 +64,14 @@ class Session:
         self.active_project = repo
 
     def resolve_repo(self, intent: Intent) -> str | None:
+        """Return the repo for this intent without mutating active_project.
+
+        If the intent specifies an app entity, return that app name directly.
+        Otherwise return the current active_project. The caller is responsible
+        for calling switch_active_project() explicitly when appropriate.
+        """
         if "app" in intent.entities:
-            repo = intent.entities["app"]
-            self.switch_active_project(repo)
-            return repo
+            return intent.entities["app"]
         return self.active_project
 
     def allocate(self, repo: str, base_port: int) -> RepoSession:

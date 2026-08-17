@@ -94,11 +94,13 @@ def test_switch_active_project(tmp_path: Path) -> None:
     assert session.active_project == "firefox"
 
 
-def test_resolve_repo_explicit_app_switches(tmp_path: Path) -> None:
+def test_resolve_repo_explicit_app_returns_app(tmp_path: Path) -> None:
+    """resolve_repo returns the app entity without mutating active_project."""
     session = load_state(tmp_path / "state.json")
     intent = _intent(entities={"app": "firefox"})
     assert session.resolve_repo(intent) == "firefox"
-    assert session.active_project == "firefox"
+    # M3 fix: resolve_repo no longer mutates active_project
+    assert session.active_project is None
 
 
 def test_resolve_repo_uses_active_project(tmp_path: Path) -> None:

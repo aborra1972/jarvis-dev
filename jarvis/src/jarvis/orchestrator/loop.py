@@ -293,6 +293,10 @@ def _resolve_repo(pipeline: Pipeline, context: _Context) -> str | None:
     repo = pipeline.session.resolve_repo(context.interpretation.intent)
     if repo is None:
         return None
+    # Explicit switch: only when the intent specifies an app entity.
+    # resolve_repo no longer mutates active_project (M3 fix).
+    if "app" in context.interpretation.intent.entities:
+        pipeline.session.switch_active_project(repo)
     pipeline.session.allocate(repo, pipeline.base_port)
     return repo
 

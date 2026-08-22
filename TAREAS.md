@@ -19,7 +19,7 @@
 
 ## Fase 1: Diagnostico y Verificacion (Prioridad 1-2)
 
-### T-DIAG-01: Crear `jarvis diagnose` command
+### T-DIAG-01: Crear `jarvis diagnose` command [COMPLETADA]
 **Fuente**: NaomiProject/Naomi/diagnose.py
 **Archivos**: `jarvis/src/jarvis/diagnose.py`, `jarvis/src/jarvis/cli.py`
 **Que hacer**:
@@ -34,7 +34,7 @@
 - [ ] README.md actualizado con seccion de diagnostico
 - [ ] Tests basicos (mock de cada check)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-DIAG-02: Agregar `diagnose` al CLI
 **Archivos**: `jarvis/src/jarvis/cli.py`
@@ -46,7 +46,7 @@
 - [ ] `python -m jarvis diagnose` funciona
 - [ ] `--help` muestra el subcomando
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -62,7 +62,7 @@
 - [ ] `pip install -e .` instala silero-vad
 - [ ] `import silero_vad` funciona
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-VAD-02: Implementar Silero VAD en `capture.py`
 **Archivos**: `jarvis/src/jarvis/audio/capture.py`
@@ -76,7 +76,7 @@
 - [ ] Fallback a energy VAD funciona
 - [ ] Tests unitarios con audio simulado
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-CALIB-01: Calibracion de ruido ambiente al wake
 **Archivos**: `jarvis/src/jarvis/audio/capture.py`
@@ -90,7 +90,7 @@
 - [ ] Umbral se ajusta dinamicamente
 - [ ] Config option `AUDIO_CALIBRATE_MS`
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-FLUSH-01: Flush de buffer stale post-playback
 **Archivos**: `jarvis/src/jarvis/audio/capture.py` o `playback.py`
@@ -103,7 +103,7 @@
 - [ ] No hay falsos positivos post-playback
 - [ ] Config option `AUDIO_FLUSH_MS` (default 1000)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -122,7 +122,7 @@
 - [ ] Approval gate configurable
 - [ ] Tests para cada capa
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-SAFE-02: Agregar config de seguridad
 **Archivos**: `jarvis/src/jarvis/config.py`
@@ -134,7 +134,7 @@
 - [ ] Config options existen
 - [ ] Documentadas en README y MANUAL_USUARIO
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -153,7 +153,7 @@
 - [ ] Cache funciona (joblib)
 - [ ] Tests unitarios
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-NLU-02: Integrar NLU en el pipeline
 **Archivos**: `jarvis/src/jarvis/interpreter/golden.py`, `jarvis/src/jarvis/orchestrator/loop.py`
@@ -167,7 +167,7 @@
 - [ ] Fallback a LLM funciona
 - [ ] Config option `NLU_ENABLED` y `NLU_CONFIDENCE`
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -188,7 +188,7 @@
 - [ ] Wake word reinicia ciclo
 - [ ] Config option `FOLLOWUP_TIMEOUT_S`
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-DICT-01: Implementar `jarvis dictation` mode
 **Archivos**: `jarvis/src/jarvis/cli.py`, `jarvis/src/jarvis/dictation.py`
@@ -204,7 +204,7 @@
 - [ ] Sale con Ctrl+C o "para dictado"
 - [ ] Escribe texto en foco actual
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -222,7 +222,7 @@
 - [ ] Import con fallback funciona
 - [ ] Fuzzy matching usa rapidfuzz
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-REMIND-01: Modulo de recordatorios
 **Archivos**: `jarvis/src/jarvis/actions/reminders.py`
@@ -238,7 +238,7 @@
 - [ ] notify-send + TTS al vencer
 - [ ] Persistencia funciona
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -256,7 +256,7 @@
 - [ ] Whisper usa prompt con frases
 - [ ] Config option `STT_PROMPT`
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-HIST-01: Persistencia de conversacion atomica
 **Archivos**: `jarvis/src/jarvis/orchestrator/session.py`
@@ -271,7 +271,7 @@
 - [ ] Se carga al iniciar
 - [ ] No se corrompe con cortes
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -290,7 +290,7 @@
 - [ ] Notificacion al terminar
 - [ ] Tests para cada intent
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -298,7 +298,7 @@
 
 | Fase | Tareas | Completadas | Pendientes |
 |------|--------|-------------|------------|
-| 1. Diagnostico | 2 | 0 | 2 |
+| 1. Diagnostico | 2 | 2 | 0 |
 | 2. VAD y Audio | 4 | 0 | 4 |
 | 3. Seguridad | 2 | 0 | 2 |
 | 4. NLU | 2 | 0 | 2 |
@@ -306,16 +306,15 @@
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **0** | **17** |
+| **Total** | **17** | **2** | **15** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-DIAG-01**: Crear `jarvis diagnose` command
+**T-VAD-01**: Agregar Silero VAD como dependencia
 
-Es la primera tarea pendiente y la mas facil de verificar.
-Una vez completa, seguir con T-DIAG-02, luego Fase 2 (VAD), etc.
+Fase 1 (Diagnostico) completada. Seguir con Fase 2: VAD y Audio.
 
 ---
 

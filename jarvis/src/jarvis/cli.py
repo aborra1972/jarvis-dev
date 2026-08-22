@@ -15,7 +15,7 @@ from pathlib import Path
 
 from jarvis.orchestrator import loop
 
-COMMANDS = ("start", "stop", "off", "on", "clean", "logs", "say")
+COMMANDS = ("start", "stop", "off", "on", "clean", "logs", "say", "diagnose")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
         return loop.switch_on()
     if args.command == "clean":
         return loop.clean()
+    if args.command == "diagnose":
+        from jarvis import diagnose
+        return diagnose.main()
     print(f"{args.command}: not implemented yet (bootstrap skeleton)", file=sys.stderr)
     return 1
 

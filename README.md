@@ -10,15 +10,54 @@ español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 
 ## Características
 
-- **Wake word personalizado**: wav2vec2-XLSR + LogisticRegression entrenado con tu voz argentina (~350ms)
+- **Wake word personalizado**: openWakeWord con modelo custom rioplatense (~80ms, ~2-5% CPU)
 - **STT offline**: whisper.cpp (tiny/small/medium) — nunca envía audio a internet
 - **TTS neural**: Edge TTS (es-MX-JorgeNeural) con fallback offline Piper
 - **LLM dual**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
 - **4 dominios de acción**: sistema, archivos, web, OpenCode
-- **Seguridad**: comandos destructivos piden confirmación por voz
+- **Seguridad**: comandos destructivos piden confirmación por voz (15s timeout)
 - **Interruptor por señal**: `jarvis off`/`jarvis on` con SIGUSR1/SIGUSR2
 - **GUI GTK3**: panel de control con estado en tiempo real (escuchando/pensando/ejecutando)
 - **Privacidad total**: todo queda en tu máquina
+- **Dictation mode**: input de texto por voz en cualquier app (`jarvis dictation`)
+- **Multi-turn follow-up**: queda escuchando 10s después de responder para seguimientos
+- **NLU classifier**: TF-IDF + LogisticRegression para intents no destructivos (rápido, cacheado)
+- **`jarvis diagnose`**: verificación completa de mic, STT, TTS, wake word, Ollama antes de arrancar
+
+## Mejoras del estudio GitHub (2026-08-22)
+
+Se analizaron 10+ proyectos GitHub con stack similar. Ver `docs/github-jarvis-study.md` para el estudio completo.
+
+### Alto impacto — incorporado o planificado
+
+| # | Mejora | Fuente | Estado |
+|---|--------|--------|--------|
+| 1 | Silero VAD para corte de grabación | casha-cashu/jarvis | 🟡 Planificado |
+| 2 | Bash agent 3 capas de seguridad (~40 patrones) | casha-cashu/jarvis | 🟡 Planificado |
+| 3 | Multi-turn follow-up con timeout 10s | casha-cashu/jarvis | 🟡 Planificado |
+| 4 | Calibración de ruido ambiente al wake | GradByte/Jarvis-on-Linux | 🟡 Planificado |
+| 5 | Flush de buffer stale post-playback | GradByte/Jarvis-on-Linux | 🟡 Planificado |
+| 6 | Rapidfuzz para fuzzy matching | casha-cashu/jarvis | 🟡 Planificado |
+| 7 | NLU classifier (TF-IDF + LogReg) | casha-cashu/jarvis | 🟡 Planificado |
+| 8 | `jarvis diagnose` | NaomiProject/Naomi | 🟡 Planificado |
+
+### Medio impacto — Fase 2
+
+| # | Mejora | Fuente | Estado |
+|---|--------|--------|--------|
+| 9 | Dictation mode | casha-cashu/jarvis | ✅ Implementado |
+| 10 | Fish Audio TTS con emotion tags | GradByte/Jarvis-on-Linux | 🟡 Post-MVP |
+| 11 | VibeVoice TTS streaming | kalai4390/Local_Voice_Assistant | 🟡 Post-MVP |
+| 12 | Recordatorios por voz | casha-cashu/jarvis | 🟡 Post-MVP |
+| 13 | Standard phrases rioplatenses | NaomiProject/Naomi | 🟡 Post-MVP |
+| 14 | Persistencia de conversación atómica | casha-cashu/jarvis | 🟡 Post-MVP |
+| 15 | Agentes IA por voz expandidos | casha-cashu/jarvis + nuestro diseño | 🟡 Planificado |
+
+### Post-MVP — UI cinematográfica
+
+| # | Mejora | Fuente | Estado |
+|---|--------|--------|--------|
+| 16 | UI estilo Jarvis (orb animado, overlay, dashboard) | qartex/jarvis-desktop | 🟡 Post-MVP |
 
 ## Requisitos del sistema
 
@@ -126,13 +165,32 @@ python -m jarvis --help
 python -c "import sounddevice; print(sounddevice.query_devices())"
 ```
 
-### 5. Verificar el wake word entrenado
+### 6. Verificar el wake word entrenado
 
 ```bash
 ls spike/models/jarvis_wake.onnx
 ```
 
 Si falta, seguí la guía en `jarvis/docs/wake-word-training.md`.
+
+## Diagnóstico pre-start
+
+```bash
+# Verificar que todo está listo antes de arrancar
+source jarvis/.venv/bin/activate
+jarvis diagnose
+```
+
+Salida esperada:
+
+```
+✅ Micrófono: HDA Intel PCH (card 0, device 0)
+✅ Wake word: jarvis_wake.onnx cargado (threshold 0.5)
+✅ Whisper: ggml-small.bin presente (487MB)
+✅ Piper: modelo es_AR-daniela presente
+❌ Ollama: no corriendo (run: ollama serve &)
+✅ Audio output: paplay disponible
+```
 
 ## Uso rápido
 
@@ -148,10 +206,12 @@ Si falta, seguí la guía en `jarvis/docs/wake-word-training.md`.
 
 ```bash
 source jarvis/.venv/bin/activate
-jarvis start    # Iniciar el asistente
-jarvis off      # Apagar (mic liberado, no escucha)
-jarvis on       # Reanudar escucha
-jarvis clean    # Limpiar logs y audio temporal
+jarvis start        # Iniciar el asistente
+jarvis off          # Apagar (mic liberado, no escucha)
+jarvis on           # Reanudar escucha
+jarvis clean        # Limpiar logs y audio temporal
+jarvis diagnose     # Verificar configuración antes de arrancar
+jarvis dictation    # Modo dictado — input de texto por voz
 ```
 
 ### Desde otra terminal (señales)
@@ -174,8 +234,8 @@ kill -SIGUSR2 $(cat ~/.local/state/jarvis/jarvis.pid)
 | "abrí firefox" | Abre Firefox |
 | "abrí el explorador" | Abre Nemo (file manager) |
 | "abrí libreoffice" | Abre LibreOffice |
-| "cerrá linux" | Apaga la máquina (pide confirmación) |
-| "reiniciá linux" | Reinicia la máquina (pide confirmación) |
+| "cerrá linux" | Apaga la máquina (pide confirmación 15s) |
+| "reiniciá linux" | Reinicia la máquina (pide confirmación 15s) |
 | "apagate" | Jarvis se apaga |
 
 ### Archivos
@@ -200,6 +260,29 @@ kill -SIGUSR2 $(cat ~/.local/state/jarvis/jarvis.pid)
 | "mostrá el estado" | Estado del proyecto activo |
 | "ayuda" | Muestra ayuda |
 
+### Desarrollo (agentes IA por voz)
+
+| Comando | Acción |
+|---------|--------|
+| "implementá el test que falta" | Abre repo en OpenCode para implementar |
+| "revisá el PR abierto" | Revisa PR con agente de revisión |
+| "corregí los warnings del lint" | Corrección automática de warnings |
+| "creá un artifact" | Genera artifact en proyecto activo |
+
+### Multi-turn follow-up
+
+Después de responder, Jarvis queda escuchando 10s para seguimientos:
+
+```
+Tú: "JARVIS, abrí firefox"
+Jarvis: "Abriendo Firefox, señor"
+      [10s follow-up — queda escuchando]
+Tú: "buscá openwakeword en google"
+Jarvis: "Buscando 'openwakeword' en Google..."
+```
+
+Si decís "JARVIS" durante el follow-up, se reinicia el ciclo con un nuevo comando.
+
 ### Flujo de uso
 
 ```
@@ -215,11 +298,22 @@ Tú:  "sí"
 Jarvis: "Apagando, señor"
 ```
 
+### Dictation mode
+
+```bash
+jarvis dictation
+```
+
+Jarvis transcribe continuamente lo que decís y lo escribe donde esté el cursor.
+Ideal para redactar emails, documentos, o código sin tocar el teclado.
+
+Para salir, decí "pará dictado" o presioná Ctrl+C.
+
 ## Panel de control (GUI)
 
 ```
 ┌─────────────────────────────┐
-│  J.A.R.V.I.S.         v1.0 │
+│  J.A.R.V.I.S.         v2.0 │
 │  Asistente de Voz Local     │
 ├─────────────────────────────┤
 │  ● ESCUCHANDO               │
@@ -246,8 +340,9 @@ El panel muestra el estado actual del asistente:
 - **● ESCUCHANDO: [texto]**: Grabando tu comando
 - **● PENSANDO**: Procesando tu comando (LLM)
 - **● EJECUTANDO: [comando]**: Ejecutando la acción
-- **● CONFIRMANDO**: Esperando confirmación para acción destructiva
+- **● CONFIRMANDO**: Esperando confirmación para acción destructiva (15s timeout)
 - **● HABLANDO**: Jarvis está hablando
+- **● FOLLOW-UP**: Escuchando seguimiento (10s timeout)
 - **● APAGADO**: Modo off — diga "jarvis on"
 
 ### Botones
@@ -268,30 +363,52 @@ Las opciones están en `jarvis/src/jarvis/config.py` o se pueden sobreescribir c
 
 ```python
 # Wake word
-WAKE_ENGINE = "xslr"           # "xslr" (custom) o "openwakeword"
-WAKE_THRESHOLD = 0.5           # Sensibilidad (0.1-0.9)
-WAKE_XLSR_MODEL = SPIKE / "models" / "jarvis_wake.onnx"
+WAKE_ENGINE = "openwakeword"     # "openwakeword" o "xslr" (legacy)
+WAKE_THRESHOLD = 0.5             # Sensibilidad (0.1-0.9)
+WAKE_MODEL = SPIKE / "models" / "hey_jarvis.onnx"
 
 # Audio
 AUDIO_SAMPLE_RATE = 16000
-AUDIO_SILENCE_MS = 800         # Tiempo de corte por silencio
+AUDIO_BLOCK_MS = 80              # Tamaño de bloque (80ms @ 16kHz)
+AUDIO_SILENCE_MS = 800           # Tiempo de corte por silencio
+AUDIO_CALIBRATE_MS = 500         # Calibración de ruido ambiente al wake
+
+# VAD
+VAD_ENGINE = "silero"            # "silero" (recomendado) o "energy" (legacy)
+VAD_THRESHOLD = 0.5              # Umbral Silero VAD (0.0-1.0)
+VAD_MIN_SPEECH_MS = 250          # Duración mínima de habla
+VAD_MIN_SILENCE_MS = 500         # Duración mínima de silencio
 
 # TTS
-TTS_ENGINE = "edge"            # "edge" (neural) o "piper" (offline)
+TTS_ENGINE = "edge"              # "edge" (neural) o "piper" (offline)
 EDGE_VOICE = "es-MX-JorgeNeural"
 
 # STT
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
-WHISPER_BEAM = 1               # 1=rápido, 5=preciso
-STT_USE_TINY = False           # True: ggml-tiny.bin (~2-5x más rápido)
+WHISPER_BEAM = 1                 # 1=rápido, 5=preciso
+STT_USE_TINY = False             # True: ggml-tiny.bin (~2-5x más rápido)
+STT_PROMPT = ""                  # Domain prompt para bias de Whisper
 
 # LLM
-LLM_PROVIDER = "local"         # "local" | "gemini" | "auto"
+LLM_PROVIDER = "local"           # "local" | "gemini" | "auto"
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_TIMEOUT_S = 15.0        # cold start necesita tiempo
+OLLAMA_TIMEOUT_S = 15.0          # cold start necesita tiempo
+
+# NLU Classifier
+NLU_ENABLED = True               # TF-IDF + LogReg para intents no destructivos
+NLU_CACHE = "~/.local/share/jarvis/nlu"
+NLU_CONFIDENCE = 0.65            # Umbral de confianza mínimo
+
+# Multi-turn
+FOLLOWUP_TIMEOUT_S = 10          # Timeout para follow-up después de hablar
+FOLLOWUP_WAKE = True             # Si wake word reinicia el ciclo
 
 # Apps permitidas
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
+
+# Seguridad
+SAFETY_GATE = "strict"           # "auto" | "strict" | "yolo"
+DANGEROUS_PATTERNS = 40          # ~40 patrones regex de peligro
 ```
 
 ### Cambiar la voz
@@ -310,7 +427,7 @@ El wake word fue entrenado con tu pronunciación argentina de "jarvis".
 
 - **Recall**: 96.7% (detecta "jarvis" 97 de 100 veces)
 - **Falsos positivos**: 0% en validación
-- **Latencia**: ~354ms por ventana de 2s
+- **Latencia**: ~80ms por ventana (openWakeWord)
 
 ### Re-entrenar
 
@@ -337,8 +454,8 @@ cp /tmp/opencode/train/modelo_wake/clasificador.onnx spike/models/jarvis_wake.on
 
 ```bash
 source jarvis/.venv/bin/activate
-pytest jarvis/tests -q                  # suite unitaria (559 tests, sin hardware)
-pytest jarvis/tests/e2e -m e2e          # e2e con binarios reales
+pytest jarvis/tests -q                  # suite unitaria (530+ tests, sin hardware)
+pytest jarvis/tests -m e2e -q           # e2e con binarios reales (3 tests)
 ```
 
 ## Arquitectura
@@ -346,54 +463,68 @@ pytest jarvis/tests/e2e -m e2e          # e2e con binarios reales
 ```
 spike/                  whisper.cpp / piper / modelos / binarios
 jarvis/src/jarvis/
-  config.py             paths, allowlists, parámetros de audio, Ollama
+  config.py             paths, allowlists, parámetros de audio, Ollama, VAD, NLU
   __main__.py           python -m jarvis entry point
-  cli.py                jarvis start/off/on/clean
+  cli.py                jarvis start/off/on/clean/diagnose/dictation
   audio/
-    wake.py             wav2vec2-XLSR + OpenWakeWord
-    capture.py          sounddevice + SilenceVAD
-    stt.py              whisper.cpp STT
+    wake.py             openWakeWord (hey_jarvis + custom rioplatense)
+    capture.py          sounddevice + Silero VAD + calibración ruido
+    stt.py              whisper-cli STT con domain prompt
     tts.py              Edge TTS + PiperTTS
     pipeline.py         UtteranceCapture, PiperSpeaker, MicSwitch
-    playback.py         paplay / gst-launch
+    playback.py         paplay / gst-launch + flush post-playback
   interpreter/
     normalize.py        normalización rioplatense (voseo → infinitivo)
-    golden.py           gate determinístico (destructivos + fast-path)
-    schema.py           16 comandos, validación de entidades
+    golden.py           gate determinístico (destructivos + fast-path + 3 capas seguridad)
+    nlu_classifier.py   TF-IDF + LogisticRegression (cacheado con joblib)
+    schema.py           15 comandos, validación de entidades
     llm.py              OllamaProvider + GeminiProvider + FallbackProvider
   orchestrator/
-    loop.py             FSM: wake → listen → interpret → execute → speak
+    loop.py             FSM: idle → listening → executing → speaking → follow-up → idle
     session.py          estado persistente (session + off switch)
-    confirm.py          confirmación destrucción por voz
+    confirm.py          confirmación destrucción por voz (15s timeout)
     supervisor.py       Clock, watchdog
   actions/
-    opencode.py         abrir repos en OpenCode
-    system.py           abrir apps del sistema
-    files.py            crear/editar archivos
+    opencode.py         abrir repos, implementar, revisar, crear artifacts
+    system.py           abrir apps del sistema + shutdown/reboot
+    files.py            crear documentos (new-only, nunca overwrite)
     web.py              buscar / abrir URLs
+    assistant_lifecycle.py  power_off_self, help, switch on/off
+  diagnose.py           verificación pre-start (mic, STT, TTS, wake, Ollama)
 jarvis_gui.py           GUI GTK3 (panel de control)
 launch_jarvis.sh        launcher (system python3 para GTK)
-MANUAL_USUARIO.md       manual completo del usuario
+docs/
+  github-jarvis-study.md  Estudio completo de 10+ proyectos GitHub
+  comandos_jarvis.md    Referencia completa de comandos
+  wake-word-training.md Guía de entrenamiento wake word
+MANUAL_USUARIO.md       Manual completo del usuario
 ```
 
 ### Flujo de datos
 
 ```
-Micrófono → sounddevice (16kHz mono)
-  → wav2vec2-XLSR detecta "jarvis" (~350ms)
+Micrófono → sounddevice (16kHz mono, 80ms bloques)
+  → openWakeWord detecta "jarvis" (~80ms)
+  → Calibración de ruido ambiente (500ms)
+  → Silero VAD captura hasta 500ms silencio
+  → Flush de buffer stale post-playback
   → Whisper transcribe a texto (~2-5s tiny, ~4-8s small)
+     con domain prompt bias rioplatense
   → Normalizador rioplatense ("abrí" → "abrir")
-  → Golden gate: matchea patrón regex (destructivos + fast-path)
+  → NLU classifier (TF-IDF + LogReg) para intents no destructivos
+  → Golden gate: 3 capas seguridad (hardline → dangerous → approval)
   → Ollama/Gemini: intent routing (~1-5s, local/cloud)
   → Executor ejecuta la acción
   → Edge TTS sintetiza respuesta
   → paplay reproduce audio
+  → Multi-turn follow-up (10s timeout)
 ```
 
 ## Documentación
 
 - **Manual completo**: `MANUAL_USUARIO.md`
-- **Comandos**: `jarvis/docs/comandos_jarvis.md`
+- **Estudio GitHub**: `docs/github-jarvis-study.md`
+- **Comandos**: `docs/comandos_jarvis.md`
 - **Entrenamiento wake word**: `jarvis/docs/wake-word-training.md`
 
 ## Solución de problemas
@@ -402,6 +533,7 @@ Micrófono → sounddevice (16kHz mono)
 1. Bajá la sensibilidad a 0.3-0.4
 2. Grabá más muestras positivas
 3. Verificá micrófono: `arecord -l`
+4. Ejecutá `jarvis diagnose` para ver el estado completo
 
 ### No hay audio
 1. Verificá dispositivos: `arecord -l` y `aplay -l`
@@ -426,6 +558,36 @@ ps aux | grep jarvis
 kill -9 <PID>  # si hay uno huérfano
 ```
 
+### Whisper entiende "yaravíes" en vez de "Jarvis"
+Esto es un problema clásico de STT sin contexto. Jarvis ya lo resuelve con:
+1. **openWakeWord** detecta el patrón de audio "jarvis" (no transcribe)
+2. **Domain prompt** en whisper-cli sesga hacia vocabulario rioplatense
+3. **NLU classifier** corrige intents mal interpretados
+4. **Fuzzy matching** (rapidfuzz) para coincidencias aproximadas
+
+Si persiste, re-entrená el modelo wake word con más muestras.
+
+## Comparativa con otros proyectos
+
+Ver `docs/github-jarvis-study.md` para el estudio completo de 10+ proyectos.
+
+| Característica | jarvis-mvp | casha-cashu/jarvis | Naomi | qartex/desktop |
+|----------------|------------|-------------------|-------|----------------|
+| Wake word | openWakeWord | openWakeWord | Snowboy | openWakeWord |
+| STT | whisper-cli | Vosk/Whisper | Múltiples | Whisper |
+| TTS | Edge + Piper | Piper | Múltiples | Piper |
+| VAD | Silero VAD | Silero VAD | WebRTC | Silero |
+| NLU classifier | ✅ TF-IDF+LogReg | ✅ TF-IDF+LogReg | ✅ Intent parser | ❌ |
+| Multi-turn | ✅ 10s timeout | ✅ 10s timeout | ✅ | ✅ |
+| 3-capas seguridad | ✅ 40 patrones | ✅ 40 patrones | Plugin valid | 109 tools |
+| Diagnóstico | ✅ jarvis diagnose | ❌ | ✅ | ❌ |
+| Dictation mode | ✅ | ✅ | ❌ | ❌ |
+| UI cinematográfica | 🟡 Post-MVP | ❌ | ❌ | ✅ Three.js orb |
+| Fuzzy matching | ✅ rapidfuzz | ✅ rapidfuzz | ❌ | ❌ |
+| Recordatorios | 🟡 Post-MVP | ✅ | ❌ | ✅ |
+
+---
+
 ## Licencia
 
 Proyecto personal — ver repositorio para detalles.
@@ -433,4 +595,4 @@ Proyecto personal — ver repositorio para detalles.
 ---
 
 *J.A.R.V.I.S. — Just A Rather Very Intelligent System*
-*Versión 1.0 — Agosto 2026*
+*Versión 2.0 — Agosto 2026*

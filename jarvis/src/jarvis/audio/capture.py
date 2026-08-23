@@ -67,6 +67,40 @@ class SilenceVAD:
     def is_speech(self, block: np.ndarray) -> bool:
         return rms(block) >= self.threshold
 
+    def calibrate(
+        self,
+        capturer: Capturer,
+        *,
+        ms: int = 500,
+        factor: float = 1.2,
+        min_threshold: float = DEFAULT_THRESHOLD,
+        read_timeout: float = 1.0,
+    ) -> float:
+        """Measure ambient noise and raise the energy threshold (T-CALIB-01).
+
+        Reads up to ``ms`` of ambient audio from the capturer, computes the
+        RMS noise floor, and sets ``self.threshold`` to
+        ``max(noise_floor * factor, min_threshold)``. Returns the new
+        threshold. A floor keeps the gate from collapsing to 0 on silence.
+        """
+        samples = int(self.sample_rate * ms / 1000.0)
+        collected = 0
+        sq_sum = 0.0
+        count = 0
+        while collected < samples:
+            block = capturer.read_frames(timeout=read_timeout)
+            if block is None:
+                break
+            flat = np.asarray(block, dtype=np.float32).reshape(-1)
+            if flat.size == 0:
+                continue
+            sq_sum += float(np.sum(flat * flat))
+            count += flat.size
+            collected += flat.size
+        noise_floor = float(np.sqrt(sq_sum / count)) if count else 0.0
+        self.threshold = max(noise_floor * factor, min_threshold)
+        return self.threshold
+
 
 class SoundDeviceCapturer:
     """sounddevice streaming capture (16kHz mono float) producing 100ms blocks.

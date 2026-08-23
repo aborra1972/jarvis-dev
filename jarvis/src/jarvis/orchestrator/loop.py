@@ -470,6 +470,9 @@ def build_pipeline(
             vad,
             sample_rate=config.AUDIO_SAMPLE_RATE,
             wav_dir=config.LOGS_CAPTURE_DIR,
+            calibrate_ms=config.AUDIO_CALIBRATE_MS,
+            calibrate_factor=config.AUDIO_CALIBRATE_FACTOR,
+            calibrate_min_threshold=config.AUDIO_CALIBRATE_MIN_THRESHOLD,
         )
         wake = build_wake_detector(
             capturer,

@@ -86,11 +86,11 @@
 - Ajustar umbral dinamicamente (noise_floor * 1.2)
 
 **Criterio de completitud**:
-- [ ] Calibracion corre al detectar wake
-- [ ] Umbral se ajusta dinamicamente
-- [ ] Config option `AUDIO_CALIBRATE_MS`
+- [x] Calibracion corre al detectar wake
+- [x] Umbral se ajusta dinamicamente
+- [x] Config option `AUDIO_CALIBRATE_MS`
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-FLUSH-01: Flush de buffer stale post-playback
 **Archivos**: `jarvis/src/jarvis/audio/capture.py` o `playback.py`
@@ -299,22 +299,22 @@
 | Fase | Tareas | Completadas | Pendientes |
 |------|--------|-------------|------------|
 | 1. Diagnostico | 2 | 2 | 0 |
-| 2. VAD y Audio | 4 | 2 | 2 |
+| 2. VAD y Audio | 4 | 3 | 1 |
 | 3. Seguridad | 2 | 0 | 2 |
 | 4. NLU | 2 | 0 | 2 |
 | 5. Multi-turn | 2 | 0 | 2 |
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **4** | **13** |
+| **Total** | **17** | **5** | **12** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-CALIB-01**: Calibracion de ruido ambiente al wake
+**T-FLUSH-01**: Flush de buffer stale post-playback
 
-Fases 1 y 2 (Diagnostico, VAD y Audio) completadas. Seguir con T-CALIB-01 (calibracion dinamica del umbral al detectar wake word).
+Fases 1-2 casi completas (3/4 de VAD y Audio). Seguir con T-FLUSH-01 (descartar audio stale tras playback para evitar falsos wake).
 
 ---
 

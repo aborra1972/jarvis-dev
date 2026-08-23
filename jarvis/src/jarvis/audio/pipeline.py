@@ -61,6 +61,9 @@ class UtteranceCapture:
         sample_rate: int = SAMPLE_RATE,
         read_timeout: float = 1.0,
         wav_dir: Path | None = None,
+        calibrate_ms: int = 0,
+        calibrate_factor: float = 1.2,
+        calibrate_min_threshold: float = 0.01,
     ) -> None:
         self.capturer = capturer
         self.stt = stt
@@ -69,11 +72,32 @@ class UtteranceCapture:
         self.read_timeout = read_timeout
         self.wav_dir = Path(wav_dir) if wav_dir else Path(tempfile.gettempdir())
         self._last_audio: np.ndarray | None = None
+        self._calibrate_ms = calibrate_ms
+        self._calibrate_factor = calibrate_factor
+        self._calibrate_min_threshold = calibrate_min_threshold
+
+    def _calibrate(self) -> None:
+        """Measure ambient noise right after the wake word (T-CALIB-01).
+
+        Only energy-based VADs (SilenceVAD) expose ``calibrate``; Silero's
+        neural gate already discriminates by model confidence, so it is skipped.
+        """
+        calibrate = getattr(self.vad, "calibrate", None)
+        if calibrate is None or self._calibrate_ms <= 0:
+            return
+        calibrate(
+            self.capturer,
+            ms=self._calibrate_ms,
+            factor=self._calibrate_factor,
+            min_threshold=self._calibrate_min_threshold,
+            read_timeout=self.read_timeout,
+        )
 
     def _next_wav(self) -> Path:
         return self.wav_dir / f"jarvis-capture-{uuid.uuid4().hex}.wav"
 
     def capture(self) -> str | None:
+        self._calibrate()
         blocks, duration_s = gather_utterance(
             self.capturer, self.vad, read_timeout=self.read_timeout
         )

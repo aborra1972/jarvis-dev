@@ -96,6 +96,12 @@ AUDIO_VAD_THRESHOLD = 0.02
 # load. Set AUDIO_USE_SILERO_VAD=False to force the energy VAD.
 AUDIO_USE_SILERO_VAD = True
 AUDIO_SILERO_THRESHOLD = 0.5
+# Noise-floor calibration (T-CALIB-01): when >0, UtteranceCapture reads this
+# many ms of ambient audio right after the wake word and raises the energy VAD
+# threshold to noise_floor * AUDIO_CALIBRATE_FACTOR. Set to 0 to disable.
+AUDIO_CALIBRATE_MS = 500
+AUDIO_CALIBRATE_FACTOR = 1.2
+AUDIO_CALIBRATE_MIN_THRESHOLD = 0.01
 STT_TIMEOUT_S = 15.0
 STT_GATE_DURATION_S = 4.0
 TTS_TIMEOUT_S = 20.0

@@ -144,3 +144,83 @@ def test_sounddevice_capturer_stop_without_start_is_noop() -> None:
 
 def test_capturer_is_a_protocol_matching_fakes() -> None:
     assert isinstance(FakeCapturer([]), Capturer)
+
+
+# --- Noise-floor calibration (T-CALIB-01) ------------------------------------
+def _noise_blocks(amplitude: float = 0.02, n: int = 6) -> list[np.ndarray]:
+    """Ambient-noise blocks of a fixed amplitude (no loud speech)."""
+    return [_sine(frames=BLOCK, amplitude=amplitude) for _ in range(n)]
+
+
+def test_calibrate_raises_threshold_with_noise_floor() -> None:
+    vad = SilenceVAD(threshold=0.5)  # start unrealistically high
+    capturer = FakeCapturer(_noise_blocks(amplitude=0.05))
+    new_threshold = vad.calibrate(
+        capturer, ms=600, factor=1.2, min_threshold=0.01, read_timeout=0.1
+    )
+    # noise floor ~0.05 * 0.707 (RMS of a sine) ~ 0.035; *1.2 ~ 0.042
+    assert new_threshold == pytest.approx(0.05 * 0.7071 * 1.2, rel=0.2)
+    assert new_threshold < 0.5
+    assert vad.threshold == new_threshold
+
+
+def test_calibrate_floor_prevents_zero_threshold_on_silence() -> None:
+    vad = SilenceVAD(threshold=0.02)
+    capturer = FakeCapturer([_silence(), _silence(), _silence()])
+    new_threshold = vad.calibrate(
+        capturer, ms=300, factor=1.2, min_threshold=0.01, read_timeout=0.1
+    )
+    assert new_threshold >= 0.01
+    assert vad.threshold >= 0.01
+
+
+def test_calibrate_empty_capturer_keeps_min_threshold() -> None:
+    vad = SilenceVAD(threshold=0.02)
+    capturer = FakeCapturer([])  # no frames at all
+    new_threshold = vad.calibrate(
+        capturer, ms=500, factor=1.2, min_threshold=0.015, read_timeout=0.1
+    )
+    assert new_threshold == pytest.approx(0.015)
+
+
+def test_utterance_capture_calibrates_energy_vad_before_gathering() -> None:
+    """UtteranceCapture._calibrate() runs on energy VADs when calibrate_ms>0."""
+    from jarvis.audio.pipeline import UtteranceCapture
+
+    vad = SilenceVAD(threshold=0.5)
+    # 3 ambient blocks for calibration + 1 speech block + silence tail
+    blocks = _noise_blocks(amplitude=0.03, n=3)
+    blocks += [_sine(amplitude=0.9), _silence()]
+    capturer = FakeCapturer(blocks)
+    stt = object()  # unused: capture returns None before STT (silence after speech)
+    cap = UtteranceCapture(
+        capturer,
+        stt,
+        vad,
+        calibrate_ms=300,
+        calibrate_factor=1.2,
+        calibrate_min_threshold=0.01,
+    )
+    cap._calibrate()
+    assert vad.threshold < 0.5
+    assert vad.threshold >= 0.01
+
+
+def test_utterance_capture_skips_calibration_when_ms_is_zero() -> None:
+    from jarvis.audio.pipeline import UtteranceCapture
+
+    vad = SilenceVAD(threshold=0.5)
+    capturer = FakeCapturer(_noise_blocks(amplitude=0.05))
+    cap = UtteranceCapture(capturer, object(), vad, calibrate_ms=0)
+    cap._calibrate()
+    assert vad.threshold == 0.5  # untouched
+
+
+def test_utterance_capture_skips_calibration_for_silero_vad() -> None:
+    """SileroVAD has no calibrate(); calibration is skipped (neural gate)."""
+    from jarvis.audio.pipeline import UtteranceCapture
+
+    silero = object()  # duck-typed stand-in without a calibrate method
+    capturer = FakeCapturer(_noise_blocks(amplitude=0.05))
+    cap = UtteranceCapture(capturer, object(), silero, calibrate_ms=300)
+    cap._calibrate()  # must not raise

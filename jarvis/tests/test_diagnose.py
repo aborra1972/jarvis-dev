@@ -144,8 +144,16 @@ class TestRunAll:
     @patch("jarvis.diagnose.check_ollama")
     @patch("jarvis.diagnose.check_audio_output")
     def test_all_pass(self, *mocks):
-        for m in mocks:
-            m.return_value = diagnose.DiagResult(m.__name__, True, "ok")
+        names = [
+            "check_audio_output",
+            "check_ollama",
+            "check_piper",
+            "check_whisper",
+            "check_wake_word",
+            "check_microphone",
+        ]
+        for m, name in zip(mocks, names):
+            m.return_value = diagnose.DiagResult(name, True, "ok")
         results = diagnose.run_all()
         assert len(results) == 6
         assert all(r.ok for r in results)

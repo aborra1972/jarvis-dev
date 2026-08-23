@@ -91,6 +91,11 @@ AUDIO_BLOCK_MS = 100
 AUDIO_SILENCE_MS = 800
 AUDIO_MAX_UTTERANCE_S = 10.0
 AUDIO_VAD_THRESHOLD = 0.02
+# Silero VAD (T-VAD-01/02): neural voice-activity detector used as the primary
+# utterance VAD gate. Falls back to the energy SilenceVAD if the model can't
+# load. Set AUDIO_USE_SILERO_VAD=False to force the energy VAD.
+AUDIO_USE_SILERO_VAD = True
+AUDIO_SILERO_THRESHOLD = 0.5
 STT_TIMEOUT_S = 15.0
 STT_GATE_DURATION_S = 4.0
 TTS_TIMEOUT_S = 20.0

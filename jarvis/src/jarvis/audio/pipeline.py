@@ -23,7 +23,14 @@ from pathlib import Path
 
 import numpy as np
 
-from jarvis.audio.capture import SAMPLE_RATE, Capturer, SilenceVAD, gather_utterance, write_wav
+from jarvis.audio.capture import (
+    SAMPLE_RATE,
+    Capturer,
+    SilenceVAD,
+    SileroVAD,
+    gather_utterance,
+    write_wav,
+)
 from jarvis.audio.playback import PlaybackError
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
@@ -49,7 +56,7 @@ class UtteranceCapture:
         self,
         capturer: Capturer,
         stt: object,
-        vad: SilenceVAD,
+        vad: SilenceVAD | SileroVAD,
         *,
         sample_rate: int = SAMPLE_RATE,
         read_timeout: float = 1.0,

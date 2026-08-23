@@ -11,11 +11,13 @@ dependencies = [
     "numpy",
     "sounddevice",
     "torch",
+    "torchaudio",
     "transformers",
     "onnxruntime",
     "scipy",
     "openwakeword",
     "edge-tts",
+    "silero-vad",
 ]
 
 [project.optional-dependencies]

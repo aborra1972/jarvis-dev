@@ -59,8 +59,8 @@
 - Verificar que el modelo se descarga automaticamente
 
 **Criterio de completitud**:
-- [ ] `pip install -e .` instala silero-vad
-- [ ] `import silero_vad` funciona
+- [x] `pip install -e .` instala silero-vad
+- [x] `import silero_vad` funciona
 
 **Estado**: `[x]` Completada
 
@@ -72,9 +72,9 @@
 - Fallback a energy VAD si Silero no esta disponible
 
 **Criterio de completitud**:
-- [ ] Silero VAD detecta voz vs silencio
-- [ ] Fallback a energy VAD funciona
-- [ ] Tests unitarios con audio simulado
+- [x] Silero VAD detecta voz vs silencio
+- [x] Fallback a energy VAD funciona
+- [x] Tests unitarios con audio simulado
 
 **Estado**: `[x]` Completada
 
@@ -90,7 +90,7 @@
 - [ ] Umbral se ajusta dinamicamente
 - [ ] Config option `AUDIO_CALIBRATE_MS`
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-FLUSH-01: Flush de buffer stale post-playback
 **Archivos**: `jarvis/src/jarvis/audio/capture.py` o `playback.py`
@@ -103,7 +103,7 @@
 - [ ] No hay falsos positivos post-playback
 - [ ] Config option `AUDIO_FLUSH_MS` (default 1000)
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -122,7 +122,7 @@
 - [ ] Approval gate configurable
 - [ ] Tests para cada capa
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-SAFE-02: Agregar config de seguridad
 **Archivos**: `jarvis/src/jarvis/config.py`
@@ -134,7 +134,7 @@
 - [ ] Config options existen
 - [ ] Documentadas en README y MANUAL_USUARIO
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -153,7 +153,7 @@
 - [ ] Cache funciona (joblib)
 - [ ] Tests unitarios
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-NLU-02: Integrar NLU en el pipeline
 **Archivos**: `jarvis/src/jarvis/interpreter/golden.py`, `jarvis/src/jarvis/orchestrator/loop.py`
@@ -167,7 +167,7 @@
 - [ ] Fallback a LLM funciona
 - [ ] Config option `NLU_ENABLED` y `NLU_CONFIDENCE`
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -188,7 +188,7 @@
 - [ ] Wake word reinicia ciclo
 - [ ] Config option `FOLLOWUP_TIMEOUT_S`
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-DICT-01: Implementar `jarvis dictation` mode
 **Archivos**: `jarvis/src/jarvis/cli.py`, `jarvis/src/jarvis/dictation.py`
@@ -204,7 +204,7 @@
 - [ ] Sale con Ctrl+C o "para dictado"
 - [ ] Escribe texto en foco actual
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -222,7 +222,7 @@
 - [ ] Import con fallback funciona
 - [ ] Fuzzy matching usa rapidfuzz
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-REMIND-01: Modulo de recordatorios
 **Archivos**: `jarvis/src/jarvis/actions/reminders.py`
@@ -238,7 +238,7 @@
 - [ ] notify-send + TTS al vencer
 - [ ] Persistencia funciona
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -256,7 +256,7 @@
 - [ ] Whisper usa prompt con frases
 - [ ] Config option `STT_PROMPT`
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ### T-HIST-01: Persistencia de conversacion atomica
 **Archivos**: `jarvis/src/jarvis/orchestrator/session.py`
@@ -271,7 +271,7 @@
 - [ ] Se carga al iniciar
 - [ ] No se corrompe con cortes
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -290,7 +290,7 @@
 - [ ] Notificacion al terminar
 - [ ] Tests para cada intent
 
-**Estado**: `[x]` Completada
+**Estado**: `[ ]` Pendiente
 
 ---
 
@@ -299,22 +299,22 @@
 | Fase | Tareas | Completadas | Pendientes |
 |------|--------|-------------|------------|
 | 1. Diagnostico | 2 | 2 | 0 |
-| 2. VAD y Audio | 4 | 0 | 4 |
+| 2. VAD y Audio | 4 | 2 | 2 |
 | 3. Seguridad | 2 | 0 | 2 |
 | 4. NLU | 2 | 0 | 2 |
 | 5. Multi-turn | 2 | 0 | 2 |
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **2** | **15** |
+| **Total** | **17** | **4** | **13** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-VAD-01**: Agregar Silero VAD como dependencia
+**T-CALIB-01**: Calibracion de ruido ambiente al wake
 
-Fase 1 (Diagnostico) completada. Seguir con Fase 2: VAD y Audio.
+Fases 1 y 2 (Diagnostico, VAD y Audio) completadas. Seguir con T-CALIB-01 (calibracion dinamica del umbral al detectar wake word).
 
 ---
 

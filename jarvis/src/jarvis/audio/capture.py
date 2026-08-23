@@ -155,3 +155,85 @@ def write_wav(path, blocks: list[np.ndarray], sample_rate: int = SAMPLE_RATE) ->
         handle.setsampwidth(2)
         handle.setframerate(sample_rate)
         handle.writeframes(pcm16.tobytes())
+
+
+# --- Silero VAD (T-VAD-02) ---
+class SileroVAD:
+    """Silero VAD wrapper for speech detection.
+
+    Uses torch.hub.load('snakers4/silero-vad', 'silero_vad') for accurate
+    voice activity detection. Falls back to energy-based SilenceVAD if the
+    model fails to load (offline / torch unavailable).
+
+    Implements the same duck-typed interface the capture pipeline needs:
+    ``is_speech(block)``, ``block_duration``, ``max_s``, ``silence_s`` and
+    ``sample_rate``, so it can replace SilenceVAD as a drop-in (T-VAD-02).
+    """
+
+    def __init__(
+        self,
+        *,
+        threshold: float = 0.5,
+        sample_rate: int = SAMPLE_RATE,
+        block_ms: int = BLOCK_MS,
+        silence_s: float = SILENCE_MS / 1000.0,
+        max_s: float = MAX_UTTERANCE_S,
+    ) -> None:
+        self.threshold = threshold
+        self.sample_rate = sample_rate
+        self.block_duration = block_ms / 1000.0
+        self.silence_s = silence_s
+        self.max_s = max_s
+        self._model = None
+        self._get_speech_ts = None
+        self._init_failed = False
+
+    def _ensure_loaded(self) -> bool:
+        """Lazily load the Silero VAD model."""
+        if self._model is not None:
+            return True
+        if self._init_failed:
+            return False
+        try:
+            import torch
+            model, utils = torch.hub.load(
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                force_reload=False,
+                trust_repo=True,
+                verbose=False,
+            )
+            self._model = model
+            (self._get_speech_ts, _, _, _, _) = utils
+            return True
+        except Exception:
+            self._init_failed = True
+            return False
+
+    def is_speech(self, block: np.ndarray) -> bool:
+        """Check if a block contains speech using Silero VAD.
+
+        Falls back to energy-based detection if Silero model failed to load.
+        """
+        if block.size == 0:
+            return False
+
+        if not self._ensure_loaded():
+            # Fallback to simple energy VAD
+            return rms(block) >= DEFAULT_THRESHOLD
+
+        # Silero VAD needs 16kHz audio, expects tensor of shape (1, samples)
+        import torch
+        audio_tensor = torch.from_numpy(block.astype("float32")).unsqueeze(0)
+
+        # Run VAD on the block
+        with torch.no_grad():
+            speech_probs = self._model(audio_tensor, self.sample_rate)
+
+        # speech_probs is a list of speech probabilities for each block.
+        # Confidence >= threshold on any window, or the block mean, counts.
+        if speech_probs:
+            confidences = [ts["confidence"] for ts in speech_probs[0]]
+            if confidences:
+                return max(confidences) >= self.threshold
+        return False

@@ -21,7 +21,7 @@ from typing import Callable
 
 from jarvis import config
 from jarvis.actions.base import build_registry
-from jarvis.audio.capture import SilenceVAD, SoundDeviceCapturer
+from jarvis.audio.capture import SilenceVAD, SileroVAD, SoundDeviceCapturer
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 from jarvis.audio.playback import Playback
 from jarvis.audio.stt import WhisperSTT
@@ -434,13 +434,25 @@ def build_pipeline(
             sample_rate=config.AUDIO_SAMPLE_RATE,
             block_ms=config.AUDIO_BLOCK_MS,
         )
-        vad = SilenceVAD(
-            threshold=config.AUDIO_VAD_THRESHOLD,
-            silence_s=config.AUDIO_SILENCE_MS / 1000.0,
-            max_s=config.AUDIO_MAX_UTTERANCE_S,
-            sample_rate=config.AUDIO_SAMPLE_RATE,
-            block_ms=config.AUDIO_BLOCK_MS,
-        )
+        if config.AUDIO_USE_SILERO_VAD:
+            # Neural VAD (T-VAD-02): better speech/silence discrimination than
+            # pure energy RMS; falls back internally to energy detection if the
+            # Silero model can't load (offline / torch unavailable).
+            vad = SileroVAD(
+                threshold=config.AUDIO_SILERO_THRESHOLD,
+                sample_rate=config.AUDIO_SAMPLE_RATE,
+                block_ms=config.AUDIO_BLOCK_MS,
+                silence_s=config.AUDIO_SILENCE_MS / 1000.0,
+                max_s=config.AUDIO_MAX_UTTERANCE_S,
+            )
+        else:
+            vad = SilenceVAD(
+                threshold=config.AUDIO_VAD_THRESHOLD,
+                silence_s=config.AUDIO_SILENCE_MS / 1000.0,
+                max_s=config.AUDIO_MAX_UTTERANCE_S,
+                sample_rate=config.AUDIO_SAMPLE_RATE,
+                block_ms=config.AUDIO_BLOCK_MS,
+            )
         stt = WhisperSTT(
             whisper_cli=config.WHISPER_CLI,
             model_small=config.WHISPER_MODEL_TINY if config.STT_USE_TINY else config.WHISPER_MODEL,

@@ -146,6 +146,21 @@ class SoundDeviceCapturer:
         except Empty:
             return None
 
+    def flush(self, ms: int = 1000) -> None:
+        """Discard up to ``ms`` of queued audio (post-playback stale mic).
+
+        T-FLUSH-01: after TTS playback the mic may have captured Jarvis's own
+        voice; that audio lingers in the queue and can trigger a false wake on
+        the next cycle. This drains the buffered blocks for up to ``ms`` so the
+        wake detector only sees fresh, post-reply audio.
+        """
+        n_blocks = max(int(ms / self.block_ms), 1)
+        for _ in range(n_blocks):
+            try:
+                self._queue.get_nowait()
+            except Empty:
+                break
+
 
 def gather_utterance(
     capturer: Capturer,

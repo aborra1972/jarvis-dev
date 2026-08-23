@@ -151,6 +151,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # before the mic was restarted.
             if hasattr(pipeline.wake, 'flush'):
                 pipeline.wake.flush()
+            # T-FLUSH-01: drain the stale mic buffer (Jarvis's own reply audio)
+            # so it can't trigger a false wake word on the next cycle.
+            if hasattr(pipeline.wake, 'capturer') and hasattr(
+                pipeline.wake.capturer, 'flush'
+            ):
+                pipeline.wake.capturer.flush(ms=config.AUDIO_FLUSH_MS)
             # Restart mic after cooldown
             if hasattr(pipeline.wake, 'capturer'):
                 pipeline.wake.capturer.start()

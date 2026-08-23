@@ -99,11 +99,11 @@
 - Evita que el audio del speaker trigger wake word falso
 
 **Criterio de completitud**:
-- [ ] Flush corre despues de cada playback
-- [ ] No hay falsos positivos post-playback
-- [ ] Config option `AUDIO_FLUSH_MS` (default 1000)
+- [x] Flush corre despues de cada playback
+- [x] No hay falsos positivos post-playback
+- [x] Config option `AUDIO_FLUSH_MS` (default 1000)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -299,22 +299,22 @@
 | Fase | Tareas | Completadas | Pendientes |
 |------|--------|-------------|------------|
 | 1. Diagnostico | 2 | 2 | 0 |
-| 2. VAD y Audio | 4 | 3 | 1 |
+| 2. VAD y Audio | 4 | 4 | 0 |
 | 3. Seguridad | 2 | 0 | 2 |
 | 4. NLU | 2 | 0 | 2 |
 | 5. Multi-turn | 2 | 0 | 2 |
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **5** | **12** |
+| **Total** | **17** | **6** | **11** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-FLUSH-01**: Flush de buffer stale post-playback
+**T-SAFE-01**: Agregar 3 capas de seguridad al golden gate
 
-Fases 1-2 casi completas (3/4 de VAD y Audio). Seguir con T-FLUSH-01 (descartar audio stale tras playback para evitar falsos wake).
+Fases 1-2 (Diagnostico, VAD y Audio) completadas. Seguir con Fase 3: Seguridad (golden gate).
 
 ---
 

@@ -102,6 +102,10 @@ AUDIO_SILERO_THRESHOLD = 0.5
 AUDIO_CALIBRATE_MS = 500
 AUDIO_CALIBRATE_FACTOR = 1.2
 AUDIO_CALIBRATE_MIN_THRESHOLD = 0.01
+# Stale-buffer flush (T-FLUSH-01): after TTS playback, drain this many ms of
+# queued mic audio so Jarvis's own reply doesn't trigger a false wake word on
+# the next cycle. Set to 0 to disable.
+AUDIO_FLUSH_MS = 1000
 STT_TIMEOUT_S = 15.0
 STT_GATE_DURATION_S = 4.0
 TTS_TIMEOUT_S = 20.0

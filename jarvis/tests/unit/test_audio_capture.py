@@ -137,6 +137,34 @@ def test_sounddevice_capturer_reads_queued_frames() -> None:
     assert capturer.read_frames(timeout=0.01) is None
 
 
+def test_sounddevice_capturer_flush_drains_stale_buffer() -> None:
+    """flush() discards queued audio (T-FLUSH-01, post-playback stale mic)."""
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    # 5 stale blocks queued from Jarvis's own reply audio
+    for _ in range(5):
+        capturer._queue.put(_sine())
+    # flush 1s = 10 blocks of 100ms — drains all 5 present
+    capturer.flush(ms=1000)
+    assert capturer._queue.empty()
+    assert capturer.read_frames(timeout=0.01) is None
+
+
+def test_sounddevice_capturer_flush_partial_when_fewer_blocks() -> None:
+    """flush() drains what's there and doesn't hang on an empty tail."""
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    capturer._queue.put(_sine())  # only 1 stale block
+    capturer.flush(ms=1000)  # wants 10, drains the 1
+    assert capturer._queue.empty()
+
+
+def test_sounddevice_capturer_flush_zero_ms_drains_at_least_one() -> None:
+    """flush(0) still drains one block (never leaves a stale head)."""
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    capturer._queue.put(_sine())
+    capturer.flush(ms=0)
+    assert capturer._queue.empty()
+
+
 def test_sounddevice_capturer_stop_without_start_is_noop() -> None:
     capturer = SoundDeviceCapturer()
     capturer.stop()  # must not raise

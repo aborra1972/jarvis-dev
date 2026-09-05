@@ -215,18 +215,19 @@
 ## Fase 6: Rapidfuzz y Recordatorios (Prioridad 14-16)
 
 ### T-FUZZY-01: Reemplazar difflib con rapidfuzz
-**Archivos**: `jarvis/src/jarvis/interpreter/golden.py`, `requirements.txt`
+**Archivos**: `jarvis/src/jarvis/interpreter/schema.py`, `jarvis/src/jarvis/interpreter/interpreter.py`, `jarvis/pyproject.toml`
 **Que hacer**:
-- Agregar `rapidfuzz` a dependencias
-- Reemplazar `difflib.SequenceMatcher` con `rapidfuzz.fuzz.ratio`
-- Fallback a difflib si rapidfuzz no esta disponible
+- Agregar `rapidfuzz` a `[project.dependencies]` en `pyproject.toml`
+- Reemplazar `difflib.get_close_matches` con `rapidfuzz.process.extractOne` (scorer `fuzz.ratio`, cutoff 60/100) en `fuzzy_correct_entities`
+- Fallback a difflib si rapidfuzz no esta disponible (import con fallback)
+- Eliminar el import muerto `import difflib` en `interpreter.py`
 
 **Criterio de completitud**:
-- [ ] `rapidfuzz` en requirements.txt
-- [ ] Import con fallback funciona
-- [ ] Fuzzy matching usa rapidfuzz
+- [x] `rapidfuzz` en `pyproject.toml` (`[project.dependencies]`)
+- [x] Import con fallback funciona
+- [x] Fuzzy matching usa rapidfuzz
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-REMIND-01: Modulo de recordatorios
 **Archivos**: `jarvis/src/jarvis/actions/reminders.py`

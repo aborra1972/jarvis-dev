@@ -19,6 +19,7 @@ dependencies = [
     "edge-tts",
     "silero-vad",
     "scikit-learn",
+    "rapidfuzz",
 ]
 
 [project.optional-dependencies]

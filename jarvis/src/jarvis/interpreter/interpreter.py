@@ -10,7 +10,6 @@ and runs with confirmation (Option A) or auto (Option B).
 from __future__ import annotations
 
 import collections
-import difflib
 import hashlib
 import logging
 import re

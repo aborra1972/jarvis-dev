@@ -9,11 +9,20 @@ URL).
 
 from __future__ import annotations
 
-import difflib
 import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
+
+# Fuzzy app-name matching (T-FUZZY-01): prefer rapidfuzz (faster, 0-100
+# score scale); fall back to difflib when rapidfuzz is not installed.
+try:
+    from rapidfuzz import fuzz, process as rfp
+except ImportError:  # pragma: no cover — rapidfuzz absent, use difflib
+    import difflib
+
+    fuzz = None
+    rfp = None
 
 # The 18 commands (8 domains) + "unknown" (the no-intent fallback, not a
 # command — drives the re-ask flow per spec RNF-4).
@@ -195,11 +204,13 @@ def validate_entities(intent: Intent, app_allowlist: set[str] | None = None) -> 
 def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None) -> Intent:
     """Fuzzy-correct the ``app`` entity for open_app intents.
 
-    Uses ``difflib.get_close_matches`` with a high cutoff (0.6) to match
-    Whisper misheard app names (e.g. "chromio" → "chromium"). Only the
-    ``app`` entity is corrected; other entities pass through unchanged.
-    Returns a NEW Intent (frozen dataclass). If no close match is found,
-    the intent is returned unchanged (``validate_entities`` will reject it).
+    Uses ``rapidfuzz.process.extractOne`` with ``fuzz.ratio`` and a score
+    cutoff of 60/100 to match Whisper misheard app names (e.g. "chromio" →
+    "chromium"). Falls back to ``difflib.get_close_matches`` (cutoff 0.6)
+    when rapidfuzz is not installed (T-FUZZY-01). Only the ``app`` entity
+    is corrected; other entities pass through unchanged. Returns a NEW
+    Intent (frozen dataclass). If no close match is found, the intent is
+    returned unchanged (``validate_entities`` will reject it).
     """
     if intent.intent != "open_app" or app_allowlist is None:
         return intent
@@ -213,9 +224,14 @@ def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None
         return intent
 
     # Try fuzzy match with high cutoff
-    matches = difflib.get_close_matches(app_clean, app_allowlist, n=1, cutoff=0.6)
-    if matches:
-        corrected = matches[0]
+    # T-FUZZY-01: rapidfuzz primary (0-100 scale), difflib fallback.
+    if rfp is not None:
+        match = rfp.extractOne(app_clean, app_allowlist, scorer=fuzz.ratio, score_cutoff=60)
+        corrected = match[0] if match else None
+    else:
+        matches = difflib.get_close_matches(app_clean, app_allowlist, n=1, cutoff=0.6)
+        corrected = matches[0] if matches else None
+    if corrected:
         new_entities = {**intent.entities, "app": corrected}
         from dataclasses import replace
         return replace(intent, entities=new_entities)

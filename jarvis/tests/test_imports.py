@@ -127,6 +127,10 @@ def test_cli_start_runs_real_pipeline(
         "_register_switch_signals",
         lambda session, switch, speaker=None: signals.append((session, switch)),
     )
+    # The proactive boot note reads the live working tree (uncommitted files /
+    # unpushed commits); this test only exercises the start flow, so pin it to
+    # None to keep the assertion independent of repo state.
+    monkeypatch.setattr(jarvis.orchestrator.loop, "_proactive_project_note", lambda repo: None)
 
     assert jarvis.cli.main(["start"]) == 0
     assert ran and ran[0].speaker is fake

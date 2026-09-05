@@ -32,6 +32,15 @@ DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({
     "format_disk", "wipe_system", "delete_all", "kill_process",
 })
 
+
+def is_destructive_intent(intent_name: str) -> bool:
+    """Guard predicate: is this intent part of the destructive hard-gate set?
+
+    Used by the interpreter to reject LLM suggestions of destructive intents
+    that did not come from the golden gate (T-SAFE-01, Layer 1).
+    """
+    return intent_name in DESTRUCTIVE_INTENTS
+
 DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
     "opencode": ("open_repo", "ask", "configure", "create_artifact", "implement", "review"),
     "system": ("shutdown", "reboot", "open_app", "execute", "kill_process", "format_disk", "wipe_system"),
@@ -78,6 +87,10 @@ class Intent:
     confirm_required: bool = False
     source: str = ""  # "golden" | "llm"
     use_active_project: bool = False
+    # T-SAFE-01: policy-blocked destructive intent (recognized by the golden
+    # gate but never executable — the registry handler denies it). Only the
+    # golden gate sets this; interpretive flags never lie.
+    blocked: bool = False
 
 
 class SchemaError(ValueError):
@@ -277,12 +290,73 @@ def build_system_prompt() -> str:
 #                                    but still worth a human confirming)
 # This lives in schema.py (not actions/system.py or interpreter.py) so both
 # modules can import it without creating a circular import between them.
+#
+# T-SAFE-01 Layer 2 (study: ~40 patterns): destructive/sensitive commands
+# that pass through allowlisted binaries. Each entry is a single regex; the
+# count is exposed via dangerous_pattern_count() so config.DANGEROUS_PATTERNS
+# can derive from the real table instead of drifting.
 _DANGEROUS_COMMAND_PATTERNS: tuple[re.Pattern, ...] = (
+    # --- catastrophic rm (targets, not single files) --------------------------
     re.compile(r"\bfind\b.*-(?:exec|execdir|delete)\b"),
-    re.compile(r"\b(?:mv|cp)\b.*\s/dev/(?:null|zero)\b"),
+    re.compile(r"\b(?:mv|cp)\b.*\s/dev/(?:null|zero)\b"),            # mv/cp to a sink
+    re.compile(r"\brm\b.*\s(?:/|~|\$HOME)(?:\s|$)"),                  # rm -rf / , ~ , $HOME
+re.compile(r"\brm\b.*\s(?:/\*|~/\*|\$HOME/\*)"),             # rm -rf /* , ~/*
+    re.compile(r"\brm\b.*\s-\S*[rf]\S*\s+\*(?:\s|$)"),               # rm -rf * (current dir)
+    # --- raw disk destruction ------------------------------------------------
+    re.compile(r"\bdd\b.*\sof=/dev/(?:sd|hd|vd|nvme|mmcblk|loop)"),  # dd to raw disk
+    re.compile(r"\bdd\b.*\sif=/dev/(?:mem|kmem)\b"),                 # direct memory access
+    re.compile(r"\bmkfs(?:\.[a-z0-9]+)?\b"),                         # mkfs.ext4 /dev/sdX
+    re.compile(r"\bmke2fs\b"),
+    re.compile(r"\bmkswap\b"),
+    re.compile(r"\bwipefs\b"),
+    re.compile(r"\bblkdiscard\b"),
+    re.compile(r"\b(?:fdisk|sfdisk|parted)\b.*\s/dev/"),             # destructive partitioning
+    re.compile(r"\b(?:vgremove|lvremove|pvremove)\b"),               # LVM removal
+    # --- permission abuse -----------------------------------------------------
+    re.compile(r"\bchmod\b\s+-\S*[Rr]\S*\s+0?777\b"),                # chmod -R 777
+    re.compile(r"\bchmod\b.*\+s\b"),                                 # setuid
+    re.compile(r"\bchmod\b.*\s/(?:bin|sbin|usr/bin)/(?:sh|bash|su|sudo)\b"),
+    re.compile(r"\bchmod\b.*\s0?000\s+(?:/|~)(?:\s|$)"),             # chmod 000 / ~
     re.compile(r"\b(?:chmod|chown)\b.*-[a-zA-Z]*[Rr][a-zA-Z]*\b.*\s(?:/|~|\$HOME)\s*$"),
+    # --- process / system destruction ----------------------------------------
+    re.compile(r"\bkill\b\s+-\s*9\b"),                               # kill -9
+    re.compile(r"\bkillall\b.*\s(?:systemd|Xorg|X|pulseaudio|pipewire|dbus-daemon|gnome-shell|NetworkManager|lightdm|gdm)\b"),
+    re.compile(r"\bpkill\b.*\s(?:systemd|Xorg|X|pulseaudio|pipewire|dbus-daemon|gnome-shell|NetworkManager)\b"),
+    re.compile(r"\bsystemctl\b.*\s(?:stop|disable|mask)\b.*\s(?:systemd|default\.target|graphical\.target|display-manager|NetworkManager|getty)\b"),
+    re.compile(r"\bsystemctl\b.*\s(?:poweroff|reboot|halt|suspend|hibernate)\b"),
+    re.compile(r"^(?:sudo\s+)?(?:shutdown|reboot|halt|poweroff)\b"),  # power binaries
+    # --- package destruction --------------------------------------------------
+    re.compile(r"\b(?:apt|apt-get|dpkg)\b.*\s(?:--)?(?:remove|purge)\b.*\s(?:linux-image|linux-headers|linux-generic|systemd|ubuntu-desktop|gnome|grub|kernel)\b"),
+    # --- raw writes to devices / /etc ----------------------------------------
+    re.compile(r">\s*/dev/(?:sd|hd|vd|nvme|mmcblk|loop)"),           # > /dev/sda
+    re.compile(r">\s*/etc/"),                                        # > / etc (fstab, passwd, ...)
+    # --- filesystem -----------------------------------------------------------
+    re.compile(r"\bumount\b.*\s(?:/|/home|/boot|/etc)(?:\s|$)"),     # unmount root/home
+    re.compile(r"\btar\b.*\s-C\s+(?:/|~)(?:\s|$)"),                  # extract into root
+    # --- destructive git ------------------------------------------------------
+    re.compile(r"\bgit\s+push\b.*\s(?:--force|-f)(?:\s|$)"),         # force push
+    re.compile(r"\bgit\s+reset\b.*--hard\b"),                        # destructive reset
+    # --- remote code execution via pipe --------------------------------------
+    re.compile(r"\bcurl\b.*\|\s*(?:sh|bash|zsh)\b"),                 # curl | sh
+    re.compile(r"\bwget\b.*\|\s*(?:sh|bash|zsh)\b"),                 # wget | sh
+    re.compile(r"\bcurl\b.*\s-o\s+/(?:etc|usr|s?bin)/"),             # curl into system dirs
+    # --- secret material -------------------------------------------------------
+    re.compile(r"\b(?:cat|cp|head|tail|less|more)\b.*(?:\.ssh/|id_rsa(?!\.pub\b)|id_ed25519(?!\.pub\b)|id_dsa(?!\.pub\b))"),
+    re.compile(r"\b(?:cat|cp|head|tail|less|more)\b.*\.env(?:\s|$)"),
     re.compile(r"\b(?:cat|cp|head|tail)\b.*\s/etc/(?:shadow|passwd|sudoers)\b"),
+    # --- everything else ------------------------------------------------------
+    re.compile(r"\biptables\b.*\s-[FX]\b"),                          # flush firewall
+    re.compile(r":\(\)\s*\{"),                                       # fork bomb
 )
+
+
+def dangerous_pattern_count() -> int:
+    """Number of dangerous command patterns (T-SAFE-02 config target).
+
+    config.DANGEROUS_PATTERNS derives from this so the documented count can
+    never drift from the real table.
+    """
+    return len(_DANGEROUS_COMMAND_PATTERNS)
 
 
 def is_dangerous_command(command_str: str) -> bool:

@@ -178,3 +178,68 @@ def test_make_build_fast_path() -> None:
     assert intent is not None
     assert intent.intent == "execute"
     assert intent.entities == {"command": "make build"}
+
+
+# --- T-SAFE-01: expanded destructive set (hardline blocklist) ----------------
+EXPANDED_DESTRUCTIVE_CASES: list[tuple[str, str, bool]] = [
+    # (raw utterance, expected intent, policy-blocked flag)
+    ("formateá el disco", "format_disk", True),
+    ("formatear el disco", "format_disk", True),
+    ("formateá el hdd", "format_disk", True),
+    ("formateá el ssd", "format_disk", True),
+    ("formateá la memoria", "format_disk", True),
+    ("borrá el sistema", "wipe_system", True),
+    ("borrar el disco por completo", "wipe_system", True),
+    ("destruí la partición entera", "wipe_system", True),
+    ("borrá el sistema ya", "wipe_system", True),
+    ("eliminá todo en el disco", "delete_all", True),
+    ("borrá todo lo que haya en el disco", "delete_all", True),
+    ("borrá todos mis archivos", "delete_all", True),
+    ("borrá todo", "delete_all", True),
+    ("matá un proceso", "kill_process", True),
+    ("matar el proceso", "kill_process", True),
+    ("eliminá ese proceso", "kill_process", True),
+    ("cortá un proceso", "kill_process", True),
+]
+
+
+@pytest.mark.parametrize(("raw", "expected", "blocked"), EXPANDED_DESTRUCTIVE_CASES)
+def test_expanded_destructive_gate_emits_with_confirm_and_blocked(
+    raw: str, expected: str, blocked: bool
+) -> None:
+    intent = _g(raw)
+    assert intent is not None
+    assert intent.intent == expected
+    assert intent.confirm_required is True
+    assert intent.confidence == 1.0
+    assert intent.source == "golden"
+    assert intent.blocked is blocked
+
+
+def test_operator_destructives_are_not_policy_blocked() -> None:
+    # shutdown/reboot/power_off_self have real operators: recognized but NOT
+    # policy-blocked (the confirm gate guards them, not a denial handler).
+    for raw in ("cerrá linux", "reiniciá la máquina", "apagate"):
+        intent = _g(raw)
+        assert intent is not None
+        assert intent.blocked is False
+
+
+NON_DESTRUCTIVE_CONTAINING_BORRAR: list[str] = [
+    "borrar un archivo",           # single file → not delete_all/wipe_system
+    "borrar el historial",         # no disk/system target
+    "borrar la cache de firefox",
+    "eliminar un comentario",
+    "destruir el cache",
+    "matar el tiempo",             # idiom, not a process
+    "cortar la luz",               # not a process
+    "formatear un documento",      # not a disk target
+    "borrar el disco de la bici",  # "el disco" + trailing words → full anchor
+]
+
+
+@pytest.mark.parametrize("raw", NON_DESTRUCTIVE_CONTAINING_BORRAR)
+def test_non_destructive_borrar_phrases_never_match_destructive(raw: str) -> None:
+    # Full-string anchoring must keep "borrar X" out of the destructive gate
+    # unless the whole utterance is a destructive target.
+    assert _g(raw) is None

@@ -58,7 +58,45 @@ DESTRUCTIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("power_off_self", re.compile(rf"^(?:{_verb_alt('apagarse')}|{_verb_alt('dormirse')})(?: ya| ahora)?$")),
+    (
+        "format_disk",
+        re.compile(
+            rf"^(?:{_verb_alt('formatear')}) "
+            rf"(?:el disco|el hdd|el ssd|la memoria)"
+            rf"(?: ya| ahora)?$"
+        ),
+    ),
+    (
+        "wipe_system",
+        re.compile(
+            rf"^(?:{_verb_alt('borrar')}|{_verb_alt('destruir')}) "
+            rf"(?:el sistema|el disco|la particion)"
+            rf"(?: por completo| entera| entero)?(?: ya| ahora)?$"
+        ),
+    ),
+    (
+        "delete_all",
+        re.compile(
+            rf"^(?:{_verb_alt('borrar')}|{_verb_alt('eliminar')}) "
+            rf"(?:todo(?: lo que haya)? en el disco|todos mis archivos|todo)"
+            rf"(?: ya| ahora)?$"
+        ),
+    ),
+    (
+        "kill_process",
+        re.compile(
+            rf"^(?:{_verb_alt('matar')}|{_verb_alt('eliminar')}|{_verb_alt('cortar')}) "
+            rf"(?:un |el |ese |este )?proceso(?: ya| ahora)?$"
+        ),
+    ),
 )
+
+# Policy-blocked destructive intents: recognized by the gate, but there is no
+# real operator behind them — the registry handler (blocked_destructive)
+# rejects them with a spoken denial (T-SAFE-01, Layer 1 hardline blocklist).
+POLICY_BLOCKED_INTENTS: frozenset[str] = frozenset({
+    "format_disk", "wipe_system", "delete_all", "kill_process",
+})
 
 # --- canonical non-destructive fast-path patterns ---------------------------
 # Prefix-anchored (^...) only — trailing text is allowed. Entity validation
@@ -175,6 +213,7 @@ def gate(normalized: str) -> Intent | None:
                 entities={},
                 confidence=1.0,
                 confirm_required=True,
+                blocked=intent in POLICY_BLOCKED_INTENTS,
                 source="golden",
             )
     for pattern, intent, extract in FAST_PATH_PATTERNS:

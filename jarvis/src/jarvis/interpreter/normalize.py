@@ -109,6 +109,17 @@ VARIANT_MAP: dict[str, str] = {
     "limpiame": "limpiar",
     "compila": "compilar",
     "compilame": "compilar",
+    # --- T-SAFE-01: destructive-intent verbs (golden gate rioplatense) ----
+    "formatea": "formatear",
+    "formateame": "formatear",
+    "destrui": "destruir",
+    "destruime": "destruir",
+    "elimina": "eliminar",
+    "eliminame": "eliminar",
+    "mata": "matar",
+    "matame": "matar",
+    "corta": "cortar",
+    "cortame": "cortar",
 }
 
 # Word-boundary replacements (longest keys first preserves phrase entries).

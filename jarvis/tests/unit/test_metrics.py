@@ -117,3 +117,22 @@ def test_m5_all_four_domains_execute_without_blocking_errors(
     for domain, intent in cases.items():
         result = registry.execute(intent, session)
         assert result.ok is True, f"{domain} must execute without blocking errors: {result.spoken}"
+
+
+def test_m6_golden_destructive_matches_all_seven_intents() -> None:
+    # T-SAFE-01: the full destructive set (not just shutdown/reboot/power-off)
+    # exits the hard gate with confirm_required=True.
+    samples = {
+        "shutdown": "cerrar linux",
+        "reboot": "reiniciar la maquina",
+        "power_off_self": "apagarse",
+        "format_disk": "formatear el disco",
+        "wipe_system": "borrar el sistema",
+        "delete_all": "borrar todo",
+        "kill_process": "matar un proceso",
+    }
+    for intent_name, phrase in samples.items():
+        intent = gate(phrase)
+        assert intent is not None, f"{phrase!r} must hit the golden gate"
+        assert intent.intent == intent_name
+        assert intent.confirm_required is True

@@ -1,8 +1,10 @@
 """Command-line interface.
 
 Exposes the lifecycle/switch commands from the assistant-lifecycle spec
-(``jarvis start/stop/off/on/clean/logs``) and the ``jarvis say`` TTS CLI
-for scripts and OpenCode integration.
+(``jarvis start/stop/off/on/clean/logs``), the ``jarvis say`` TTS CLI
+for scripts and OpenCode integration, and the agent/persona selector
+(``jarvis agent`` / ``jarvis setup``) that persists JARVIS_AGENT in the
+repo-root .env.
 """
 
 from __future__ import annotations
@@ -15,7 +17,10 @@ from pathlib import Path
 
 from jarvis.orchestrator import loop
 
-COMMANDS = ("start", "stop", "off", "on", "clean", "logs", "say", "diagnose")
+COMMANDS = (
+    "start", "stop", "off", "on", "clean", "logs", "say", "diagnose",
+    "agent", "setup",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,7 +37,15 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--detach", "-d", action="store_true",
                            help="don't wait for playback to finish")
             p.add_argument("--voice", default=None,
-                           help="override TTS voice (default: es-MX-JorgeNeural)")
+                           help="override TTS voice (default: voz del agente activo — config.EDGE_VOICE)")
+        elif cmd == "agent":
+            p = sub.add_parser(cmd, help="ver o cambiar el agente/personaje (jarvis|friday|karen)")
+            p.add_argument("name", nargs="?", default=None,
+                           help="agente a activar (jarvis|friday|karen); sin argumento muestra el actual")
+        elif cmd == "setup":
+            p = sub.add_parser(cmd, help="wizard de configuración: elegir agente/personaje")
+            p.add_argument("name", nargs="?", default=None,
+                           help="agente a configurar (no interactivo); sin argumento pregunta")
         else:
             sub.add_parser(cmd, help=f"{cmd}")
     return parser
@@ -101,6 +114,84 @@ def _handle_say(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_agent(args: argparse.Namespace) -> int:
+    """``jarvis agent [name]``: show the active agent or switch persona.
+
+    With no name, prints the active agent, its edge-tts voice and personality.
+    With a valid name writes JARVIS_AGENT=<name> into the repo-root .env (the
+    switch applies on the next run — the running process keeps its persona).
+    Unknown names are rejected with a non-zero exit.
+    """
+    from jarvis import config
+
+    if args.name is None:
+        profile = config.AGENT_PROFILES[config.AGENT]
+        print(f"Agente activo: {config.AGENT} ({profile['name']})")
+        print(f"Voz: {config.EDGE_VOICE}")
+        print(f"Tratamiento: {profile['address']}")
+        print(f"Personalidad: {profile['personality']}")
+        return 0
+
+    name = args.name.strip().lower()
+    if name not in config.AGENT_PROFILES:
+        print(
+            f"jarvis agent: agente desconocido '{args.name}'. "
+            f"Válidos: {', '.join(sorted(config.AGENT_PROFILES))}",
+            file=sys.stderr,
+        )
+        return 1
+    config.set_agent(name)
+    profile = config.AGENT_PROFILES[name]
+    print(f"Agente cambiado a {profile['name']} (voz: {profile['voice']}).")
+    print("El cambio se aplica al reiniciar jarvis.")
+    return 0
+
+
+def _handle_setup(args: argparse.Namespace) -> int:
+    """``jarvis setup [name]``: wizard to pick the agent/persona.
+
+    Lists the 3 agents; with no name it prompts interactively (number or
+    name). Persists JARVIS_AGENT=<name> in the repo-root .env.
+    """
+    from jarvis import config
+
+    profiles = config.AGENT_PROFILES
+    keys = list(profiles)  # canonical order: jarvis, friday, karen
+    print("Agentes disponibles:")
+    for idx, key in enumerate(keys, 1):
+        p = profiles[key]
+        print(f"  {idx}. {key} — {p['name']} (voz: {p['voice']})")
+
+    if args.name:
+        choice = args.name.strip().lower()
+    else:
+        try:
+            choice = input("Elegí un agente (número o nombre, Enter cancela): ").strip().lower()
+        except EOFError:
+            choice = ""
+    if not choice:
+        print("Setup cancelado. Agente actual sin cambios.")
+        return 0
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(keys):
+            choice = keys[idx - 1]
+        else:
+            print(f"jarvis setup: número inválido '{choice}'.", file=sys.stderr)
+            return 1
+    if choice not in profiles:
+        print(
+            f"jarvis setup: agente desconocido '{choice}'. "
+            f"Válidos: {', '.join(sorted(profiles))}",
+            file=sys.stderr,
+        )
+        return 1
+    config.set_agent(choice)
+    print(f"Agente configurado: {profiles[choice]['name']} (voz: {profiles[choice]['voice']}).")
+    print("El cambio se aplica al reiniciar jarvis.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns a process exit code."""
     parser = build_parser()
@@ -118,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         return loop.switch_on()
     if args.command == "clean":
         return loop.clean()
+    if args.command == "agent":
+        return _handle_agent(args)
+    if args.command == "setup":
+        return _handle_setup(args)
     if args.command == "diagnose":
         from jarvis import diagnose
         return diagnose.main()

@@ -10,6 +10,7 @@ executors/allowlists (PR4), voice pipeline (PR5).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -50,6 +51,10 @@ from jarvis.interpreter.schema import build_system_prompt, dangerous_pattern_cou
 _THIS = Path(__file__).resolve()
 APP_ROOT = _THIS.parents[2]   # jarvis/ (app root)
 REPO_ROOT = _THIS.parents[3]  # repo root (contains spike/)
+# Repo-root .env (the same file _load_env() reads). The CLI agent selector
+# (``jarvis agent <name>`` / ``jarvis setup``) writes JARVIS_AGENT here so the
+# switch persists across runs.
+ENV_FILE = REPO_ROOT / ".env"
 
 # --- Subprocess artifacts (reuse spike, do not rebuild) ----------------------
 SPIKE = REPO_ROOT / "spike"
@@ -124,10 +129,136 @@ STT_GATE_DURATION_S = 4.0
 TTS_TIMEOUT_S = 20.0
 PLAY_TIMEOUT_S = 20.0
 PLAYER_BIN = "paplay"
+# --- Agent / persona selection (jarvis | friday | karen) ----------------------
+# Each profile defines the display name, edge-tts voice, the address the agent
+# uses to speak to the user, the boot announcement, and the LLM personality
+# (system prompt for general QA). Selecting an agent changes name + personality
+# + voice across the whole runtime. Switched via JARVIS_AGENT in .env / shell
+# env (see cli.py ``agent``/``setup`` which write the repo-root .env).
+AGENT_PROFILES: dict[str, dict] = {
+    "jarvis": {
+        "name": "Jarvis",
+        "voice": "es-NI-FedericoNeural",
+        "address": "señor",
+        "announcement": "Buen día, señor. Soy Jarvis, a su servicio.",
+        "personality": (
+            'Sos Jarvis, un asistente virtual útil y amigable. Tratá al usuario de "señor". '
+            "Respondé en español rioplatense, breve y directo. "
+            "Máximo 2-3 oraciones. No uses markdown ni formato especial."
+        ),
+    },
+    "friday": {
+        "name": "Friday",
+        "voice": "es-PE-CamilaNeural",
+        "address": "jefe",
+        "announcement": "Buen día, jefe. Soy Friday, a su servicio.",
+        "personality": (
+            'Sos Friday, la inteligencia artificial de Stark Industries: eficiente, ágil y '
+            "directa, con un toque de humor seco. Tratá al usuario de \"jefe\". "
+            "Respondé en español rioplatense, breve y directo. "
+            "Máximo 2-3 oraciones. No uses markdown ni formato especial."
+        ),
+    },
+    "karen": {
+        "name": "Karen",
+        "voice": "es-GT-MartaNeural",
+        "address": "amigo",
+        "announcement": "Buen día, amigo. Soy Karen, a su servicio.",
+        "personality": (
+            'Sos Karen, la inteligencia artificial del traje de Spider-Man: práctica, directa '
+            "y sin vueltas; ayudás con datos concretos y avisos útiles. Tratá al usuario de "
+            '"amigo". Respondé en español rioplatense, breve y directo. '
+            "Máximo 2-3 oraciones. No uses markdown ni formato especial."
+        ),
+    },
+}
+
+
+def _resolve_agent_key() -> str:
+    """Return the active agent key from ``JARVIS_AGENT``, validated.
+
+    Unknown or invalid values warn on stderr and fall back to ``jarvis`` (the
+    project's historical default persona).
+    """
+    key = os.environ.get("JARVIS_AGENT", "jarvis")
+    if key not in AGENT_PROFILES:
+        print(
+            f"advertencia: JARVIS_AGENT={key!r} no es un agente válido "
+            f"({', '.join(sorted(AGENT_PROFILES))}); usando 'jarvis'.",
+            file=sys.stderr,
+        )
+        return "jarvis"
+    return key
+
+
+# Agent selected at import time from env/.env (validated → jarvis fallback).
+AGENT: str = _resolve_agent_key()
+
+
+def active_agent() -> dict:
+    """Profile dict of the active agent (re-reads JARVIS_AGENT on each call)."""
+    return AGENT_PROFILES[_resolve_agent_key()]
+
+
+def agent_name() -> str:
+    """Display name of the active agent (e.g. "Jarvis", "Friday", "Karen")."""
+    return active_agent()["name"]
+
+
+def agent_voice() -> str:
+    """edge-tts voice of the active agent."""
+    return active_agent()["voice"]
+
+
+def agent_address() -> str:
+    """Address the active agent uses for the user (e.g. "señor", "jefe")."""
+    return active_agent()["address"]
+
+
+def agent_personality() -> str:
+    """LLM system prompt of the active agent (general QA identity/tono)."""
+    return active_agent()["personality"]
+
+
+def agent_announcement() -> str:
+    """Boot announcement of the active agent (spoken on start)."""
+    return active_agent()["announcement"]
+
+
+def set_agent(agent: str) -> Path:
+    """Persist ``JARVIS_AGENT=<agent>`` in the repo-root .env.
+
+    Creates the file if missing and preserves every other key/comment line.
+    Raises ValueError for unknown agents. Returns the written path.
+    """
+    if agent not in AGENT_PROFILES:
+        raise ValueError(
+            f"agente desconocido: {agent!r}; "
+            f"válidos: {', '.join(sorted(AGENT_PROFILES))}"
+        )
+    lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
+    out: list[str] = []
+    found = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("JARVIS_AGENT=") or stripped.startswith("export JARVIS_AGENT="):
+            out.append(f"JARVIS_AGENT={agent}")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        out.append(f"JARVIS_AGENT={agent}")
+    ENV_FILE.write_text("\n".join(out) + "\n")
+    return ENV_FILE
+
+
 # TTS engine selection: "edge" = Microsoft neural voices (primary, mp3 via
 # gst-launch-1.0), "piper" = offline es_MX-ald-medium fallback (wav via paplay).
 TTS_ENGINE = "edge"
-EDGE_VOICE = "es-MX-JorgeNeural"
+# Voice follows the selected agent (EDGE_VOICE = AGENT_PROFILES[AGENT].voice).
+# A manual EDGE_VOICE=... in .env/shell still overrides the agent's voice —
+# kept for backwards compatibility, but the agent's voice is the intended knob.
+EDGE_VOICE: str = os.environ.get("EDGE_VOICE") or AGENT_PROFILES[AGENT]["voice"]
 # Optional edge-tts voice shaping flags, e.g. "-10%" or "-5Hz"; None = omit.
 EDGE_RATE: str | None = None
 EDGE_PITCH: str | None = None

@@ -12,7 +12,7 @@ español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 
 - **Wake word personalizado**: openWakeWord/XLSR con modelo custom rioplatense (~80ms, ~2-5% CPU)
 - **STT offline**: whisper.cpp (tiny/small/medium) — nunca envía audio a internet
-- **TTS neural**: Edge TTS (es-MX-JorgeNeural) con fallback offline Piper
+- **TTS neural**: Edge TTS (voz por agente: Jarvis/Friday/Karen) con fallback offline Piper
 - **LLM dual**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
 - **4 dominios de acción**: sistema, archivos, web, OpenCode
 - **Seguridad**: comandos destructivos piden confirmación por voz (15s timeout) + intents destructivos bloqueados por política
@@ -218,6 +218,9 @@ jarvis on           # Reanudar escucha
 jarvis clean        # Limpiar logs y audio temporal
 jarvis diagnose     # Verificar configuración antes de arrancar
 jarvis dictation    # Modo dictado — input de texto por voz
+jarvis agent        # Ver el agente/personaje activo
+jarvis agent friday # Cambiar de agente (escribe JARVIS_AGENT en .env)
+jarvis setup        # Wizard para elegir agente/personaje
 ```
 
 ### Desde otra terminal (señales)
@@ -374,6 +377,9 @@ El panel muestra el estado actual del asistente:
 Las opciones están en `jarvis/src/jarvis/config.py` o se pueden sobreescribir con `.env`:
 
 ```python
+# Agente / personaje
+JARVIS_AGENT = "jarvis"          # "jarvis" | "friday" | "karen" (default: jarvis)
+
 # Wake word
 WAKE_ENGINE = "xslr"             # "openwakeword" (default) o "xslr" (entrenada)
 WAKE_THRESHOLD = 0.7             # Sensibilidad (0.1-0.9)
@@ -399,7 +405,7 @@ BARGE_IN_WAKE_THRESHOLD = 0.85   # Umbral alto: evita auto-disparo con la voz de
 
 # TTS
 TTS_ENGINE = "edge"              # "edge" (neural) o "piper" (offline)
-EDGE_VOICE = "es-MX-JorgeNeural"
+EDGE_VOICE = "<voz del agente>"  # Sigue al agente activo (ver "Agente" abajo)
 
 # STT
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
@@ -425,11 +431,46 @@ DANGEROUS_PATTERNS = 40          # conteo real de patrones de peligro (Capa 2, d
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
 ```
 
+### Agente / personaje
+
+El asistente tiene **3 agentes seleccionables**: `jarvis`, `friday` y `karen`.
+Cada uno define **nombre**, **personalidad** (cómo responde, qué tratamiento usa
+con vos) y **voz de edge-tts**. Al cambiar de agente cambian los tres en todo el
+runtime (saludo de boot, mensajes hablados y respuestas del LLM).
+
+Se elige desde `.env` (repo root) o con los comandos del CLI:
+
+```bash
+jarvis agent              # ver agente activo + voz + personalidad
+jarvis agent friday       # cambiar a Friday (escribe .env, reiniciá para aplicar)
+jarvis setup              # wizard interactivo con los 3 agentes
+```
+
+`.env`:
+
+```bash
+# .env (repo root)
+JARVIS_AGENT=friday       # jarvis | friday | karen
+```
+
+| Agente | Nombre | Voz edge-tts | Tratamiento |
+|--------|--------|--------------|-------------|
+| `jarvis` | Jarvis | `es-NI-FedericoNeural` | "señor" |
+| `friday` | Friday | `es-PE-CamilaNeural` | "jefe" |
+| `karen` | Karen | `es-GT-MartaNeural` | "amigo" |
+
+El default es `jarvis`. Si `JARVIS_AGENT` tiene un valor inválido, Jarvis avisa
+por stderr y usa `jarvis`.
+
 ### Cambiar la voz
+
+La voz sigue al agente activo (`EDGE_VOICE = AGENT_PROFILES[AGENT]["voice"]`).
+Si querés forzar una voz distinta a la del agente (escape hatch), `EDGE_VOICE`
+en `.env` sigue siendo respetado:
 
 ```python
 EDGE_VOICE = "es-MX-DaliaNeural"   # femenina
-EDGE_VOICE = "es-MX-JorgeNeural"   # masculina (default)
+EDGE_VOICE = "es-MX-JorgeNeural"   # masculina
 EDGE_VOICE = "es-AR-TomasNeural"   # argentino
 ```
 

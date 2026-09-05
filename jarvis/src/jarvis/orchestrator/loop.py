@@ -72,6 +72,20 @@ STT_ERROR_SPOKEN = "Lo lamento, señor, no pude escucharlo. Intente de nuevo."
 LONG_OPERATION_ACK = "En ello estoy, señor. Le aviso cuando termine."
 
 
+def _spoken_toward(default_message: str) -> str:
+    """Agent-aware spoken text: swap "señor" for the active agent's address.
+
+    The module-level constants above keep the jarvis defaults (imported
+    verbatim by tests); the runtime roads them through this helper so non-jarvis
+    agents (friday/karen) address the user with their own treatment. jarvis
+    (address == "señor") returns the exact default string.
+    """
+    address = config.agent_address()
+    if address == "señor":
+        return default_message
+    return default_message.replace("señor", address)
+
+
 @dataclass
 class Pipeline:
     clock: object
@@ -254,7 +268,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         try:
             transcript = pipeline.capture.capture()
         except CaptureError:
-            pipeline.speaker.speak(STT_ERROR_SPOKEN)
+            pipeline.speaker.speak(_spoken_toward(STT_ERROR_SPOKEN))
             context.outcome = "stt_error"
             return State.IDLE, context
         if transcript is None:
@@ -346,23 +360,24 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.CONFIRMING, context
         if step == "reask":
             attempt = pipeline.session.reask_attempts
-            base_msg = REASK_1 if attempt == 1 else REASK_2
+            base_msg = _spoken_toward(REASK_1 if attempt == 1 else REASK_2)
             hint = context.interpretation.suggestion if context.interpretation else None
             pipeline.speaker.speak(f"{base_msg} ¿Quisiste {hint}?" if hint else base_msg)
             context.outcome = "reask"
             return State.LISTENING, context
         if step == "reveal":
-            pipeline.speaker.speak(REVEAL_PREFIX + transcript)
+            pipeline.speaker.speak(_spoken_toward(REVEAL_PREFIX) + transcript)
             context.outcome = "revealed"
             return State.SPEAKING, context
         if step == "rejected":
-            pipeline.speaker.speak(REJECTED_SPOKEN)
+            pipeline.speaker.speak(_spoken_toward(REJECTED_SPOKEN))
             context.outcome = "rejected"
             return State.SPEAKING, context
         if step == "unsupported":
             hint = context.interpretation.suggestion if context.interpretation else None
             pipeline.speaker.speak(
-                f"{UNSUPPORTED_SPOKEN} ¿Quisiste {hint}?" if hint else UNSUPPORTED_SPOKEN
+                f"{_spoken_toward(UNSUPPORTED_SPOKEN)} ¿Quisiste {hint}?"
+                if hint else _spoken_toward(UNSUPPORTED_SPOKEN)
             )
             context.outcome = "unsupported"
             return State.SPEAKING, context
@@ -383,7 +398,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # PR6 (item 5): a capture failure during the confirmation gate is
             # transient — apologize and retry the confirmation (never abort
             # the destructive op silently).
-            pipeline.speaker.speak(STT_ERROR_SPOKEN)
+            pipeline.speaker.speak(_spoken_toward(STT_ERROR_SPOKEN))
             context.outcome = "stt_error"
             return State.CONFIRMING, context
         if verdict is Confirmation.CONFIRMED:
@@ -395,12 +410,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     if state is State.EXECUTING:
         intent = context.interpretation.intent
         if _needs_repo(intent.intent) and _resolve_repo(pipeline, context) is None:
-            pipeline.speaker.speak(NO_ACTIVE_PROJECT)
+            pipeline.speaker.speak(_spoken_toward(NO_ACTIVE_PROJECT))
             context.outcome = "rejected"
             _write_fsm_state("speaking")
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
-            pipeline.speaker.speak(LONG_OPERATION_ACK)
+            pipeline.speaker.speak(_spoken_toward(LONG_OPERATION_ACK))
         if intent.intent == "general_qa" and config.LLM_PROVIDER != "gemini":
             # Stream sentence-by-sentence so Jarvis starts speaking before
             # Ollama finishes generating the full answer (see
@@ -493,7 +508,7 @@ def _is_long_running(executor: object, intent: str) -> bool:
 
 # --- CLI wiring (task 3.6 / PR6 task 5.7) -------------------------------------
 
-ANNOUNCEMENT = "Buen día, señor. Soy Jarvis, a su servicio."
+ANNOUNCEMENT = config.agent_announcement()
 
 
 def build_pipeline(

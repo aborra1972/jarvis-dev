@@ -37,7 +37,7 @@ Se analizaron 10+ proyectos GitHub con stack similar. Ver `docs/github-jarvis-st
 | # | Mejora | Fuente | Estado |
 |---|--------|--------|--------|
 | 1 | Silero VAD (ONNX offline) para corte de grabación | casha-cashu/jarvis | ✅ Implementado |
-| 2 | Bash agent 3 capas de seguridad (~40 patrones) | casha-cashu/jarvis | 🟡 Parcial (intents destructivos bloqueados) |
+| 2 | Bash agent 3 capas de seguridad (~40 patrones) | casha-cashu/jarvis | ✅ Implementado |
 | 3 | Multi-turn follow-up con timeout configurable | casha-cashu/jarvis | ✅ Implementado (modo conversación 8s) |
 | 4 | Calibración de ruido ambiente al wake | GradByte/Jarvis-on-Linux | ✅ Implementado |
 | 5 | Flush de buffer stale post-playback | GradByte/Jarvis-on-Linux | ✅ Implementado |
@@ -418,13 +418,11 @@ USAGE_PATTERN_MIN_COUNT = 5      # Mínima frecuencia para sugerir un patrón
 
 # Seguridad
 AUTO_EXECUTE = False             # False = confirmar antes de ejecutar comandos
+SAFETY_GATE = "strict"           # "auto" | "strict" | "yolo" (Capa 3, T-SAFE-02)
+DANGEROUS_PATTERNS = 40          # conteo real de patrones de peligro (Capa 2, deriva de schema)
 
 # Apps permitidas
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
-
-# Seguridad
-SAFETY_GATE = "strict"           # "auto" | "strict" | "yolo"
-DANGEROUS_PATTERNS = 40          # ~40 patrones regex de peligro
 ```
 
 ### Cambiar la voz

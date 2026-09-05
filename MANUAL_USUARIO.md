@@ -353,6 +353,8 @@ USAGE_PATTERN_MIN_COUNT = 5      # Mínima frecuencia para sugerir un patrón
 
 # Seguridad
 AUTO_EXECUTE = False             # False = confirmar antes de ejecutar
+SAFETY_GATE = "strict"           # "auto" | "strict" | "yolo" (ver sección 13)
+DANGEROUS_PATTERNS = 40          # conteo real de patrones de peligro (deriva de schema)
 ```
 
 ### Cambiar la voz
@@ -373,33 +375,52 @@ TTS_ENGINE = "piper"
 
 ## 13. Seguridad y aprobación de comandos
 
-Jarvis implementa 3 capas de seguridad para comandos destructivos:
+Jarvis implementa 3 capas de seguridad (T-SAFE-01/02). La capa 1 y 2 son
+fijas (no dependen de la config); la capa 3 la controla `SAFETY_GATE`.
 
-### Capa 1: Hardline blocklist (siempre bloqueado)
+### Capa 1: Golden gate (intents destructivos hablados)
 
-Comandos catastróficos que **nunca** se ejecutan:
+Frases destructivas se reconocen ANTES de consultar el modelo, con patrones
+rioplatenses exactos, y siempre piden confirmación:
 
-- `rm -rf /`
-- `mkfs`
-- `dd of=/dev/sd`
-- Fork bombs
-- `chmod -R 000 /`
+- Apagar/reiniciar: "cerrá linux", "reiniciá la máquina", "apagate"
+- Formatear: "formateá el disco", "formateá la memoria"
+- Borrar todo: "borrá el sistema", "borrá todo", "eliminá todo en el disco",
+  "borrá todos mis archivos"
+- Matar procesos: "matá un proceso", "cortá un proceso"
 
-### Capa 2: Dangerous patterns (~40 patrones)
+Los intents **bloqueados por política** (`format_disk`, `wipe_system`,
+`delete_all`, `kill_process`) no solo piden confirmación: Jarvis los **rechaza
+hablado** con una negativa y no los ejecuta en ninguna circunstancia.
+`shutdown`, `reboot` y `power_off_self` sí se ejecutan tras tu confirmación.
 
-Patrones peligrosos con warning:
+### Capa 2: Patrones peligrosos (40 patrones)
 
-- `rm -rf ~` (home deletion)
-- `curl | sh` (pipe to bash)
-- `git push -f` (force push)
-- `iptables -F` (flush firewall)
-- `kill -9 -1` (kill all processes)
+Todo comando que pasa por el agente se compara contra `DANGEROUS_PATTERNS`
+regex que detectan efectos destructivos aunque usen binarios permitidos:
 
-### Capa 3: Approval gate
+- `rm -rf /` `~/ *` `*`, `find ... -exec rm`
+- `dd`/`mkfs`/`fdisk`/LVM sobre discos, `wipefs`, `blkdiscard`
+- `chmod -R 777`, `chmod +s`, `chmod 000 /`
+- `kill -9`, `killall` de systemd/X/audio, `systemctl stop/poweroff`
+- `apt/dpkg remove` de paquetes base, `umount /`, `tar -C /`
+- `git push --force`, `git reset --hard`
+- `curl | sh`, `wget | sh`, escrituras a `/dev` y `/etc`
+- Lectura de claves SSH / `.env`, `iptables -F`, fork bombs
 
-- **auto**: Ejecuta sin preguntar (comandos seguros)
-- **strict**: Pide confirmación por voz (default)
-- **yolo**: Ejecuta todo sin preguntar (no recomendado)
+Un comando que matchea **siempre** se confirma, incluso con `AUTO_EXECUTE`
+activado o `SAFETY_GATE = "auto"`.
+
+### Capa 3: Approval gate (`SAFETY_GATE`)
+
+Controla cuándo se pide confirmación por voz para los comandos rutinarios:
+
+- **strict** (default): pide confirmación para TODOS los comandos
+- **auto**: sigue a `AUTO_EXECUTE` (False = confirmar todo; True = ejecutar
+  rutinarios sin preguntar, los peligrosos de la Capa 2 siempre confirman)
+- **yolo**: ejecuta rutinarios sin preguntar; los peligrosos y los destructivos
+  de la Capa 1 siguen confirmando (yolo acelera lo rutinario, no desbloquea
+  lo destructivo)
 
 ---
 

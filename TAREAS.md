@@ -116,16 +116,16 @@
 - Capa 2: Dangerous patterns (~40 patrones) con warning
 - Capa 3: Approval gate (auto/strict/yolo)
 
-**Avance 2026-09-05 (parcial)**:
+**Avance 2026-09-05 (completa)**:
 - [x] Intents destructivos (`format_disk`, `wipe_system`, `delete_all`, `kill_process`) registrados como `blocked_destructive` en `build_registry()` — rechazan con negativa hablada
 - [x] `format_disk`, `wipe_system` en `DOMAIN_INTENTS["system"]`
 - [x] Tests de gating destructivo (`tests/unit/test_schema.py`)
-- [ ] Hardline blocklist del golden gate
-- [ ] Dangerous patterns (~40 patrones)
-- [ ] Approval gate configurable
-- [ ] Tests para cada capa
+- [x] Hardline blocklist completo del golden gate: los 7 intents destructivos (shutdown, reboot, power_off_self + format_disk, wipe_system, delete_all, kill_process) salen por patrones rioplatenses full-anchored con `confirm_required=True`, sin consultar al LLM. Los 4 sin operador real salen con `blocked=True` (política: `POLICY_BLOCKED_INTENTS` en golden.py) → el handler `blocked_destructive` los rechaza hablado
+- [x] Dangerous patterns: `_DANGEROUS_COMMAND_PATTERNS` expandido a 40 patrones en schema.py (catastróficos rm, dd/mkfs/fdisk/LVM, chmod/chown abusivos, kill -9/killall/systemctl, apt/dpkg base, escrituras a /dev//etc, umount/tar, git push -f, curl|sh, secretos SSH/.env, iptables -F, fork bomb) + `dangerous_pattern_count()` derivado en vivo
+- [x] Approval gate configurable (`SAFETY_GATE` auto/strict/yolo) con política real: yolo nunca desbloquea destructivos del gate; auto confirma siempre comandos peligrosos
+- [x] Tests por capa + matriz 57 peligrosos / 37 seguros + M6 extendido a los 7 destructivos — suite completa 791 passed, 0 failed
 
-**Estado**: `[~]` Parcial — bloqueo de intents destructivos listo; falta el golden gate completo
+**Estado**: `[x]` Completada
 
 ### T-SAFE-02: Agregar config de seguridad
 **Archivos**: `jarvis/src/jarvis/config.py`
@@ -136,9 +136,9 @@
 
 **Criterio de completitud**:
 - [x] `AUTO_EXECUTE` existe y está documentado (README + MANUAL)
-- [ ] Config options `SAFETY_GATE` y `DANGEROUS_PATTERNS` existen
+- [x] Config options `SAFETY_GATE` y `DANGEROUS_PATTERNS` existen — `SAFETY_GATE = "strict"` (auto/strict/yolo) y `DANGEROUS_PATTERNS = dangerous_pattern_count()` (derivado en vivo de `schema._DANGEROUS_COMMAND_PATTERNS`, hoy 40)
 
-**Estado**: `[~]` Parcial
+**Estado**: `[x]` Completada
 
 ---
 
@@ -304,22 +304,22 @@
 |------|--------|-------------|------------|
 | 1. Diagnostico | 2 | 2 | 0 |
 | 2. VAD y Audio | 4 | 4 | 0 |
-| 3. Seguridad | 2 | 0 | 2 (parcial T-SAFE-01 y T-SAFE-02) |
+| 3. Seguridad | 2 | 2 | 0 |
 | 4. NLU | 2 | 2 | 0 |
 | 5. Multi-turn | 2 | 2 | 0 |
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **10** | **7** |
+| **Total** | **17** | **12** | **5** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-SAFE-01** (continuar): completar capa 1-3 del golden gate (hardline blocklist,
-dangerous patterns, approval gate). El bloqueo de intents destructivos ya está.
+**T-FUZZY-01**: reemplazar difflib con rapidfuzz (fuzzy matching)
+(ver sección Fase 6). T-SAFE-01 y T-SAFE-02 completadas.
 
-Fases 1-2-4-5 (Diagnostico, VAD/Audio, NLU, Multi-turn) completadas
+Fases 1-2-3-4-5 (Diagnostico, VAD/Audio, Seguridad, NLU, Multi-turn) completadas
 (2026-09-05: fusionados cambios del estudio + robustez al ruido + modo conversacion).
 
 ---

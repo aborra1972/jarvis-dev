@@ -110,101 +110,105 @@
 ## Fase 3: Seguridad (Prioridad 7-8)
 
 ### T-SAFE-01: Agregar 3 capas de seguridad al golden gate
-**Archivos**: `jarvis/src/jarvis/interpreter/golden.py`
+**Archivos**: `jarvis/src/jarvis/interpreter/golden.py`, `jarvis/src/jarvis/actions/base.py`
 **Que hacer**:
 - Capa 1: Hardline blocklist (siempre bloqueado) — ~10 patrones
 - Capa 2: Dangerous patterns (~40 patrones) con warning
 - Capa 3: Approval gate (auto/strict/yolo)
 
-**Criterio de completitud**:
-- [ ] Hardline blocklist bloquea comandos catastroficos
-- [ ] Dangerous patterns detecta ~40 patrones
+**Avance 2026-09-05 (parcial)**:
+- [x] Intents destructivos (`format_disk`, `wipe_system`, `delete_all`, `kill_process`) registrados como `blocked_destructive` en `build_registry()` — rechazan con negativa hablada
+- [x] `format_disk`, `wipe_system` en `DOMAIN_INTENTS["system"]`
+- [x] Tests de gating destructivo (`tests/unit/test_schema.py`)
+- [ ] Hardline blocklist del golden gate
+- [ ] Dangerous patterns (~40 patrones)
 - [ ] Approval gate configurable
 - [ ] Tests para cada capa
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[~]` Parcial — bloqueo de intents destructivos listo; falta el golden gate completo
 
 ### T-SAFE-02: Agregar config de seguridad
 **Archivos**: `jarvis/src/jarvis/config.py`
 **Que hacer**:
-- `SAFETY_GATE = "strict"` (auto/strict/yolo)
-- `DANGEROUS_PATTERNS = 40`
+- `AUTO_EXECUTE = False` ✅ (ya existe: False = confirmar antes de ejecutar)
+- `SAFETY_GATE = "strict"` (auto/strict/yolo) — pendiente
+- `DANGEROUS_PATTERNS = 40` — pendiente
 
 **Criterio de completitud**:
-- [ ] Config options existen
-- [ ] Documentadas en README y MANUAL_USUARIO
+- [x] `AUTO_EXECUTE` existe y está documentado (README + MANUAL)
+- [ ] Config options `SAFETY_GATE` y `DANGEROUS_PATTERNS` existen
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[~]` Parcial
 
 ---
 
 ## Fase 4: NLU Classifier (Prioridad 9-10)
 
 ### T-NLU-01: Implementar TF-IDF + LogReg classifier
-**Archivos**: `jarvis/src/jarvis/interpreter/nlu_classifier.py`
+**Archivos**: `jarvis/src/jarvis/interpreter/nlu.py`
 **Que hacer**:
-- Clase `IntentClassifier` con vectorizer + classifier
-- Entrenar con ejemplos de comandos rioplatenses
-- Cache con joblib en `~/.local/share/jarvis/nlu`
+- Clase/clasificador con vectorizer TF-IDF + LogisticRegression
+- Entrenado con ejemplos de comandos rioplatenses embebidos en el módulo
+- Devuelve `Suggestion(intent, confidence, spoken)` o `None`
 
 **Criterio de completitud**:
-- [ ] Classifier entrena con ejemplos
-- [ ] Predice intents con confianza
-- [ ] Cache funciona (joblib)
-- [ ] Tests unitarios
+- [x] Clasifica comandos con confianza (ej: "abrir firefox" → open_app)
+- [x] Devuelve `None` para frases fuera de dominio
+- [x] Nunca lanza (guardado con try/except, sklearn lazy)
+- [x] Tests unitarios (`tests/unit/test_nlu.py`)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-NLU-02: Integrar NLU en el pipeline
-**Archivos**: `jarvis/src/jarvis/interpreter/golden.py`, `jarvis/src/jarvis/orchestrator/loop.py`
+**Archivos**: `jarvis/src/jarvis/interpreter/interpreter.py`, `jarvis/src/jarvis/orchestrator/loop.py`
 **Que hacer**:
-- NLU corre antes del LLM para intents no destructivos
-- Si confianza >= 0.65, usa NLU (rapido)
-- Si confianza < 0.65, fallback a LLM
+- Cuando el intérprete no entiende, NLU ofrece una sugerencia hablada
+- **No ejecuta nada** — solo un hint de qué intención probablemente quisiste decir
+- Nunca interfiere con el routing LLM normal
 
 **Criterio de completitud**:
-- [ ] NLU se integra en el pipeline
-- [ ] Fallback a LLM funciona
-- [ ] Config option `NLU_ENABLED` y `NLU_CONFIDENCE`
+- [x] `interpreter.py` consulta `nlu.classify()` cuando no hay intent
+- [x] La sugerencia se habla, nunca se ejecuta
+- [x] Protegido contra fallos (nunca rompe el loop)
+- [x] Tests de integración (`tests/unit/test_loop.py`)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
 ## Fase 5: Multi-turn y Dictation (Prioridad 11-13)
 
-### T-MULTI-01: Agregar estado follow-up al FSM
-**Archivos**: `jarvis/src/jarvis/orchestrator/state.py`, `jarvis/src/jarvis/orchestrator/loop.py`
+### T-MULTI-01: Modo conversación (follow-up sin wake word)
+**Archivos**: `jarvis/src/jarvis/orchestrator/loop.py`, `jarvis/src/jarvis/config.py`
 **Que hacer**:
-- Nuevo estado `followup` despues de `speaking`
-- Timeout configurable (10s por defecto)
-- Si hay input durante followup, procesar directamente
-- Si wake word durante followup, reiniciar ciclo
+- Tras un comando exitoso, quedarse escuchando `CONVERSATION_WINDOW_S` (8s) sin wake word
+- 0 = desactivado (siempre requiere "jarvis")
+- La ventana se renueva tras cada comando exitoso
 
 **Criterio de completitud**:
-- [ ] Estado follow-up existe en FSM
-- [ ] Timeout funciona (10s)
-- [ ] Input durante followup se procesa
-- [ ] Wake word reinicia ciclo
-- [ ] Config option `FOLLOWUP_TIMEOUT_S`
+- [x] `CONVERSATION_WINDOW_S = 8.0` en config
+- [x] Loop arma la ventana tras comando exitoso
+- [x] Vuelve a requerir wake word si no hay input en la ventana
+- [x] Config option documentada en README y MANUAL
+- [x] Tests (`tests/unit/test_loop.py`)
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada — diseño adaptado: ventana temporal en loop.py en vez de estado FSM
 
 ### T-DICT-01: Implementar `jarvis dictation` mode
-**Archivos**: `jarvis/src/jarvis/cli.py`, `jarvis/src/jarvis/dictation.py`
+**Archivos**: `jarvis/src/jarvis/interpreter/dictation.py`, `jarvis/src/jarvis/cli.py`
 **Que hacer**:
 - Modo dictado: escucha continua, transcribe, escribe texto
 - Deteccion de pausas (800ms) como fin de frase
 - Salida con Ctrl+C o "para dictado"
-- Usar wtype/xdotool para escribir en foco actual
+- Red de seguridad de 120s (`AUDIO_MAX_UTTERANCE_S`) para dictado largo
 
 **Criterio de completitud**:
-- [ ] `jarvis dictation` funciona
-- [ ] Transcribe continuamente
-- [ ] Sale con Ctrl+C o "para dictado"
-- [ ] Escribe texto en foco actual
+- [x] `jarvis dictation` funciona
+- [x] Transcribe continuamente
+- [x] Sale con Ctrl+C o "para dictado"
+- [x] Escribe texto en foco actual
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -300,22 +304,24 @@
 |------|--------|-------------|------------|
 | 1. Diagnostico | 2 | 2 | 0 |
 | 2. VAD y Audio | 4 | 4 | 0 |
-| 3. Seguridad | 2 | 0 | 2 |
-| 4. NLU | 2 | 0 | 2 |
-| 5. Multi-turn | 2 | 0 | 2 |
+| 3. Seguridad | 2 | 0 | 2 (parcial T-SAFE-01 y T-SAFE-02) |
+| 4. NLU | 2 | 2 | 0 |
+| 5. Multi-turn | 2 | 2 | 0 |
 | 6. Rapidfuzz | 2 | 0 | 2 |
 | 7. Phrases/Hist | 2 | 0 | 2 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **6** | **11** |
+| **Total** | **17** | **10** | **7** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-SAFE-01**: Agregar 3 capas de seguridad al golden gate
+**T-SAFE-01** (continuar): completar capa 1-3 del golden gate (hardline blocklist,
+dangerous patterns, approval gate). El bloqueo de intents destructivos ya está.
 
-Fases 1-2 (Diagnostico, VAD y Audio) completadas. Seguir con Fase 3: Seguridad (golden gate).
+Fases 1-2-4-5 (Diagnostico, VAD/Audio, NLU, Multi-turn) completadas
+(2026-09-05: fusionados cambios del estudio + robustez al ruido + modo conversacion).
 
 ---
 
-*Ultima actualizacion: 2026-08-22*
+*Ultima actualizacion: 2026-09-05*

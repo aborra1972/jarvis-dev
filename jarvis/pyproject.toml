@@ -18,6 +18,7 @@ dependencies = [
     "openwakeword",
     "edge-tts",
     "silero-vad",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]

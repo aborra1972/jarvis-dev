@@ -39,18 +39,19 @@
 - Integración con OpenCode para desarrollo
 - Privacidad total — todo queda en tu máquina
 - Wake word personalizado "jarvis" con tu pronunciación rioplatense
-- Multi-turn follow-up — queda escuchando 10s después de responder
+- Modo conversación — respondé seguimientos sin repetir "jarvis" (8s configurables)
 - Dictation mode — input de texto por voz en cualquier app
 - Diagnóstico pre-start — verifica todo antes de arrancar
+- Detección robusta al ruido — Silero VAD ONNX + calibración al wake
 - 3 capas de seguridad para comandos destructivos
 
 **Stack tecnológico:**
 - **STT**: Whisper.cpp (tiny/small/medium)
 - **TTS**: Edge TTS (es-MX-JorgeNeural) + Piper (offline fallback)
 - **LLM**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
-- **Wake Word**: openWakeWord con modelo custom rioplatense
-- **VAD**: Silero VAD para detección precisa de voz vs ruido
-- **NLU**: TF-IDF + LogisticRegression para intents no destructivos
+- **Wake Word**: openWakeWord / XLSR con modelo custom rioplatense
+- **VAD**: Silero VAD ONNX (offline, sin nube)
+- **NLU**: TF-IDF + LogisticRegression para sugerencias al no entender
 - **Acciones**: OpenCode serve + Python executors
 - **GUI**: GTK3 (panel de control con estado en tiempo real)
 
@@ -179,12 +180,20 @@ El panel de control es una ventana flotante en la esquina superior derecha.
 1. **Activar**: Decí "JARVIS" con tu pronunciación natural
 2. **Comando**: Decí lo que necesitás (ej: "abrí la terminal")
 3. **Respuesta**: Jarvis confirma y ejecuta
-4. **Follow-up**: Jarvis queda escuchando 10s para seguimientos
+4. **Follow-up**: Jarvis queda escuchando unos segundos para seguimientos
 5. **Repetir**: Para otro comando, volvé a decir "JARVIS"
 
 ### Calibración automática de ruido
 
 Cada vez que se detecta el wake word, Jarvis calibra automáticamente el nivel de ruido ambiente durante 500ms. Esto evita falsos positivos y mejora la precisión del VAD.
+
+### Detección robusta al ruido
+
+Jarvis combina tres mecanismos para escucharte bien incluso con ruido de fondo:
+
+1. **Silero VAD ONNX**: red neuronal de detección de voz (offline, sin nube). Separa tu voz del ruido ambiente y corta la grabación cuando dejás de hablar.
+2. **Calibración de ruido al wake**: al detectar "jarvis", mide el ruido ambiente 500ms y sube el umbral (ruido × 1.2) para no confundir ruido con voz.
+3. **Flush de buffer post-respuesta**: cuando Jarvis termina de hablar, descarta ~1s de audio residual para que su propia voz no re-dispare el wake word en el siguiente ciclo.
 
 ### Ejemplos de uso
 
@@ -194,33 +203,38 @@ Jarvis: [sonido de confirmación]
 Tú: "abrí firefox"
 Jarvis: "Abriendo Firefox, señor"
 [Se abre Firefox]
-[10s follow-up — Jarvis queda escuchando]
+[beep suave — queda escuchando para seguimientos]
 Tú: "buscá openwakeword en google"
 Jarvis: "Buscando 'openwakeword' en Google..."
 ```
 
 ---
 
-## 8. Multi-turn follow-up
+## 8. Multi-turn follow-up (modo conversación)
 
-Después de responder, Jarvis queda escuchando automáticamente durante 10 segundos para seguimientos.
+Después de ejecutar un comando con éxito, Jarvis queda escuchando automáticamente durante una ventana configurable (8 segundos por defecto) para seguimientos sin repetir el wake word.
 
 ```
 Tú: "JARVIS, abrí firefox"
 Jarvis: "Abriendo Firefox, señor"
-      [10s follow-up — queda escuchando]
-Tú: "buscá openwakeword"
-Jarvis: "Buscando 'openwakeword'..."
+      [beep suave — queda escuchando 8s]
+Tú: "ahora abrí spotify"
+Jarvis: "Abriendo Spotify, señor"
+      [beep suave — la ventana se renueva otros 8s]
 ```
 
-Si decís "JARVIS" durante el follow-up, se reinicia el ciclo con un nuevo comando.
+Si no decís nada en la ventana, vuelve a requerir "jarvis" normalmente.
+La ventana solo se arma tras un comando **exitoso**: si Jarvis no entendió o
+rechazó el comando, no queda escuchando de más.
 
 ### Configuración
 
 ```python
-FOLLOWUP_TIMEOUT_S = 10    # Segundos de follow-up
-FOLLOWUP_WAKE = True       # Si wake word reinicia el ciclo
+CONVERSATION_WINDOW_S = 8.0    # Segundos de follow-up sin wake word; 0 = off
+BARGE_IN_ENABLED = False       # Interrumpir respuesta con el wake word (sin AEC)
 ```
+
+Si decís "JARVIS" durante la ventana de conversación, se reinicia el ciclo con un nuevo comando.
 
 ---
 
@@ -295,24 +309,29 @@ Jarvis puede desencadenar agentes de IA mediante comandos de voz para tareas de 
 ### Archivo de configuración
 
 `jarvis/src/jarvis/config.py` contiene todas las opciones. Podés sobreescribirlas con `.env` en la raíz del repo:
-
 ```python
 # Wake word
-WAKE_ENGINE = "openwakeword"
-WAKE_THRESHOLD = 0.5
-WAKE_MODEL = SPIKE / "models" / "hey_jarvis.onnx"
+WAKE_ENGINE = "xslr"             # "openwakeword" (default) o "xslr" (entrenada)
+WAKE_THRESHOLD = 0.7             # Sensibilidad (0.1-0.9); evitar falsos positivos
+WAKE_CUSTOM_MODEL = None         # ONNX entrenado; None = hey_jarvis_v0.1.onnx
 
 # Audio
 AUDIO_SAMPLE_RATE = 16000
-AUDIO_BLOCK_MS = 80
-AUDIO_SILENCE_MS = 800
-AUDIO_CALIBRATE_MS = 500
+AUDIO_BLOCK_MS = 100
+AUDIO_SILENCE_MS = 800           # Corte por silencio
+AUDIO_MAX_UTTERANCE_S = 120.0    # Red de seguridad: dictado largo hasta 2 min
+AUDIO_CALIBRATE_MS = 500         # Calibración de ruido al wake
+AUDIO_CALIBRATE_FACTOR = 1.2     # umbral = ruido de fondo × factor
+AUDIO_FLUSH_MS = 1000            # Descarta mic residual post-respuesta
 
 # VAD
-VAD_ENGINE = "silero"
-VAD_THRESHOLD = 0.5
-VAD_MIN_SPEECH_MS = 250
-VAD_MIN_SILENCE_MS = 500
+AUDIO_USE_SILERO_VAD = True      # Silero VAD ONNX (recomendado) / False = energy
+AUDIO_SILERO_THRESHOLD = 0.5     # Umbral Silero (0.0-1.0)
+
+# Conversación
+CONVERSATION_WINDOW_S = 8.0      # Follow-up sin wake word; 0 = off
+BARGE_IN_ENABLED = False         # Interrumpir respuesta con wake word (sin AEC)
+BARGE_IN_WAKE_THRESHOLD = 0.85   # Umbral alto para barge-in
 
 # TTS
 TTS_ENGINE = "edge"
@@ -322,23 +341,18 @@ EDGE_VOICE = "es-MX-JorgeNeural"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1
 STT_USE_TINY = False
-STT_PROMPT = ""
+WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
 
 # LLM
-LLM_PROVIDER = "local"
+LLM_PROVIDER = "local"           # "local" | "gemini" | "auto"
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_TIMEOUT_S = 15.0
+OLLAMA_TIMEOUT_S = 30.0          # cold start necesita tiempo
 
-# NLU
-NLU_ENABLED = True
-NLU_CONFIDENCE = 0.65
-
-# Multi-turn
-FOLLOWUP_TIMEOUT_S = 10
-FOLLOWUP_WAKE = True
+# Sugerencias de patrones de uso
+USAGE_PATTERN_MIN_COUNT = 5      # Mínima frecuencia para sugerir un patrón
 
 # Seguridad
-SAFETY_GATE = "strict"
+AUTO_EXECUTE = False             # False = confirmar antes de ejecutar
 ```
 
 ### Cambiar la voz

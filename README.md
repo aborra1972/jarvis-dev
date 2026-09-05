@@ -10,36 +10,42 @@ español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 
 ## Características
 
-- **Wake word personalizado**: openWakeWord con modelo custom rioplatense (~80ms, ~2-5% CPU)
+- **Wake word personalizado**: openWakeWord/XLSR con modelo custom rioplatense (~80ms, ~2-5% CPU)
 - **STT offline**: whisper.cpp (tiny/small/medium) — nunca envía audio a internet
 - **TTS neural**: Edge TTS (es-MX-JorgeNeural) con fallback offline Piper
 - **LLM dual**: Ollama local (qwen2.5:3b) + Gemini cloud con fallback automático
 - **4 dominios de acción**: sistema, archivos, web, OpenCode
-- **Seguridad**: comandos destructivos piden confirmación por voz (15s timeout)
+- **Seguridad**: comandos destructivos piden confirmación por voz (15s timeout) + intents destructivos bloqueados por política
 - **Interruptor por señal**: `jarvis off`/`jarvis on` con SIGUSR1/SIGUSR2
 - **GUI GTK3**: panel de control con estado en tiempo real (escuchando/pensando/ejecutando)
 - **Privacidad total**: todo queda en tu máquina
 - **Dictation mode**: input de texto por voz en cualquier app (`jarvis dictation`)
-- **Multi-turn follow-up**: queda escuchando 10s después de responder para seguimientos
-- **NLU classifier**: TF-IDF + LogisticRegression para intents no destructivos (rápido, cacheado)
+- **Detección robusta al ruido**: Silero VAD ONNX + calibración de ruido ambiente al wake
+- **Modo conversación**: tras un comando exitoso, respondé seguimientos sin repetir "jarvis" (8s configurables)
+- **Barge-in**: interrumpí a Jarvis en medio de la respuesta repitiendo el wake word (opcional, off por defecto)
+- **Dictado largo**: red de seguridad de 120s — no te corta a mitad de frase ni deja grabar para siempre
+- **NLU classifier**: TF-IDF + LogisticRegression sugiere intenciones cuando no entiende (no ejecuta)
+- **Sugerencias proactivas**: Jarvis nota patrones de uso y propone atajos al arrancar
 - **`jarvis diagnose`**: verificación completa de mic, STT, TTS, wake word, Ollama antes de arrancar
 
 ## Mejoras del estudio GitHub (2026-08-22)
 
 Se analizaron 10+ proyectos GitHub con stack similar. Ver `docs/github-jarvis-study.md` para el estudio completo.
 
-### Alto impacto — incorporado o planificado
+### Alto impacto — incorporado
 
 | # | Mejora | Fuente | Estado |
 |---|--------|--------|--------|
-| 1 | Silero VAD para corte de grabación | casha-cashu/jarvis | 🟡 Planificado |
-| 2 | Bash agent 3 capas de seguridad (~40 patrones) | casha-cashu/jarvis | 🟡 Planificado |
-| 3 | Multi-turn follow-up con timeout 10s | casha-cashu/jarvis | 🟡 Planificado |
-| 4 | Calibración de ruido ambiente al wake | GradByte/Jarvis-on-Linux | 🟡 Planificado |
-| 5 | Flush de buffer stale post-playback | GradByte/Jarvis-on-Linux | 🟡 Planificado |
-| 6 | Rapidfuzz para fuzzy matching | casha-cashu/jarvis | 🟡 Planificado |
-| 7 | NLU classifier (TF-IDF + LogReg) | casha-cashu/jarvis | 🟡 Planificado |
-| 8 | `jarvis diagnose` | NaomiProject/Naomi | 🟡 Planificado |
+| 1 | Silero VAD (ONNX offline) para corte de grabación | casha-cashu/jarvis | ✅ Implementado |
+| 2 | Bash agent 3 capas de seguridad (~40 patrones) | casha-cashu/jarvis | 🟡 Parcial (intents destructivos bloqueados) |
+| 3 | Multi-turn follow-up con timeout configurable | casha-cashu/jarvis | ✅ Implementado (modo conversación 8s) |
+| 4 | Calibración de ruido ambiente al wake | GradByte/Jarvis-on-Linux | ✅ Implementado |
+| 5 | Flush de buffer stale post-playback | GradByte/Jarvis-on-Linux | ✅ Implementado |
+| 6 | Rapidfuzz para fuzzy matching | casha-cashu/jarvis | 🟡 Planificado (usa difflib) |
+| 7 | NLU classifier (TF-IDF + LogReg) | casha-cashu/jarvis | ✅ Implementado (sugerencias al no entender) |
+| 8 | `jarvis diagnose` | NaomiProject/Naomi | ✅ Implementado |
+| 9 | Barge-in (interrumpir respuesta con wake word) | casha-cashu/jarvis | 🟢 Configurable (off por defecto, `BARGE_IN_ENABLED`) |
+| 10 | Sugerencias proactivas de patrones de uso | casha-cashu/jarvis | ✅ Implementado |
 
 ### Medio impacto — Fase 2
 
@@ -269,19 +275,25 @@ kill -SIGUSR2 $(cat ~/.local/state/jarvis/jarvis.pid)
 | "corregí los warnings del lint" | Corrección automática de warnings |
 | "creá un artifact" | Genera artifact en proyecto activo |
 
-### Multi-turn follow-up
+### Multi-turn follow-up (modo conversación)
 
-Después de responder, Jarvis queda escuchando 10s para seguimientos:
+Después de ejecutar un comando con éxito, Jarvis queda escuchando
+`CONVERSATION_WINDOW_S` segundos (8s por defecto) sin que tengas que repetir
+el wake word para seguimientos:
 
 ```
 Tú: "JARVIS, abrí firefox"
 Jarvis: "Abriendo Firefox, señor"
-      [10s follow-up — queda escuchando]
-Tú: "buscá openwakeword en google"
-Jarvis: "Buscando 'openwakeword' en Google..."
+      [beep suave — queda escuchando 8s]
+Tú: "ahora abrí spotify también"
+Jarvis: "Abriendo Spotify, señor"
+      [beep suave — la ventana se renueva otros 8s]
 ```
 
-Si decís "JARVIS" durante el follow-up, se reinicia el ciclo con un nuevo comando.
+Si no decís nada en la ventana, vuelve a requerir "jarvis" normalmente. La
+ventana solo se arma después de un comando **exitoso** — si Jarvis no te
+entendió o rechazó el comando, no queda escuchando de más. Con
+`CONVERSATION_WINDOW_S = 0` se desactiva y siempre hay que decir "jarvis".
 
 ### Flujo de uso
 
@@ -363,21 +375,27 @@ Las opciones están en `jarvis/src/jarvis/config.py` o se pueden sobreescribir c
 
 ```python
 # Wake word
-WAKE_ENGINE = "openwakeword"     # "openwakeword" o "xslr" (legacy)
-WAKE_THRESHOLD = 0.5             # Sensibilidad (0.1-0.9)
-WAKE_MODEL = SPIKE / "models" / "hey_jarvis.onnx"
+WAKE_ENGINE = "xslr"             # "openwakeword" (default) o "xslr" (entrenada)
+WAKE_THRESHOLD = 0.7             # Sensibilidad (0.1-0.9)
+WAKE_CUSTOM_MODEL = None         # ONNX entrenado; None = hey_jarvis_v0.1.onnx
 
 # Audio
 AUDIO_SAMPLE_RATE = 16000
-AUDIO_BLOCK_MS = 80              # Tamaño de bloque (80ms @ 16kHz)
+AUDIO_BLOCK_MS = 100             # Tamaño de bloque (100ms @ 16kHz)
 AUDIO_SILENCE_MS = 800           # Tiempo de corte por silencio
+AUDIO_MAX_UTTERANCE_S = 120.0    # Red de seguridad: corte de dictado largo (2 min)
 AUDIO_CALIBRATE_MS = 500         # Calibración de ruido ambiente al wake
+AUDIO_CALIBRATE_FACTOR = 1.2     # umbral = ruido de fondo * factor
+AUDIO_FLUSH_MS = 1000            # Drena buffer de mic su propia voz no re-dispara wake
 
 # VAD
-VAD_ENGINE = "silero"            # "silero" (recomendado) o "energy" (legacy)
-VAD_THRESHOLD = 0.5              # Umbral Silero VAD (0.0-1.0)
-VAD_MIN_SPEECH_MS = 250          # Duración mínima de habla
-VAD_MIN_SILENCE_MS = 500         # Duración mínima de silencio
+AUDIO_USE_SILERO_VAD = True      # Silero VAD ONNX (recomendado) / False = energy
+AUDIO_SILERO_THRESHOLD = 0.5     # Umbral Silero VAD (0.0-1.0)
+
+# Conversación y barge-in
+CONVERSATION_WINDOW_S = 8.0      # Segundos sin wake word tras comando exitoso; 0 = off
+BARGE_IN_ENABLED = False         # Interrumpir respuesta diciendo "jarvis" de nuevo (sin AEC)
+BARGE_IN_WAKE_THRESHOLD = 0.85   # Umbral alto: evita auto-disparo con la voz de Jarvis
 
 # TTS
 TTS_ENGINE = "edge"              # "edge" (neural) o "piper" (offline)
@@ -387,21 +405,19 @@ EDGE_VOICE = "es-MX-JorgeNeural"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1                 # 1=rápido, 5=preciso
 STT_USE_TINY = False             # True: ggml-tiny.bin (~2-5x más rápido)
-STT_PROMPT = ""                  # Domain prompt para bias de Whisper
+WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
 
 # LLM
 LLM_PROVIDER = "local"           # "local" | "gemini" | "auto"
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_TIMEOUT_S = 15.0          # cold start necesita tiempo
+OLLAMA_TIMEOUT_S = 30.0          # cold start necesita tiempo
 
-# NLU Classifier
-NLU_ENABLED = True               # TF-IDF + LogReg para intents no destructivos
-NLU_CACHE = "~/.local/share/jarvis/nlu"
-NLU_CONFIDENCE = 0.65            # Umbral de confianza mínimo
+# Sugerencias de patrones de uso
+USAGE_SUGGESTIONS_FILE = "~/.local/state/jarvis/usage_suggestions.json"
+USAGE_PATTERN_MIN_COUNT = 5      # Mínima frecuencia para sugerir un patrón
 
-# Multi-turn
-FOLLOWUP_TIMEOUT_S = 10          # Timeout para follow-up después de hablar
-FOLLOWUP_WAKE = True             # Si wake word reinicia el ciclo
+# Seguridad
+AUTO_EXECUTE = False             # False = confirmar antes de ejecutar comandos
 
 # Apps permitidas
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}

@@ -151,6 +151,21 @@ def execute(intent: Intent, session: object) -> ActionResult:
     if binary == "rm" and _RM_DANGEROUS.search(command_str):
         return ActionResult(ok=False, spoken="Lo lamento, señor, no puedo borrar con -rf.")
 
+    # Defense in depth: the same broader danger check that forces
+    # confirm_required=True in interpreter.py (find -exec, mv/cp to
+    # /dev/null, chmod -R on /, reading /etc/shadow, etc.) is checked again
+    # here — but only as a safety net for a command that reaches execute()
+    # WITHOUT having gone through confirmation (intent.confirm_required is
+    # False despite being dangerous: a bug upstream, a stale cached intent,
+    # a future code path that skips the interpreter). If confirm_required is
+    # True, the FSM only reaches execute() via CONFIRMING → CONFIRMED, i.e.
+    # the user already said yes — this must NOT re-block it a second time.
+    if schema.is_dangerous_command(command_str) and not intent.confirm_required:
+        return ActionResult(
+            ok=False,
+            spoken="Ese comando necesita confirmación explícita, señor, y no la tengo.",
+        )
+
     base.log(f"execute: {command_str}")
     code, output = base.safe_run(command)
 

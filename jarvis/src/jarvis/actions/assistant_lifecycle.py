@@ -10,6 +10,7 @@ enrolls the user's voice for speaker verification.
 from __future__ import annotations
 
 import logging
+import re
 
 from jarvis.actions import base
 from jarvis import config
@@ -169,3 +170,92 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
     except Exception as exc:
         logger.error("general_qa failed: %s", exc)
         return ActionResult(ok=True, spoken="Lo lamento, señor, no puedo responder eso ahora.")
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def stream_general_qa(intent: Intent, session: object, speak_fn) -> ActionResult:
+    """Like handle_general_qa, but speaks each sentence as it's generated.
+
+    Streams tokens from Ollama (stream=True) instead of waiting for the full
+    response, buffering until a sentence boundary (.!?) and calling
+    ``speak_fn`` immediately for that sentence — the reply starts playing
+    seconds before the model finishes generating the rest, instead of after.
+
+    Only wired for the Ollama path: config.LLM_PROVIDER == "gemini" callers
+    should keep using handle_general_qa (Gemini's HTTP streaming shape is
+    different and isn't implemented here — falling back to non-streaming for
+    that path is intentional, not an oversight).
+
+    Returns an ActionResult with spoken="" (text was already spoken
+    incrementally via speak_fn) so the caller doesn't speak it a second time.
+    """
+    query = intent.entities.get("query", "")
+    if not query:
+        speak_fn("No recibí la pregunta, señor.")
+        return ActionResult(ok=False, spoken="")
+
+    import json
+    import urllib.error
+    import urllib.request
+
+    system_prompt = (
+        "Sos un asistente virtual útil y amigable. Respondé en español rioplatense, "
+        "breve y directo. Máximo 2-3 oraciones. No uses markdown ni formato especial."
+    )
+    url = f"{config.OLLAMA_BASE_URL}/api/generate"
+    payload = json.dumps({
+        "model": config.INTERPRETER_LLM_MODEL,
+        "prompt": query,
+        "system": system_prompt,
+        "stream": True,
+        "options": {
+            "num_ctx": 1024,
+            "temperature": 0.7,
+            "num_predict": 150,
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+
+    buffer = ""
+    full_text_parts: list[str] = []
+    try:
+        with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT_S) as resp:
+            for line in resp:
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                token = chunk.get("response", "")
+                buffer += token
+                # Speak complete sentences as soon as they're ready; keep any
+                # trailing partial sentence buffered for the next token(s).
+                parts = _SENTENCE_END.split(buffer)
+                if len(parts) > 1:
+                    for sentence in parts[:-1]:
+                        sentence = sentence.strip()
+                        if sentence:
+                            speak_fn(sentence)
+                            full_text_parts.append(sentence)
+                    buffer = parts[-1]
+                if chunk.get("done"):
+                    break
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        logger.error("stream_general_qa failed: %s", exc)
+        if not full_text_parts:
+            speak_fn("Lo lamento, señor, no puedo responder eso ahora.")
+        return ActionResult(ok=bool(full_text_parts), spoken="")
+
+    remainder = buffer.strip()
+    if remainder:
+        speak_fn(remainder)
+        full_text_parts.append(remainder)
+
+    if not full_text_parts:
+        speak_fn("No tengo una respuesta para eso, señor.")
+        return ActionResult(ok=True, spoken="")
+
+    logger.info("stream_general_qa response: %s", " ".join(full_text_parts)[:100])
+    return ActionResult(ok=True, spoken="")

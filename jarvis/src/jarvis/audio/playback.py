@@ -71,6 +71,7 @@ class Playback:
         self.player = player
         self.mp3_player = mp3_player
         self.timeout_s = timeout_s
+        self._current_proc: subprocess.Popen | None = None
 
     def play(self, path: Path) -> None:
         if str(path).endswith(".mp3"):
@@ -80,19 +81,43 @@ class Playback:
             cmd = [self.player, str(path)]
             player_name = self.player
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                check=False,
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
+            self._current_proc = proc
+            try:
+                _, stderr = proc.communicate(timeout=self.timeout_s)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                raise
+            finally:
+                self._current_proc = None
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise PlaybackError(f"{player_name} failed: {exc}") from exc
         if proc.returncode != 0:
             raise PlaybackError(
-                f"{player_name} exited {proc.returncode}: {proc.stderr.strip()}"
+                f"{player_name} exited {proc.returncode}: {(stderr or '').strip()}"
             )
+
+    def stop(self) -> None:
+        """Kill whatever is currently playing, right now (barge-in).
+
+        Best-effort and safe to call at any time, including when nothing is
+        playing (no-op) — a race against playback naturally finishing on its
+        own is expected and harmless.
+        """
+        proc = self._current_proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=0.5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     def play_beep(self) -> None:
         """Play a short activation beep to confirm wake-word detection."""

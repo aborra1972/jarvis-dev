@@ -256,6 +256,7 @@ class XLSRWakeWord:
         proba = float(result[0][0])
         if isinstance(proba, (list, np.ndarray)):
             proba = float(proba[0]) if len(proba) == 1 else float(proba[1])
+        print(f"[jarvis] wake score: {proba:.3f} (threshold={self.threshold})", flush=True)
         return proba
 
 

@@ -261,7 +261,7 @@ class FakeTranscriptLog:
     def __init__(self) -> None:
         self.records: list[tuple[str, str | None, str]] = []
 
-    def record(self, transcript: str, intent=None, outcome=None) -> None:
+    def record(self, transcript: str, intent=None, outcome=None, entities=None) -> None:
         self.records.append((transcript, intent, outcome))
 
 

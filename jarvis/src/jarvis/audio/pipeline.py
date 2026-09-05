@@ -202,6 +202,16 @@ class PiperSpeaker:
     def is_playing(self) -> bool:
         return self._queue.unfinished_tasks > 0 or self._playing
 
+    def interrupt(self) -> None:
+        """Stop any in-progress playback immediately (barge-in, RF-11 off).
+
+        Duck-typed: a playback backend without ``stop`` (e.g. a test fake)
+        simply does nothing.
+        """
+        stop = getattr(self.playback, "stop", None)
+        if callable(stop):
+            stop()
+
     def flush(self, timeout: float = 10.0) -> None:
         if self._closed:
             return

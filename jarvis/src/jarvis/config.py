@@ -89,13 +89,26 @@ WAKE_XLSR_MODEL = SPIKE / "models" / "jarvis_wake.onnx"
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_MS = 100
 AUDIO_SILENCE_MS = 800
-AUDIO_MAX_UTTERANCE_S = 10.0
+AUDIO_MAX_UTTERANCE_S = 120.0
 AUDIO_VAD_THRESHOLD = 0.02
 # Silero VAD (T-VAD-01/02): neural voice-activity detector used as the primary
 # utterance VAD gate. Falls back to the energy SilenceVAD if the model can't
 # load. Set AUDIO_USE_SILERO_VAD=False to force the energy VAD.
 AUDIO_USE_SILERO_VAD = True
 AUDIO_SILERO_THRESHOLD = 0.5
+# Derived VAD selection knobs (single-string form for code that picks the
+# VAD by engine name instead of the boolean flag).
+VAD_ENGINE = "silero" if AUDIO_USE_SILERO_VAD else "energy"
+VAD_SILERO_THRESHOLD = AUDIO_SILERO_THRESHOLD
+# Conversation mode (roadmap "sin repetir jarvis en cada comando"): after a
+# successfully-executed command, keep listening for this many seconds without
+# needing the wake word again. 0 = disabled (always require the wake word).
+CONVERSATION_WINDOW_S = 8.0
+# Barge-in: while Jarvis is speaking, keep the mic open and let a repeat of
+# the wake word interrupt TTS. Off by default — there is no AEC in this
+# project, so Jarvis's own voice can false-trigger at the normal threshold.
+BARGE_IN_ENABLED = False
+BARGE_IN_WAKE_THRESHOLD = 0.85
 # Noise-floor calibration (T-CALIB-01): when >0, UtteranceCapture reads this
 # many ms of ambient audio right after the wake word and raises the energy VAD
 # threshold to noise_floor * AUDIO_CALIBRATE_FACTOR. Set to 0 to disable.
@@ -135,6 +148,11 @@ LOGS_DIR = RUN_DIR / "logs"
 LOGS_CAPTURE_DIR = LOGS_DIR / "capture"   # utterance wavs (audio logs)
 LOGS_REPLY_DIR = LOGS_DIR / "reply"       # TTS reply wavs (audio logs)
 TRANSCRIPTS_FILE = LOGS_DIR / "transcripts.jsonl"  # handled transcripts
+# Usage-pattern memory: state file for "noticed you did X N times" boot notes
+# (usage_patterns.pick_new_suggestion persists here so it never nags every
+# single boot with the identical note).
+USAGE_SUGGESTIONS_FILE = RUN_DIR / "usage_suggestions.json"
+USAGE_PATTERN_MIN_COUNT = 5
 PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
 FSM_STATE_FILE = RUN_DIR / "fsm_state"    # real-time FSM state for GUI
 

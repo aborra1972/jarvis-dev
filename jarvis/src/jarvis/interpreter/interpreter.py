@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, replace
 
 from jarvis import config as _config
-from jarvis.interpreter import golden, llm, schema
+from jarvis.interpreter import golden, llm, nlu, schema
 from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.interpreter.normalize import normalize
 
@@ -160,15 +160,32 @@ class _RecentContext:
 _recent_context = _RecentContext()
 
 
+def _guess(surface: str) -> str | None:
+    """Best-effort spoken hint from interpreter.nlu, or None.
+
+    Called only after BOTH the golden gate and the LLM have already failed
+    to resolve `surface` — this never runs on the happy path, so its cost
+    (a small TF-IDF+LogReg inference) is paid only when Jarvis was already
+    about to say "no entiendo". Must never raise: nlu.classify() is
+    documented best-effort and returns None on any internal failure.
+    """
+    suggestion = nlu.classify(surface)
+    return suggestion.spoken if suggestion else None
+
+
 @dataclass
 class Interpretation:
     """Final interpreter result; at most one of intent/reask signals applies."""
 
     intent: schema.Intent | None = None
     needs_reask: bool = False
-    rejected_destructive: bool = False
     unsupported: bool = False
     reason: str = ""
+    rejected_destructive: bool = False
+    # Non-executable hint from interpreter.nlu (roadmap: NLU classifier).
+    # Only ever set alongside needs_reask/unsupported — the orchestrator may
+    # SPEAK this, never execute it. See interpreter/nlu.py's module docstring.
+    suggestion: str | None = None
 
 
 def resolve_intent(
@@ -235,7 +252,9 @@ def resolve_intent(
         intent = llm.resolve(surface, schema.build_system_prompt(), provider)
     except schema.SchemaError as exc:
         if exc.code == "unknown_intent":
-            return Interpretation(unsupported=True, reason="unknown_intent")
+            return Interpretation(
+                unsupported=True, reason="unknown_intent", suggestion=_guess(surface)
+            )
         return Interpretation(needs_reask=True, reason=exc.code)
     except Exception:
         return Interpretation(needs_reask=True, reason="llm_failure")
@@ -249,7 +268,7 @@ def resolve_intent(
             needs_reask=True, rejected_destructive=True, reason="golden_rejected_destructive"
         )
     if intent.intent == "unknown":
-        return Interpretation(needs_reask=True, reason="unknown")
+        return Interpretation(needs_reask=True, reason="unknown", suggestion=_guess(surface))
 
     # 3b. Fix LLM routing: if create_artifact includes a command field, reroute to execute
     if intent.intent == "create_artifact" and intent.entities.get("command"):
@@ -265,8 +284,14 @@ def resolve_intent(
     # 4. Execute intent: set confirm_required based on AUTO_EXECUTE config.
     #    Option A (AUTO_EXECUTE=False): confirm_required=True → orchestrator asks
     #    Option B (AUTO_EXECUTE=True): confirm_required=False → direct execution
+    #    EXCEPT: a command matching schema.is_dangerous_command() always
+    #    requires confirmation, even in auto mode — AUTO_EXECUTE is meant to
+    #    skip the prompt for routine commands (ls, git status, ...), not to
+    #    silently green-light `find . -exec rm -rf {} +` or `chmod -R 777 /`
+    #    just because they don't start with the literal token "rm".
     if intent.intent == "execute":
-        if not _config.AUTO_EXECUTE:
+        command_str = intent.entities.get("command", "")
+        if not _config.AUTO_EXECUTE or schema.is_dangerous_command(command_str):
             intent = replace(intent, confirm_required=True)
 
     intent = _resolve_active_project(intent)

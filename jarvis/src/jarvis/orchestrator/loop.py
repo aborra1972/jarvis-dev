@@ -10,6 +10,7 @@ adapters in without rework; tests drive fakes.
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -20,8 +21,10 @@ from pathlib import Path
 from typing import Callable
 
 from jarvis import config
+from jarvis.actions import assistant_lifecycle
+from jarvis.orchestrator import usage_patterns
 from jarvis.actions.base import build_registry
-from jarvis.audio.capture import SilenceVAD, SileroVAD, SoundDeviceCapturer
+from jarvis.audio.capture import SilenceVAD, SileroVAD, SoundDeviceCapturer, calibrate_noise_floor
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 from jarvis.audio.playback import Playback
 from jarvis.audio.stt import WhisperSTT
@@ -36,6 +39,8 @@ from jarvis.orchestrator.logs import TranscriptLog, clean_logs
 from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
+
+logger = logging.getLogger("jarvis.orchestrator")
 
 WAKE_TIMEOUT_S = 30.0
 TTS_COOLDOWN_S = 2.0  # increased from 0.5s — prevent wake word detection from TTS audio
@@ -95,6 +100,11 @@ class _Context:
     outcome: str = ""
     last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
     was_playing: bool = False  # tracks TTS playing state for accurate cooldown
+    # Conversation mode (roadmap: "sin repetir jarvis en cada comando"): set
+    # after a successfully-executed command to a monotonic deadline; while
+    # now() is before it, IDLE skips wake-word detection entirely and goes
+    # straight to LISTENING for a follow-up. 0.0 means no active window.
+    conversation_until: float = 0.0
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -128,10 +138,47 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.OFF, context
         playing = _speaker_is_playing(pipeline.speaker)
         if playing:
-            # PR6 (item 6): never listen over jarvis's own voice.
-            # Keep mic stopped while TTS plays to prevent feedback loop.
-            if hasattr(pipeline.wake, 'capturer'):
-                pipeline.wake.capturer.stop()
+            if config.BARGE_IN_ENABLED and hasattr(pipeline.wake, 'capturer'):
+                # Keep the mic open during playback (instead of stopping it)
+                # so a repeated wake word can interrupt Jarvis. No AEC in
+                # this project, so we use a stricter threshold than normal
+                # wake detection to cut down false triggers from Jarvis's
+                # own voice bleeding into the mic — see config.py.
+                pipeline.wake.capturer.start()
+                original_threshold = getattr(pipeline.wake, "threshold", None)
+                try:
+                    if original_threshold is not None:
+                        pipeline.wake.threshold = config.BARGE_IN_WAKE_THRESHOLD
+                    fired = pipeline.wake.wait(0.15)
+                finally:
+                    if original_threshold is not None:
+                        pipeline.wake.threshold = original_threshold
+                if fired:
+                    interrupt = getattr(pipeline.speaker, "interrupt", None)
+                    if callable(interrupt):
+                        interrupt()
+                    if hasattr(pipeline.wake, 'flush'):
+                        pipeline.wake.flush()
+                    context.was_playing = False
+                    context.last_spoke_at = 0.0
+                    context.outcome = "barge_in"
+                    try:
+                        pipeline.speaker.playback.play_beep()
+                    except Exception:
+                        pass  # best effort — don't block on beep failure
+                    time.sleep(0.2)
+                    if hasattr(pipeline.wake, 'flush'):
+                        pipeline.wake.flush()
+                    if hasattr(pipeline.wake, 'capturer'):
+                        pipeline.wake.capturer.start()
+                    pipeline.session.reask_attempts = 0
+                    _write_fsm_state("listening")
+                    return State.LISTENING, context
+            else:
+                # PR6 (item 6): never listen over jarvis's own voice.
+                # Keep mic stopped while TTS plays to prevent feedback loop.
+                if hasattr(pipeline.wake, 'capturer'):
+                    pipeline.wake.capturer.stop()
             context.was_playing = True
             context.outcome = "speaking"
             return State.IDLE, context
@@ -151,8 +198,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # before the mic was restarted.
             if hasattr(pipeline.wake, 'flush'):
                 pipeline.wake.flush()
-            # T-FLUSH-01: drain the stale mic buffer (Jarvis's own reply audio)
-            # so it can't trigger a false wake word on the next cycle.
+            # T-FLUSH-01: drain the stale mic buffer (Jarvis's own reply
+            # audio) too, so it can't trigger a false wake word on the very
+            # next cycle. Only after TTS (the mic was open replaying audio).
             if hasattr(pipeline.wake, 'capturer') and hasattr(
                 pipeline.wake.capturer, 'flush'
             ):
@@ -160,6 +208,25 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             # Restart mic after cooldown
             if hasattr(pipeline.wake, 'capturer'):
                 pipeline.wake.capturer.start()
+        # Conversation mode: right after a successfully-executed command,
+        # skip the wake word for a short follow-up window instead of making
+        # the person say "jarvis" again for every single exchange. Expires
+        # on its own (config.CONVERSATION_WINDOW_S) so Jarvis doesn't keep
+        # listening indefinitely after the conversation is actually over.
+        if context.conversation_until and time.monotonic() < context.conversation_until:
+            context.conversation_until = 0.0
+            pipeline.session.reask_attempts = 0
+            try:
+                pipeline.speaker.playback.play_beep()
+            except Exception:
+                pass  # best effort — don't block on beep failure
+            time.sleep(0.2)
+            if hasattr(pipeline.wake, 'flush'):
+                pipeline.wake.flush()
+            context.outcome = "conversation_continue"
+            _write_fsm_state("listening")
+            return State.LISTENING, context
+        context.conversation_until = 0.0
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
             context.outcome = "no_wake"
             return State.IDLE, context
@@ -266,6 +333,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 transcript,
                 intent=interpretation.intent.intent if interpretation.intent else None,
                 outcome=step,
+                entities=interpretation.intent.entities if interpretation.intent else None,
             )
         if step == "execute":
             context.outcome = "execute"
@@ -278,7 +346,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.CONFIRMING, context
         if step == "reask":
             attempt = pipeline.session.reask_attempts
-            pipeline.speaker.speak(REASK_1 if attempt == 1 else REASK_2)
+            base_msg = REASK_1 if attempt == 1 else REASK_2
+            hint = context.interpretation.suggestion if context.interpretation else None
+            pipeline.speaker.speak(f"{base_msg} ¿Quisiste {hint}?" if hint else base_msg)
             context.outcome = "reask"
             return State.LISTENING, context
         if step == "reveal":
@@ -290,7 +360,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             context.outcome = "rejected"
             return State.SPEAKING, context
         if step == "unsupported":
-            pipeline.speaker.speak(UNSUPPORTED_SPOKEN)
+            hint = context.interpretation.suggestion if context.interpretation else None
+            pipeline.speaker.speak(
+                f"{UNSUPPORTED_SPOKEN} ¿Quisiste {hint}?" if hint else UNSUPPORTED_SPOKEN
+            )
             context.outcome = "unsupported"
             return State.SPEAKING, context
         context.outcome = "ignore"
@@ -328,12 +401,25 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(LONG_OPERATION_ACK)
-        result = pipeline.executor.execute(intent, pipeline.session)
-        pipeline.speaker.speak(result.spoken)
+        if intent.intent == "general_qa" and config.LLM_PROVIDER != "gemini":
+            # Stream sentence-by-sentence so Jarvis starts speaking before
+            # Ollama finishes generating the full answer (see
+            # assistant_lifecycle.stream_general_qa). Falls back to the
+            # regular blocking path for gemini, since that streaming shape
+            # isn't wired up.
+            result = assistant_lifecycle.stream_general_qa(
+                intent, pipeline.session, pipeline.speaker.speak
+            )
+        else:
+            result = pipeline.executor.execute(intent, pipeline.session)
+        if result.spoken:
+            pipeline.speaker.speak(result.spoken)
         if intent.intent == "power_off_self":
             context.outcome = "powered_off"
             return State.STOPPED, context
         context.outcome = "executed" if result.ok else "failed"
+        if result.ok and config.CONVERSATION_WINDOW_S > 0:
+            context.conversation_until = time.monotonic() + config.CONVERSATION_WINDOW_S
         _write_fsm_state("speaking")
         return State.SPEAKING, context
 
@@ -433,6 +519,12 @@ def build_pipeline(
     """
     if transcript_log is None:
         transcript_log = TranscriptLog(config.TRANSCRIPTS_FILE)
+    if git_runner is None:
+        # RF-6: detect the active project from `git rev-parse --show-toplevel`.
+        # This was previously left None here — _git_root() existed but was
+        # never wired in, so active-project auto-detection silently never ran
+        # outside tests that inject a fake git_runner explicitly.
+        git_runner = _git_root
     if wake is None:
         config.LOGS_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         config.LOGS_REPLY_DIR.mkdir(parents=True, exist_ok=True)
@@ -440,10 +532,13 @@ def build_pipeline(
             sample_rate=config.AUDIO_SAMPLE_RATE,
             block_ms=config.AUDIO_BLOCK_MS,
         )
+        # Silero VAD (offline ONNX) by default — much more robust to ambient
+        # noise than a fixed RMS threshold. Construction stays side-effect
+        # free here (no mic access) so build_pipeline() keeps being safe to
+        # call from unit tests; the energy-VAD fallback gets its real
+        # noise-floor calibration later, in start(), once the mic is
+        # actually running.
         if config.AUDIO_USE_SILERO_VAD:
-            # Neural VAD (T-VAD-02): better speech/silence discrimination than
-            # pure energy RMS; falls back internally to energy detection if the
-            # Silero model can't load (offline / torch unavailable).
             vad = SileroVAD(
                 threshold=config.AUDIO_SILERO_THRESHOLD,
                 sample_rate=config.AUDIO_SAMPLE_RATE,
@@ -663,6 +758,29 @@ def start() -> int:
             if hasattr(pipeline.wake, 'capturer'):
                 pipeline.wake.capturer.stop()
             pipeline.speaker.speak(ANNOUNCEMENT)
+            # Proactive note (no user prompt needed): if the active project
+            # has uncommitted changes or unpushed commits, mention it now
+            # instead of waiting to be asked. Best-effort — a git failure or
+            # missing repo here must never block boot, hence the try/except.
+            try:
+                repo = _git_root(os.getcwd())
+                note = _proactive_project_note(repo) if repo else None
+                if note:
+                    pipeline.speaker.speak(note)
+            except Exception:
+                pass
+            # "Memoria de patrones de uso": mention a frequently-repeated
+            # command once (not every boot — see usage_patterns.pick_new_suggestion).
+            try:
+                usage_note = usage_patterns.pick_new_suggestion(
+                    config.TRANSCRIPTS_FILE,
+                    config.USAGE_SUGGESTIONS_FILE,
+                    min_count=config.USAGE_PATTERN_MIN_COUNT,
+                )
+                if usage_note:
+                    pipeline.speaker.speak(f"Ah, y {usage_note}, señor.")
+            except Exception:
+                pass
             pipeline.speaker.flush(timeout=10)
         except Exception:
             print(ANNOUNCEMENT, file=sys.stderr)
@@ -673,6 +791,15 @@ def start() -> int:
             pipeline.wake.flush()
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.start()
+        # Calibrate the energy VAD against this room's real ambient noise now
+        # that the mic is actually open. Silero scores speech probability
+        # directly and doesn't need this — only the energy fallback does.
+        capture_stage = getattr(pipeline, "capture", None)
+        vad = getattr(capture_stage, "vad", None)
+        if isinstance(vad, SilenceVAD) and hasattr(pipeline.wake, 'capturer'):
+            calibrated = calibrate_noise_floor(pipeline.wake.capturer)
+            vad.threshold = calibrated
+            print(f"[jarvis] piso de ruido calibrado: threshold={calibrated:.4f}", flush=True)
         run(pipeline)
     finally:
         _remove_pid()
@@ -826,3 +953,43 @@ def _git_root(cwd: str) -> str | None:
         return None
     root = proc.stdout.strip()
     return root or None
+
+
+def _proactive_project_note(repo: str) -> str | None:
+    """Check the active project for anything worth mentioning unprompted.
+
+    Runs `git status --porcelain` (uncommitted changes) and `git status -sb`
+    (ahead of upstream) against the active project. Returns a short spoken
+    note, or None if there's nothing notable, git isn't available, or the
+    repo path is empty — this must never raise or block boot (best-effort
+    only; a broken proactive check should never delay/crash `jarvis start`).
+    """
+    if not repo:
+        return None
+    try:
+        porcelain = subprocess.run(
+            ["git", "-C", repo, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        branch = subprocess.run(
+            ["git", "-C", repo, "status", "-sb"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if porcelain.returncode != 0:
+        return None
+
+    notes: list[str] = []
+    changed = [line for line in porcelain.stdout.splitlines() if line.strip()]
+    if changed:
+        word = "archivo" if len(changed) == 1 else "archivos"
+        notes.append(f"{len(changed)} {word} sin commitear")
+    branch_line = branch.stdout.splitlines()[0] if branch.stdout else ""
+    if "ahead" in branch_line:
+        notes.append("commits sin subir")
+
+    if not notes:
+        return None
+    project_name = Path(repo).name
+    return f"Ah, señor — en {project_name} tenés {' y '.join(notes)}."

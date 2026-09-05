@@ -19,11 +19,22 @@ class TranscriptLog:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
-    def record(self, transcript: str, intent: str | None = None, outcome: str | None = None) -> None:
+    def record(
+        self,
+        transcript: str,
+        intent: str | None = None,
+        outcome: str | None = None,
+        entities: dict | None = None,
+    ) -> None:
         if not transcript:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"transcript": transcript, "intent": intent, "outcome": outcome}
+        entry = {
+            "transcript": transcript,
+            "intent": intent,
+            "outcome": outcome,
+            "entities": entities,
+        }
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

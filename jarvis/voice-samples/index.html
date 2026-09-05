@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis — Evaluación de Voces TTS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 2rem;
+            border-bottom: 2px solid #e94560;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: #e94560;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .controls {
+            background: #12121a;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #1a1a2e;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .controls label {
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        .controls select, .controls button {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            border: 1px solid #0f3460;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .controls select:hover, .controls button:hover {
+            border-color: #e94560;
+        }
+
+        .controls button.active {
+            background: #e94560;
+            border-color: #e94560;
+        }
+
+        .controls .stop-all {
+            background: #333;
+            border-color: #555;
+            margin-left: auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
+            padding: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .voice-card {
+            background: #12121a;
+            border: 1px solid #1a1a2e;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+
+        .voice-card:hover {
+            border-color: #0f3460;
+        }
+
+        .voice-card.playing {
+            border-color: #e94560;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.2);
+        }
+
+        .voice-header {
+            padding: 1rem 1.2rem;
+            background: #16213e;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .voice-flag {
+            font-size: 1.5rem;
+        }
+
+        .voice-info h3 {
+            font-size: 1rem;
+            color: #fff;
+            margin-bottom: 0.2rem;
+        }
+
+        .voice-info span {
+            font-size: 0.75rem;
+            color: #888;
+        }
+
+        .gender-badge {
+            margin-left: auto;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .gender-badge.female {
+            background: rgba(233, 69, 96, 0.2);
+            color: #e94560;
+        }
+
+        .gender-badge.male {
+            background: rgba(15, 52, 96, 0.3);
+            color: #5dade2;
+        }
+
+        .role-badge {
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .role-badge.jarvis {
+            background: rgba(93, 173, 226, 0.25);
+            color: #5dade2;
+            border: 1px solid #5dade2;
+        }
+
+        .role-badge.friday {
+            background: rgba(233, 69, 96, 0.25);
+            color: #e94560;
+            border: 1px solid #e94560;
+        }
+
+        .role-badge.karen {
+            background: rgba(46, 213, 115, 0.25);
+            color: #2ed573;
+            border: 1px solid #2ed573;
+        }
+
+        .role-note {
+            padding: 0.4rem 1.2rem;
+            font-size: 0.72rem;
+            color: #777;
+            background: #0f1018;
+            border-bottom: 1px solid #1a1a2e;
+            font-style: italic;
+        }
+
+        .samples {
+            padding: 1rem 1.2rem;
+        }
+
+        .sample-row {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #1a1a2e;
+        }
+
+        .sample-row:last-child {
+            border-bottom: none;
+        }
+
+        .sample-label {
+            font-size: 0.8rem;
+            color: #888;
+            width: 100px;
+            flex-shrink: 0;
+        }
+
+        .sample-play {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #e94560;
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: transform 0.1s, background 0.2s;
+        }
+
+        .sample-play:hover {
+            background: #ff6b81;
+            transform: scale(1.1);
+        }
+
+        .sample-play.playing {
+            background: #0f3460;
+        }
+
+        .sample-play svg {
+            width: 14px;
+            height: 14px;
+            fill: white;
+        }
+
+        .sample-progress {
+            flex: 1;
+            height: 4px;
+            background: #1a1a2e;
+            border-radius: 2px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .sample-progress-fill {
+            height: 100%;
+            background: #e94560;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .sample-time {
+            font-size: 0.7rem;
+            color: #555;
+            width: 40px;
+            text-align: right;
+        }
+
+        .play-all-btn {
+            width: 100%;
+            padding: 0.8rem;
+            background: #16213e;
+            border: none;
+            border-top: 1px solid #1a1a2e;
+            color: #e94560;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .play-all-btn:hover {
+            background: #1a1a3e;
+        }
+
+        .text-section {
+            background: #12121a;
+            border: 1px solid #1a1a2e;
+            border-radius: 12px;
+            padding: 1.5rem 2rem;
+            margin: 0 2rem 2rem;
+        }
+
+        .text-section h2 {
+            color: #e94560;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+
+        .text-item {
+            display: flex;
+            gap: 1rem;
+            padding: 0.8rem 0;
+            border-bottom: 1px solid #1a1a2e;
+            align-items: flex-start;
+        }
+
+        .text-item:last-child {
+            border-bottom: none;
+        }
+
+        .text-key {
+            background: #0f3460;
+            color: #5dade2;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            flex-shrink: 0;
+            min-width: 90px;
+            text-align: center;
+        }
+
+        .text-content {
+            color: #ccc;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+            .controls {
+                padding: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>🎭 Evaluación de Voces TTS</h1>
+    <p>Jarvis — 15 voces nuevas × 5 textos = 75 muestras · Jarvis · Friday · Karen</p>
+</div>
+
+<div class="controls">
+    <label>Filtrar por personaje:</label>
+    <select id="filterRole">
+        <option value="all">Todos</option>
+        <option value="jarvis">🤖 Jarvis</option>
+        <option value="friday">🔴 Friday</option>
+        <option value="karen">🕷 Karen</option>
+    </select>
+    <label>Género:</label>
+    <select id="filterGender">
+        <option value="all">Todos</option>
+        <option value="female">Femeninas</option>
+        <option value="male">Masculinas</option>
+    </select>
+    <button id="playAllVisible" class="active">▶ Reproducir todas visibles</button>
+    <button id="stopAll" class="stop-all">⏹ Detener todas</button>
+</div>
+
+<div class="grid" id="voiceGrid"></div>
+
+<div class="text-section">
+    <h2>📝 Textos de prueba</h2>
+    <div id="textList"></div>
+</div>
+
+<script>
+const VOICES = {
+    "es-BO-MarceloNeural": { flag: "🇧🇴", name: "Marcelo", country: "Bolivia", gender: "male", role: "jarvis", label: "Marcelo (Bolivia)" },
+    "es-GT-AndresNeural": { flag: "🇬🇹", name: "Andrés", country: "Guatemala", gender: "male", role: "jarvis", label: "Andrés (Guatemala)" },
+    "es-NI-FedericoNeural": { flag: "🇳🇮", name: "Federico", country: "Nicaragua", gender: "male", role: "jarvis", label: "Federico (Nicaragua)" },
+    "es-PE-AlexNeural": { flag: "🇵🇪", name: "Alex", country: "Perú", gender: "male", role: "jarvis", label: "Alex (Perú)" },
+    "es-UY-MateoNeural": { flag: "🇺🇾", name: "Mateo", country: "Uruguay", gender: "male", role: "jarvis", label: "Mateo (Uruguay)" },
+    "es-ES-XimenaNeural": { flag: "🇪🇸", name: "Ximena", country: "España", gender: "female", role: "friday", label: "Ximena (España)" },
+    "es-PE-CamilaNeural": { flag: "🇵🇪", name: "Camila", country: "Perú", gender: "female", role: "friday", label: "Camila (Perú)" },
+    "es-UY-ValentinaNeural": { flag: "🇺🇾", name: "Valentina", country: "Uruguay", gender: "female", role: "friday", label: "Valentina (Uruguay)" },
+    "es-US-PalomaNeural": { flag: "🇺🇸", name: "Paloma", country: "EE.UU.", gender: "female", role: "friday", label: "Paloma (EE.UU.)" },
+    "es-BO-SofiaNeural": { flag: "🇧🇴", name: "Sofía", country: "Bolivia", gender: "female", role: "friday", label: "Sofía (Bolivia)" },
+    "es-GT-MartaNeural": { flag: "🇬🇹", name: "Marta", country: "Guatemala", gender: "female", role: "karen", label: "Marta (Guatemala)" },
+    "es-HN-KarlaNeural": { flag: "🇭🇳", name: "Karla", country: "Honduras", gender: "female", role: "karen", label: "Karla (Honduras)" },
+    "es-PR-KarinaNeural": { flag: "🇵🇷", name: "Karina", country: "Puerto Rico", gender: "female", role: "karen", label: "Karina (Puerto Rico)" },
+    "es-VE-PaolaNeural": { flag: "🇻🇪", name: "Paola", country: "Venezuela", gender: "female", role: "karen", label: "Paola (Venezuela)" },
+    "es-CR-MariaNeural": { flag: "🇨🇷", name: "María", country: "Costa Rica", gender: "female", role: "karen", label: "María (Costa Rica)" },
+};
+
+const ROLE_INFO = {
+    jarvis: { label: "Jarvis", emoji: "🤖", note: "IA de Iron Man — masculina, grave, serena, elegante" },
+    friday: { label: "Friday", emoji: "🔴", note: "F.R.I.D.A.Y. — IA que reemplaza a Jarvis — femenina, joven, eficiente" },
+    karen: { label: "Karen", emoji: "🕷", note: "IA del traje de Spider-Man — femenina, cálida, cercana" },
+};
+
+const SAMPLES = {
+    greeting: "Hola, soy Jarvis. Estoy en línea y listo para trabajar. ¿En qué puedo ayudarte hoy?",
+    weather: "Hoy en Buenos Aires hace frío, pero con sol. Temperatura máxima de dieciocho grados. Ideal para tomar un mate en el balcón.",
+    personality: "Mi nombre es Jarvis. Soy preciso, sereno y siempre tengo la respuesta adecuada. No soy como los otros asistentes.",
+    memory: "Recordá que tu proyecto favorito quedó guardado en la carpeta de documentos. ¿Querés que lo abra?",
+    pronunciation: "Gúgel, Wái-fai, Nétflis, Spotifái, Yutú, Guasap. Todos estos términos se pronuncian en español castellano.",
+};
+
+const SAMPLE_LABELS = {
+    greeting: "Saludo",
+    weather: "Clima",
+    personality: "Personalidad",
+    memory: "Memoria",
+    pronunciation: "Pronunciación",
+};
+
+let currentlyPlaying = [];
+let audioElements = {};
+
+function getVoiceKey(voiceId) {
+    const parts = voiceId.split('-');
+    const country = parts[0];
+    const name = parts[1].replace('neural', '');
+    return `${country}-${name.charAt(0).toUpperCase() + name.slice(1)}Neural`;
+}
+
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function createVoiceCard(voiceId, voice) {
+    const card = document.createElement('div');
+    card.className = 'voice-card';
+    card.dataset.gender = voice.gender;
+    card.dataset.role = voice.role;
+
+    const role = ROLE_INFO[voice.role];
+
+    const header = document.createElement('div');
+    header.className = 'voice-header';
+    header.innerHTML = `
+        <span class="voice-flag">${voice.flag}</span>
+        <div class="voice-info">
+            <h3>${voice.name}</h3>
+            <span>${voice.country}</span>
+        </div>
+        <span class="role-badge ${voice.role}">${role.emoji} ${role.label}</span>
+        <span class="gender-badge ${voice.gender}">${voice.gender === 'female' ? 'Femenina' : 'Masculina'}</span>
+    `;
+
+    const roleNote = document.createElement('div');
+    roleNote.className = 'role-note';
+    roleNote.textContent = role.note;
+
+    const samples = document.createElement('div');
+    samples.className = 'samples';
+
+    Object.keys(SAMPLES).forEach(textKey => {
+        const row = document.createElement('div');
+        row.className = 'sample-row';
+
+        const audioId = `${voiceId}_${textKey}`;
+        const mp3File = `/${voiceId.toLowerCase().replace('neural', 'neural')}_${textKey}.mp3`;
+
+        row.innerHTML = `
+            <span class="sample-label">${SAMPLE_LABELS[textKey]}</span>
+            <button class="sample-play" data-audio="${mp3File}" data-id="${audioId}" title="Reproducir">
+                <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
+            <div class="sample-progress" data-id="${audioId}">
+                <div class="sample-progress-fill" data-id="${audioId}"></div>
+            </div>
+            <span class="sample-time" data-id="${audioId}">0:00</span>
+        `;
+
+        samples.appendChild(row);
+    });
+
+    const playAllBtn = document.createElement('button');
+    playAllBtn.className = 'play-all-btn';
+    playAllBtn.textContent = `▶ Reproducir toda la voz ${voice.name}`;
+    playAllBtn.onclick = () => playAllForVoice(voiceId);
+
+    card.appendChild(header);
+    card.appendChild(roleNote);
+    card.appendChild(samples);
+    card.appendChild(playAllBtn);
+
+    return card;
+}
+
+function playAudio(audioSrc, btn) {
+    const existingId = btn.dataset.id;
+    if (audioElements[existingId]) {
+        audioElements[existingId].pause();
+        audioElements[existingId] = null;
+        btn.classList.remove('playing');
+    }
+
+    const audio = new Audio(audioSrc);
+    audioElements[existingId] = audio;
+
+    const card = btn.closest('.voice-card');
+    card.classList.add('playing');
+    btn.classList.add('playing');
+
+    const progressFill = document.querySelector(`.sample-progress-fill[data-id="${existingId}"]`);
+    const timeDisplay = document.querySelector(`.sample-time[data-id="${existingId}"]`);
+
+    audio.addEventListener('timeupdate', () => {
+        if (audio.duration) {
+            const pct = (audio.currentTime / audio.duration) * 100;
+            progressFill.style.width = pct + '%';
+            timeDisplay.textContent = formatTime(audio.currentTime);
+        }
+    });
+
+    audio.addEventListener('ended', () => {
+        btn.classList.remove('playing');
+        card.classList.remove('playing');
+        progressFill.style.width = '0%';
+        timeDisplay.textContent = '0:00';
+        audioElements[existingId] = null;
+    });
+
+    audio.play().catch(e => {
+        console.error('Error playing audio:', e);
+        btn.classList.remove('playing');
+        card.classList.remove('playing');
+    });
+}
+
+function stopAllAudio() {
+    Object.keys(audioElements).forEach(id => {
+        if (audioElements[id]) {
+            audioElements[id].pause();
+            audioElements[id] = null;
+        }
+    });
+    document.querySelectorAll('.sample-play.playing').forEach(btn => btn.classList.remove('playing'));
+    document.querySelectorAll('.voice-card.playing').forEach(card => card.classList.remove('playing'));
+    document.querySelectorAll('.sample-progress-fill').forEach(fill => fill.style.width = '0%');
+    document.querySelectorAll('.sample-time').forEach(time => time.textContent = '0:00');
+}
+
+async function playAllForVoice(voiceId) {
+    stopAllAudio();
+    const keys = Object.keys(SAMPLES);
+    for (let i = 0; i < keys.length; i++) {
+        const textKey = keys[i];
+        const mp3File = `/${voiceId.toLowerCase()}_${textKey}.mp3`;
+        const btn = document.querySelector(`.sample-play[data-id="${voiceId}_${textKey}"]`);
+        if (btn) {
+            playAudio(mp3File, btn);
+            await new Promise(resolve => {
+                const audio = audioElements[`${voiceId}_${textKey}`];
+                if (audio) {
+                    audio.addEventListener('ended', resolve, { once: true });
+                } else {
+                    resolve();
+                }
+            });
+            await new Promise(r => setTimeout(r, 300));
+        }
+    }
+}
+
+async function playAllVisible() {
+    stopAllAudio();
+    const visibleCards = document.querySelectorAll('.voice-card:not([style*="display: none"])');
+    for (const card of visibleCards) {
+        const btn = card.querySelector('.play-all-btn');
+        if (btn) btn.click();
+        await new Promise(r => setTimeout(r, 500));
+    }
+}
+
+function applyFilters() {
+    const role = document.getElementById('filterRole').value;
+    const gender = document.getElementById('filterGender').value;
+
+    document.querySelectorAll('.voice-card').forEach(card => {
+        const matchRole = role === 'all' || card.dataset.role === role;
+        const matchGender = gender === 'all' || card.dataset.gender === gender;
+        card.style.display = (matchRole && matchGender) ? '' : 'none';
+    });
+}
+
+// Build UI
+const grid = document.getElementById('voiceGrid');
+Object.entries(VOICES).forEach(([voiceId, voice]) => {
+    grid.appendChild(createVoiceCard(voiceId, voice));
+});
+
+// Build text list
+const textList = document.getElementById('textList');
+Object.entries(SAMPLES).forEach(([key, text]) => {
+    const item = document.createElement('div');
+    item.className = 'text-item';
+    item.innerHTML = `
+        <span class="text-key">${SAMPLE_LABELS[key]}</span>
+        <span class="text-content">${text}</span>
+    `;
+    textList.appendChild(item);
+});
+
+// Event listeners
+document.querySelectorAll('.sample-play').forEach(btn => {
+    btn.addEventListener('click', () => {
+        playAudio(btn.dataset.audio, btn);
+    });
+});
+
+document.querySelectorAll('.sample-progress').forEach(progress => {
+    progress.addEventListener('click', (e) => {
+        const id = progress.dataset.id;
+        const audio = audioElements[id];
+        if (audio && audio.duration) {
+            const rect = progress.getBoundingClientRect();
+            const pct = (e.clientX - rect.left) / rect.width;
+            audio.currentTime = pct * audio.duration;
+        }
+    });
+});
+
+document.getElementById('filterRole').addEventListener('change', applyFilters);
+document.getElementById('filterGender').addEventListener('change', applyFilters);
+document.getElementById('playAllVisible').addEventListener('click', playAllVisible);
+document.getElementById('stopAll').addEventListener('click', stopAllAudio);
+</script>
+
+</body>
+</html>

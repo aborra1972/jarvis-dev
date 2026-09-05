@@ -210,3 +210,65 @@ def test_pronoun_resolution_cerrarlo() -> None:
     # But it's not the full pattern "cerrar linux", so it might not match
     # The important thing is that it doesn't crash
     assert r2.intent is not None or r2.needs_reask is True
+
+
+# --- T-SAFE-02: SAFETY_GATE confirmation policy over execute intent ----------
+def _execute_surface(monkeypatch, safety_gate: str, auto_execute: bool, command: str) -> bool:
+    from jarvis import config
+
+    monkeypatch.setattr(config, "SAFETY_GATE", safety_gate)
+    monkeypatch.setattr(config, "AUTO_EXECUTE", auto_execute)
+    result = resolve_intent(
+        "hacé una tarea rutinaria",
+        provider=FakeProvider(
+            [{"intent": "execute", "entities": {"command": command}, "confidence": 0.9}]
+        ),
+        app_allowlist=ALLOWLIST,
+        use_cache=False,
+    )
+    return result.intent.confirm_required
+
+
+def test_safety_gate_strict_confirms_routine_execute(monkeypatch) -> None:
+    assert _execute_surface(monkeypatch, "strict", True, "ls src") is True
+
+
+def test_safety_gate_auto_follows_auto_execute_false(monkeypatch) -> None:
+    assert _execute_surface(monkeypatch, "auto", False, "ls src") is True
+
+
+def test_safety_gate_auto_skips_routine_when_auto_execute(monkeypatch) -> None:
+    assert _execute_surface(monkeypatch, "auto", True, "ls src") is False
+
+
+def test_safety_gate_auto_always_confirms_dangerous(monkeypatch) -> None:
+    # AUTO_EXECUTE=True must NOT green-light a dangerous-pattern command.
+    assert _execute_surface(monkeypatch, "auto", True, "mv informe.txt /dev/null") is True
+
+
+def test_safety_gate_yolo_skips_routine(monkeypatch) -> None:
+    assert _execute_surface(monkeypatch, "yolo", False, "ls src") is False
+
+
+def test_safety_gate_yolo_still_confirms_dangerous(monkeypatch) -> None:
+    assert _execute_surface(monkeypatch, "yolo", False, "mv informe.txt /dev/null") is True
+
+
+def test_safety_gate_yolo_does_not_unlock_golden_destructive(monkeypatch) -> None:
+    # Policy beats yolo: destructive golden intents keep confirm_required=True.
+    from jarvis import config
+
+    monkeypatch.setattr(config, "SAFETY_GATE", "yolo")
+    result = resolve_intent("cerrá linux", provider=None, app_allowlist=ALLOWLIST)
+    assert result.intent.intent == "shutdown"
+    assert result.intent.confirm_required is True
+    assert result.intent.source == "golden"
+
+
+# --- T-SAFE-01: policy-blocked destructive intent reaches the handler ---------
+def test_policy_blocked_destructive_intent_flagged() -> None:
+    result = resolve_intent("formateá el disco", provider=None, app_allowlist=ALLOWLIST)
+    assert result.intent.intent == "format_disk"
+    assert result.intent.blocked is True
+    assert result.intent.source == "golden"
+    assert result.intent.confirm_required is True

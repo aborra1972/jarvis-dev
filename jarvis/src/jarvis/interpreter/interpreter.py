@@ -263,7 +263,7 @@ def resolve_intent(
 
     # 3. Hard gate over LLM output: destructive intents without a golden match
     #    are REJECTED (spec: golden rejection wins over LLM suggestion).
-    if intent.intent in schema.DESTRUCTIVE_INTENTS:
+    if schema.is_destructive_intent(intent.intent):
         return Interpretation(
             needs_reask=True, rejected_destructive=True, reason="golden_rejected_destructive"
         )
@@ -281,17 +281,26 @@ def resolve_intent(
             logger.info("code editor focused — routing general_qa to ask (OpenCode)")
             intent = replace(intent, intent="ask")
 
-    # 4. Execute intent: set confirm_required based on AUTO_EXECUTE config.
-    #    Option A (AUTO_EXECUTE=False): confirm_required=True → orchestrator asks
-    #    Option B (AUTO_EXECUTE=True): confirm_required=False → direct execution
-    #    EXCEPT: a command matching schema.is_dangerous_command() always
-    #    requires confirmation, even in auto mode — AUTO_EXECUTE is meant to
-    #    skip the prompt for routine commands (ls, git status, ...), not to
-    #    silently green-light `find . -exec rm -rf {} +` or `chmod -R 777 /`
-    #    just because they don't start with the literal token "rm".
+    # 4. Execute intent: confirmation policy driven by SAFETY_GATE (T-SAFE-02).
+    #    - "strict" (default) → always confirm every execute command.
+    #    - "auto" → follow AUTO_EXECUTE; dangerous-pattern commands always
+    #      confirm even in auto mode (AUTO_EXECUTE is meant to skip the prompt
+    #      for routine commands (ls, git status, ...), not to silently
+    #      green-light `find . -exec rm -rf {} +` or `chmod -R 777 /`).
+    #    - "yolo" → never confirm routine commands; dangerous commands keep
+    #      confirming. Destructive golden-gate intents are NOT affected: they
+    #      already carry confirm_required=True at the gate and never reach
+    #      this LLM-only step ("yolo acelera lo rutinario, no desbloquea lo
+    #      destructivo").
     if intent.intent == "execute":
         command_str = intent.entities.get("command", "")
-        if not _config.AUTO_EXECUTE or schema.is_dangerous_command(command_str):
+        if _config.SAFETY_GATE == "yolo":
+            if schema.is_dangerous_command(command_str):
+                intent = replace(intent, confirm_required=True)
+        elif _config.SAFETY_GATE == "auto":
+            if not _config.AUTO_EXECUTE or schema.is_dangerous_command(command_str):
+                intent = replace(intent, confirm_required=True)
+        else:  # "strict" (default): always confirm execute.
             intent = replace(intent, confirm_required=True)
 
     intent = _resolve_active_project(intent)

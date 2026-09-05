@@ -44,7 +44,7 @@ def _load_env() -> None:
 
 _load_env()
 
-from jarvis.interpreter.schema import build_system_prompt  # PR2: real prompt
+from jarvis.interpreter.schema import build_system_prompt, dangerous_pattern_count  # PR2: real prompt
 
 # --- Layout ------------------------------------------------------------------
 _THIS = Path(__file__).resolve()
@@ -175,6 +175,16 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_TIMEOUT_S: float = 30.0
 # Execute mode: False = confirm before any command (Option A), True = auto-execute (Option B)
 AUTO_EXECUTE = False
+# --- Safety gate (T-SAFE-02): approval layer over AUTO_EXECUTE ---------------
+# "auto"   → follow AUTO_EXECUTE; commands matching a dangerous pattern always
+#            confirm (AUTO_EXECUTE only skips routine prompts, never risk).
+# "strict" → always confirm every `execute` command (default, safest).
+# "yolo"   → skip confirmation for routine commands; dangerous commands and
+#            destructive intents still confirm (policy beats yolo).
+SAFETY_GATE: str = "strict"
+# Live count of dangerous command patterns (schema._DANGEROUS_COMMAND_PATTERNS):
+# derived from the real table so the documented target never drifts.
+DANGEROUS_PATTERNS: int = dangerous_pattern_count()
 
 # --- LLM provider selection (local / gemini / auto) -------------------------
 # "local"  = Ollama only (default, offline)

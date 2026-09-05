@@ -22,15 +22,20 @@ ALLOWED_INTENTS: frozenset[str] = frozenset({
     "shutdown", "reboot", "power_off_self", "open_app", "create_doc",
     "open_file_dir", "web_search", "open_url", "help", "unknown", "execute",
     "general_qa", "register_voice",
+    # T-SAFE-01: expanded destructive intent set (hardline golden gate).
+    "format_disk", "wipe_system", "delete_all", "kill_process",
 })
 
 # Destructive intents: only the golden hard gate may emit these.
-DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({"shutdown", "reboot", "power_off_self"})
+DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({
+    "shutdown", "reboot", "power_off_self",
+    "format_disk", "wipe_system", "delete_all", "kill_process",
+})
 
 DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
     "opencode": ("open_repo", "ask", "configure", "create_artifact", "implement", "review"),
-    "system": ("shutdown", "reboot", "open_app", "execute"),
-    "files": ("create_doc", "open_file_dir"),
+    "system": ("shutdown", "reboot", "open_app", "execute", "kill_process", "format_disk", "wipe_system"),
+    "files": ("create_doc", "open_file_dir", "delete_all"),
     "web": ("web_search", "open_url"),
     "lifecycle": ("power_off_self", "help"),
     "conversation": ("general_qa",),
@@ -258,3 +263,35 @@ def build_system_prompt() -> str:
         "hacé/hacer, poné/poner, sacá/sacar, andá/andar.\n"
         f"Domains:\n{domain_lines}\n"
     )
+
+
+# --- Shared "genuinely dangerous command" detection ---------------------------
+#
+# actions/system.py's `execute()` only applies extra scrutiny to `rm -rf`
+# when `rm` is literally the FIRST token of the command. That misses the
+# same destructive effect reached through other allowlisted binaries:
+#   find /home -exec rm -rf {} +   (rm never appears as the first token)
+#   mv important.txt /dev/null     (deletes without ever calling rm)
+#   chmod -R 777 /                 (destructive, no rm involved at all)
+#   cat /etc/shadow                (sensitive-file read, not "destructive"
+#                                    but still worth a human confirming)
+# This lives in schema.py (not actions/system.py or interpreter.py) so both
+# modules can import it without creating a circular import between them.
+_DANGEROUS_COMMAND_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"\bfind\b.*-(?:exec|execdir|delete)\b"),
+    re.compile(r"\b(?:mv|cp)\b.*\s/dev/(?:null|zero)\b"),
+    re.compile(r"\b(?:chmod|chown)\b.*-[a-zA-Z]*[Rr][a-zA-Z]*\b.*\s(?:/|~|\$HOME)\s*$"),
+    re.compile(r"\b(?:cat|cp|head|tail)\b.*\s/etc/(?:shadow|passwd|sudoers)\b"),
+)
+
+
+def is_dangerous_command(command_str: str) -> bool:
+    """True if a SAFE_BINARIES-allowlisted command is still worth a human
+    confirming — destructive or sensitive-file access reached through a
+    binary other than the obviously-dangerous ones already caught by
+    per-binary checks (e.g. actions.system's rm -rf regex).
+
+    This does NOT replace the allowlist or the shell-operator blocklist —
+    it's an additional, binary-independent layer on top of both.
+    """
+    return any(p.search(command_str) for p in _DANGEROUS_COMMAND_PATTERNS)

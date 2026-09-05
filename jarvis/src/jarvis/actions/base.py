@@ -85,8 +85,21 @@ class Registry:
         return dict(self._handlers)
 
 
+def blocked_destructive(intent: Intent, session: object) -> ActionResult:
+    """Policy handler for destructive intents that are recognized but never
+    executable. The golden gate may emit these intents, but there is no
+    operator behind them yet (T-SAFE-01: expanded destructive set); every
+    invocation is blocked with a clear spoken denial so the registry still
+    covers ALLOWED_INTENTS without ever performing a dangerous action.
+    """
+    return ActionResult(
+        ok=False,
+        spoken="Esa acción es destructiva y no está disponible, señor. " "No la voy a ejecutar.",
+    )
+
+
 def build_registry() -> Registry:
-    """Wire every executor handler (8 domains, 18 intents) into one registry."""
+    """Wire every executor handler (8 domains, 22 intents) into one registry."""
     from jarvis.actions import assistant_lifecycle, files, opencode, system, web
 
     registry = Registry()
@@ -106,4 +119,7 @@ def build_registry() -> Registry:
     registry.register("help", assistant_lifecycle.handle_help)
     registry.register("general_qa", assistant_lifecycle.handle_general_qa)
     registry.register("register_voice", assistant_lifecycle.handle_register_voice)
+    # T-SAFE-01 expanded destructive intents: recognized, never executable.
+    for intent in ("format_disk", "wipe_system", "delete_all", "kill_process"):
+        registry.register(intent, blocked_destructive)
     return registry

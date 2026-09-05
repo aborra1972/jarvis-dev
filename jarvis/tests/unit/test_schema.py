@@ -24,17 +24,24 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_18_commands_in_8_domains() -> None:
+def test_22_commands_in_8_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 18
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 18
+    assert len(commands) == 22
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 22
     assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle", "conversation", "voice"}
 
 
 def test_destructive_intents_are_gated() -> None:
-    assert DESTRUCTIVE_INTENTS == {"shutdown", "reboot", "power_off_self"}
+    assert DESTRUCTIVE_INTENTS == {
+        "shutdown", "reboot", "power_off_self",
+        "format_disk", "wipe_system", "delete_all", "kill_process",
+    }
     assert DESTRUCTIVE_INTENTS <= ALLOWED_INTENTS
     assert INTENT_DOMAIN["shutdown"] == "system"
+    assert INTENT_DOMAIN["format_disk"] == "system"
+    assert INTENT_DOMAIN["wipe_system"] == "system"
+    assert INTENT_DOMAIN["delete_all"] == "files"
+    assert INTENT_DOMAIN["kill_process"] == "system"
     assert INTENT_DOMAIN["power_off_self"] == "lifecycle"
     assert CONFIDENCE_THRESHOLD == 0.6
 

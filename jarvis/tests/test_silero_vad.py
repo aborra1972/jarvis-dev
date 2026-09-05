@@ -1,9 +1,11 @@
 """Tests for SileroVAD in capture.py.
 
-torch is imported *inside* capture methods (lazy), so the module attribute
-``jarvis.audio.capture.torch`` does not exist — patching that name fails.
-Instead, tests inject a fake torch into ``sys.modules`` so the in-function
-``import torch`` resolves to the mock.
+The pip package's ``load_silero_vad(onnx=True)`` is imported *inside*
+capture methods (lazy), so the module attribute ``jarvis.audio.capture.silero_vad``
+does not exist — patching that name fails. Instead, tests inject a fake
+``silero_vad`` module into ``sys.modules`` so the in-function
+``from silero_vad import load_silero_vad`` resolves to the mock. A fake
+``torch`` is also injected for ``is_speech``'s in-function import.
 """
 
 from __future__ import annotations
@@ -17,21 +19,34 @@ import numpy as np
 from jarvis.audio.capture import DEFAULT_THRESHOLD, SileroVAD, rms
 
 
+def _make_silero_vad():
+    """Return a fake silero_vad module whose load_silero_vad yields a model."""
+    module = ModuleType("silero_vad")
+    module.load_silero_vad = MagicMock()
+    return module
+
+
 def _make_torch():
-    """Return a fake torch module whose hub.load yields (model, utils)."""
+    """Return a fake torch module for is_speech's in-function import."""
     torch = ModuleType("torch")
     torch.no_grad = lambda: MagicMock()  # context manager via MagicMock's __enter__/__exit__
     torch.from_numpy = MagicMock(return_value=MagicMock())
-    torch.hub = ModuleType("torch.hub")
-    torch.hub.load = MagicMock()
     return torch
 
 
-def _inject_torch():
-    """Patch sys.modules['torch'] for the duration of the test."""
+def _inject_deps():
+    """Patch sys.modules for 'torch' and 'silero_vad' for the test duration."""
     torch = _make_torch()
-    patcher = patch.dict(sys.modules, {"torch": torch})
-    return patcher, torch
+    silero_vad = _make_silero_vad()
+    patcher = patch.dict(sys.modules, {"torch": torch, "silero_vad": silero_vad})
+    return patcher, torch, silero_vad
+
+
+def _prob_tensor(value: float):
+    """Return a fake tensor whose .item() yields `value` (ONNX model output)."""
+    tensor = MagicMock()
+    tensor.item.return_value = value
+    return tensor
 
 
 class TestSileroVAD:
@@ -45,26 +60,26 @@ class TestSileroVAD:
 
     def test_ensure_loaded_success(self):
         """Test successful model loading."""
-        patcher, torch = _inject_torch()
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
             vad = SileroVAD()
             mock_model = MagicMock()
-            mock_utils = (MagicMock(), None, None, None, None)
-            torch.hub.load.return_value = (mock_model, mock_utils)
+            silero_vad.load_silero_vad.return_value = mock_model
 
             result = vad._ensure_loaded()
             assert result is True
             assert vad._model is mock_model
+            silero_vad.load_silero_vad.assert_called_once_with(onnx=True)
         finally:
             patcher.stop()
 
     def test_ensure_loaded_fallback_on_import_error(self):
-        """Test fallback when torch.hub.load fails."""
-        patcher, torch = _inject_torch()
+        """Test fallback when the model fails to load."""
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
-            torch.hub.load.side_effect = ImportError("no module")
+            silero_vad.load_silero_vad.side_effect = ImportError("no package")
             vad = SileroVAD()
             result = vad._ensure_loaded()
             assert result is False
@@ -74,11 +89,13 @@ class TestSileroVAD:
 
     def test_is_speech_empty_block(self):
         """Test empty block returns False (even with model loaded)."""
-        patcher, torch = _inject_torch()
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
             vad = SileroVAD()
-            torch.hub.load.return_value = (MagicMock(), (MagicMock(), None, None, None, None))
+            mock_model = MagicMock()
+            mock_model.return_value = _prob_tensor(0.9)
+            silero_vad.load_silero_vad.return_value = mock_model
             block = np.array([], dtype=np.float32)
             assert vad.is_speech(block) is False
         finally:
@@ -86,10 +103,10 @@ class TestSileroVAD:
 
     def test_is_speech_fallback_to_energy(self):
         """Test fallback to energy VAD when Silero not loaded."""
-        patcher, torch = _inject_torch()
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
-            torch.hub.load.side_effect = ImportError("no module")
+            silero_vad.load_silero_vad.side_effect = ImportError("no package")
             vad = SileroVAD()
             assert vad._init_failed is False
             # High energy block (speech)
@@ -102,16 +119,14 @@ class TestSileroVAD:
             patcher.stop()
 
     def test_is_speech_with_model_above_threshold(self):
-        """Test speech detection with loaded model (confidence >= threshold)."""
-        patcher, torch = _inject_torch()
+        """Test speech detection with loaded model (probability >= threshold)."""
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
             vad = SileroVAD(threshold=0.5)
             mock_model = MagicMock()
-            mock_utils = (MagicMock(), None, None, None, None)
-            torch.hub.load.return_value = (mock_model, mock_utils)
-            # Model returns confidence 0.9 -> speech (Silero: list of timestamp lists)
-            mock_model.return_value = [[{"start": 0, "end": 160, "confidence": 0.9}]]
+            mock_model.return_value = _prob_tensor(0.9)
+            silero_vad.load_silero_vad.return_value = mock_model
 
             block = np.random.randn(1600).astype(np.float32)
             assert vad.is_speech(block) is True
@@ -119,14 +134,14 @@ class TestSileroVAD:
             patcher.stop()
 
     def test_is_speech_with_model_below_threshold(self):
-        """Test silence when confidence is below threshold."""
-        patcher, torch = _inject_torch()
+        """Test silence when probability is below threshold."""
+        patcher, _, silero_vad = _inject_deps()
         patcher.start()
         try:
             vad = SileroVAD(threshold=0.5)
             mock_model = MagicMock()
-            torch.hub.load.return_value = (mock_model, (MagicMock(), None, None, None, None))
-            mock_model.return_value = [[{"start": 0, "end": 160, "confidence": 0.2}]]
+            mock_model.return_value = _prob_tensor(0.2)
+            silero_vad.load_silero_vad.return_value = mock_model
 
             block = np.random.randn(1600).astype(np.float32)
             assert vad.is_speech(block) is False

@@ -208,11 +208,17 @@ def write_wav(path, blocks: list[np.ndarray], sample_rate: int = SAMPLE_RATE) ->
 
 # --- Silero VAD (T-VAD-02) ---
 class SileroVAD:
-    """Silero VAD wrapper for speech detection.
+    """Silero VAD-based voice activity detector (offline ONNX model).
 
-    Uses torch.hub.load('snakers4/silero-vad', 'silero_vad') for accurate
-    voice activity detection. Falls back to energy-based SilenceVAD if the
-    model fails to load (offline / torch unavailable).
+    Scores each captured block for speech probability instead of raw RMS
+    energy. Much more robust than a fixed amplitude threshold against
+    ambient noise (fans, traffic, hum, keyboard clicks) because it was
+    trained to recognize speech patterns, not just "loud vs quiet".
+
+    The model comes from the pip ``silero-vad`` package via
+    ``load_silero_vad(onnx=True)`` (offline ONNX runtime), loaded lazily on
+    first use. Falls back to energy-based SilenceVAD if the model fails to
+    load / the package isn't installed.
 
     Implements the same duck-typed interface the capture pipeline needs:
     ``is_speech(block)``, ``block_duration``, ``max_s``, ``silence_s`` and
@@ -234,26 +240,18 @@ class SileroVAD:
         self.silence_s = silence_s
         self.max_s = max_s
         self._model = None
-        self._get_speech_ts = None
         self._init_failed = False
 
     def _ensure_loaded(self) -> bool:
-        """Lazily load the Silero VAD model."""
+        """Lazily load the Silero VAD model (offline ONNX)."""
         if self._model is not None:
             return True
         if self._init_failed:
             return False
         try:
-            import torch
-            model, utils = torch.hub.load(
-                repo_or_dir="snakers4/silero-vad",
-                model="silero_vad",
-                force_reload=False,
-                trust_repo=True,
-                verbose=False,
-            )
-            self._model = model
-            (self._get_speech_ts, _, _, _, _) = utils
+            from silero_vad import load_silero_vad
+
+            self._model = load_silero_vad(onnx=True)
             return True
         except Exception:
             self._init_failed = True
@@ -271,18 +269,85 @@ class SileroVAD:
             # Fallback to simple energy VAD
             return rms(block) >= DEFAULT_THRESHOLD
 
-        # Silero VAD needs 16kHz audio, expects tensor of shape (1, samples)
+        # Silero VAD needs 16kHz mono float32; score the whole block.
         import torch
-        audio_tensor = torch.from_numpy(block.astype("float32")).unsqueeze(0)
 
-        # Run VAD on the block
+        if block.ndim > 1:
+            block = block.reshape(-1)
+        tensor = torch.from_numpy(np.ascontiguousarray(block, dtype=np.float32))
         with torch.no_grad():
-            speech_probs = self._model(audio_tensor, self.sample_rate)
+            prob = float(self._model(tensor, self.sample_rate).item())
+        return prob >= self.threshold
 
-        # speech_probs is a list of speech probabilities for each block.
-        # Confidence >= threshold on any window, or the block mean, counts.
-        if speech_probs:
-            confidences = [ts["confidence"] for ts in speech_probs[0]]
-            if confidences:
-                return max(confidences) >= self.threshold
-        return False
+
+def build_vad(
+    *,
+    engine: str = "silero",
+    threshold: float | None = None,
+    silence_s: float = SILENCE_MS / 1000.0,
+    max_s: float = MAX_UTTERANCE_S,
+    sample_rate: int = SAMPLE_RATE,
+    block_ms: int = BLOCK_MS,
+) -> SileroVAD | SilenceVAD:
+    """Factory: build the configured VAD, falling back to energy on failure.
+
+    engine="silero" (default) tries the Silero model first; if it can't
+    load (package not installed, model not cached, offline first-run with
+    no network), falls back to the energy-based SilenceVAD so Jarvis still
+    starts instead of crashing. Construction is side-effect free here (the
+    Silero model loads lazily on first is_speech call), so this is safe to
+    call from unit tests.
+    """
+    if engine == "silero":
+        try:
+            return SileroVAD(
+                threshold=threshold if threshold is not None else 0.5,
+                silence_s=silence_s,
+                max_s=max_s,
+                sample_rate=sample_rate,
+                block_ms=block_ms,
+            )
+        except Exception as exc:  # pragma: no cover - environment dependent
+            print(
+                f"[jarvis] WARN: Silero VAD no cargó ({exc}); usando energy VAD",
+                flush=True,
+            )
+    return SilenceVAD(
+        threshold=threshold if threshold is not None else DEFAULT_THRESHOLD,
+        silence_s=silence_s,
+        max_s=max_s,
+        sample_rate=sample_rate,
+        block_ms=block_ms,
+    )
+
+
+def calibrate_noise_floor(
+    capturer: Capturer,
+    *,
+    duration_s: float = 1.2,
+    multiplier: float = 2.5,
+    min_threshold: float = 0.01,
+    max_threshold: float = 0.12,
+    read_timeout: float = 1.0,
+) -> float:
+    """Sample ambient noise and derive a VAD threshold for this environment.
+
+    Call once at boot (mic must already be started). Reads ~duration_s of
+    silence, takes the mean RMS, and scales it by `multiplier` so speech
+    (which sits well above ambient noise) still crosses the gate. Falls back
+    to DEFAULT_THRESHOLD if no frames arrive (mic not ready / muted).
+    """
+    samples: list[float] = []
+    elapsed = 0.0
+    block_duration = BLOCK_MS / 1000.0
+    while elapsed < duration_s:
+        block = capturer.read_frames(timeout=read_timeout)
+        if block is None:
+            break
+        samples.append(rms(block))
+        elapsed += block_duration
+    if not samples:
+        return DEFAULT_THRESHOLD
+    noise_floor = float(np.mean(samples))
+    threshold = noise_floor * multiplier
+    return max(min_threshold, min(threshold, max_threshold))

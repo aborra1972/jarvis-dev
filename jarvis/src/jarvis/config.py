@@ -138,7 +138,9 @@ PLAYER_BIN = "paplay"
 AGENT_PROFILES: dict[str, dict] = {
     "jarvis": {
         "name": "Jarvis",
-        "voice": "es-NI-FedericoNeural",
+        "voice": "en-US-AndrewMultilingualNeural",
+        "rate": "-5%",
+        "pitch": "-10Hz",
         "address": "señor",
         "announcement": "Buen día, señor. Soy Jarvis, a su servicio.",
         "personality": (
@@ -149,7 +151,9 @@ AGENT_PROFILES: dict[str, dict] = {
     },
     "friday": {
         "name": "Friday",
-        "voice": "es-PE-CamilaNeural",
+        "voice": "en-US-AvaMultilingualNeural",
+        "rate": "+5%",
+        "pitch": "+0Hz",
         "address": "jefe",
         "announcement": "Buen día, jefe. Soy Friday, a su servicio.",
         "personality": (
@@ -161,7 +165,9 @@ AGENT_PROFILES: dict[str, dict] = {
     },
     "karen": {
         "name": "Karen",
-        "voice": "es-GT-MartaNeural",
+        "voice": "en-US-EmmaMultilingualNeural",
+        "rate": "+3%",
+        "pitch": "+5Hz",
         "address": "amigo",
         "announcement": "Buen día, amigo. Soy Karen, a su servicio.",
         "personality": (
@@ -208,6 +214,16 @@ def agent_name() -> str:
 def agent_voice() -> str:
     """edge-tts voice of the active agent."""
     return active_agent()["voice"]
+
+
+def agent_rate() -> str:
+    """edge-tts speaking rate of the active agent."""
+    return active_agent()["rate"]
+
+
+def agent_pitch() -> str:
+    """edge-tts pitch adjustment of the active agent."""
+    return active_agent()["pitch"]
 
 
 def agent_address() -> str:
@@ -259,9 +275,10 @@ TTS_ENGINE = "edge"
 # A manual EDGE_VOICE=... in .env/shell still overrides the agent's voice —
 # kept for backwards compatibility, but the agent's voice is the intended knob.
 EDGE_VOICE: str = os.environ.get("EDGE_VOICE") or AGENT_PROFILES[AGENT]["voice"]
-# Optional edge-tts voice shaping flags, e.g. "-10%" or "-5Hz"; None = omit.
-EDGE_RATE: str | None = None
-EDGE_PITCH: str | None = None
+# Voice shaping preserves each persona's pacing and tonal profile after moving
+# to multilingual voices. Environment values remain available for fine tuning.
+EDGE_RATE: str | None = os.environ.get("EDGE_RATE") or AGENT_PROFILES[AGENT]["rate"]
+EDGE_PITCH: str | None = os.environ.get("EDGE_PITCH") or AGENT_PROFILES[AGENT]["pitch"]
 # edge-tts chunks long text internally (~4s per 1000 chars); task results are
 # long, so the timeout is generous.
 EDGE_TTS_TIMEOUT_S = 60.0

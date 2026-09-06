@@ -70,7 +70,7 @@ class PiperTTS:
 class EdgeTTS:
     """Microsoft neural TTS via the edge-tts CLI (primary engine).
 
-    es-MX-JorgeNeural outputs mp3 directly; edge-tts chunks long text
+    MultilingualNeural voices output mp3 directly; edge-tts chunks long text
     internally, so the generous timeout covers full task results.
     """
 
@@ -102,9 +102,9 @@ class EdgeTTS:
             str(out_path),
         ]
         if self.rate:
-            cmd += ["--rate", self.rate]
+            cmd.append(f"--rate={self.rate}")
         if self.pitch:
-            cmd += ["--pitch", self.pitch]
+            cmd.append(f"--pitch={self.pitch}")
         try:
             proc = subprocess.run(
                 cmd,

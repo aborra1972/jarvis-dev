@@ -145,10 +145,8 @@ def test_edge_synthesize_passes_rate_and_pitch(fake_edge_tts: Path, tmp_path: Pa
     tts.synthesize("hola", tmp_path / "reply.mp3")
 
     args = _edge_args(fake_edge_tts)
-    assert args[6] == "--rate"
-    assert args[7] == "-10%"
-    assert args[8] == "--pitch"
-    assert args[9] == "-5Hz"
+    assert args[6] == "--rate=-10%"
+    assert args[7] == "--pitch=-5Hz"
 
 
 def test_edge_synthesize_omits_rate_and_pitch_by_default(

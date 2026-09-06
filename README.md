@@ -453,18 +453,20 @@ jarvis setup              # wizard interactivo con los 3 agentes
 JARVIS_AGENT=friday       # jarvis | friday | karen
 ```
 
-| Agente | Nombre | Voz edge-tts | Tratamiento |
-|--------|--------|--------------|-------------|
-| `jarvis` | Jarvis | `es-NI-FedericoNeural` | "señor" |
-| `friday` | Friday | `es-PE-CamilaNeural` | "jefe" |
-| `karen` | Karen | `es-GT-MartaNeural` | "amigo" |
+| Agente | Nombre | Voz edge-tts | Perfil | Tratamiento |
+|--------|--------|--------------|--------|-------------|
+| `jarvis` | Jarvis | `en-US-AndrewMultilingualNeural` | formal, cálida y grave | "señor" |
+| `friday` | Friday | `en-US-AvaMultilingualNeural` | ágil y profesional | "jefe" |
+| `karen` | Karen | `en-US-EmmaMultilingualNeural` | joven, clara y cálida | "amigo" |
 
 El default es `jarvis`. Si `JARVIS_AGENT` tiene un valor inválido, Jarvis avisa
 por stderr y usa `jarvis`.
 
 ### Cambiar la voz
 
-La voz sigue al agente activo (`EDGE_VOICE = AGENT_PROFILES[AGENT]["voice"]`).
+La voz, velocidad y tono siguen al agente activo. Los perfiles multilingües
+pronuncian correctamente español e inglés sin perder la identidad perceptual de
+cada asistente.
 Si querés forzar una voz distinta a la del agente (escape hatch), `EDGE_VOICE`
 en `.env` sigue siendo respetado:
 

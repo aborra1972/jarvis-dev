@@ -99,6 +99,19 @@ def test_gather_empty_when_no_frames() -> None:
     assert duration == 0.0
 
 
+def test_gather_aborts_when_control_requests_stop() -> None:
+    capturer = FakeCapturer([_sine(), _sine(), _sine()])
+
+    blocks, duration = gather_utterance(
+        capturer,
+        _vad(),
+        stop_requested=lambda: capturer.reads >= 1,
+    )
+
+    assert len(blocks) == 1
+    assert duration == pytest.approx(0.1)
+
+
 def test_gather_speech_only_without_silence_runs_to_max() -> None:
     vad = _vad(max_s=0.3, silence_s=0.8)
     capturer = FakeCapturer([_sine(), _sine(), _sine(), _sine(), _sine()])
@@ -168,6 +181,31 @@ def test_sounddevice_capturer_flush_zero_ms_drains_at_least_one() -> None:
 def test_sounddevice_capturer_stop_without_start_is_noop() -> None:
     capturer = SoundDeviceCapturer()
     capturer.stop()  # must not raise
+
+
+def test_enqueue_back_reads_front_blocks_first() -> None:
+    """Re-injected pre-roll (name wake) is read BEFORE live queued frames."""
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    queued_a, queued_b = _sine(), _sine()
+    capturer._queue.put(queued_a)
+    capturer._queue.put(queued_b)
+    f0, f1 = _sine(), _sine()
+    capturer.enqueue_back([f0, f1])
+    assert capturer.read_frames(timeout=0.01) is f0
+    assert capturer.read_frames(timeout=0.01) is f1
+    assert capturer.read_frames(timeout=0.01) is queued_a
+    assert capturer.read_frames(timeout=0.01) is queued_b
+
+
+def test_flush_drains_front_and_queue() -> None:
+    """flush() must discard the re-injected front buffer too (T-FLUSH-01)."""
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    capturer.enqueue_back([_sine(), _sine()])
+    capturer._queue.put(_sine())
+    capturer.flush(ms=1)
+    assert not capturer._front
+    assert capturer._queue.empty()
+    assert capturer.read_frames(timeout=0.01) is None
 
 
 def test_capturer_is_a_protocol_matching_fakes() -> None:

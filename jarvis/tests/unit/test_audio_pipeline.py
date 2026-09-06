@@ -215,6 +215,17 @@ def test_utterance_capture_returns_transcript(tmp_path: Path) -> None:
     assert duration == pytest.approx(0.4)
 
 
+def test_utterance_capture_flattens_audio_for_speaker_verification(tmp_path: Path) -> None:
+    capturer = FakeCapturer(
+        [_speech().reshape(-1, 1), _silence().reshape(-1, 1)]
+    )
+    capture = UtteranceCapture(capturer, FakeSTT("hola"), _vad(), wav_dir=tmp_path)
+
+    assert capture.capture() == "hola"
+    assert capture.last_audio() is not None
+    assert capture.last_audio().ndim == 1
+
+
 def test_utterance_capture_cleans_wav_after_transcription(tmp_path: Path) -> None:
     """Capture WAV files must be deleted after STT to avoid disk fill."""
     capturer = FakeCapturer([_speech(), _silence()])

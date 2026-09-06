@@ -72,7 +72,13 @@ def check_microphone() -> DiagResult:
 
 
 def check_wake_word() -> DiagResult:
-    """Check that the wake word model file exists."""
+    """Check the wake backend: name-gated VAD, built-in model, or XLSR file."""
+    if config.WAKE_ENGINE == "name":
+        return DiagResult(
+            "Wake por nombre (VAD)",
+            True,
+            "activación con el nombre del agente + VAD (sin modelo)",
+        )
     if config.WAKE_ENGINE == "openwakeword":
         # openWakeWord uses built-in models, no file check needed
         return DiagResult(

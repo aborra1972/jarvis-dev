@@ -5,12 +5,18 @@ detector implements the orchestrator WakeDetector protocol — wait(timeout) ->
 bool (orchestrator.contracts, PR3) — and pulls 16kHz mono float blocks from a
 Capturer.
 
-Two backends:
-- OpenWakeWord (default): pretrained hey_jarvis_v0.1.onnx from the package.
+Three backends:
+- SpeechStartWake (default, engine "name"): bare-agent-name activation. The
+  VAD's speech LEADING EDGE fires (no ML model) and rewind() re-injects the
+  ~2s pre-roll that contains the agent name the user is speaking right now;
+  the loop's name gate verifies the transcript starts with the agent name.
+- OpenWakeWord (engine "openwakeword"): pretrained hey_jarvis_v0.1.onnx from
+  the package.
 - XLSRWakeWord (gate 5.6): custom wav2vec2-XLSR + LogisticRegression trained
   on the operator's own voice for "jarvis" (single word, Argentine Spanish).
 
-Config.WAKE_ENGINE selects the backend: "openwakeword" (default) or "xslr".
+Config.WAKE_ENGINE selects the backend: "name" (default), "openwakeword" or
+"xslr".
 """
 
 from __future__ import annotations
@@ -18,10 +24,18 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 from typing import Protocol
+import warnings
 
 import numpy as np
 
-from jarvis.audio.capture import BLOCK_MS, SAMPLE_RATE, Capturer
+from jarvis import config
+from jarvis.audio.capture import (
+    BLOCK_MS,
+    SAMPLE_RATE,
+    Capturer,
+    SilenceVAD,
+    build_vad,
+)
 
 DEFAULT_THRESHOLD = 0.7
 DEFAULT_VAD_THRESHOLD = 0.6
@@ -100,11 +114,17 @@ class OpenWakeWord:
             from openwakeword.model import Model
 
             paths = [str(p) for p in build_model_paths(model_paths, custom=custom)]
-            self._model = Model(
-                wakeword_model_paths=paths,
-                enable_speex_noise_suppression=False,
-                vad_threshold=vad_threshold,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Specified provider 'CUDAExecutionProvider'.*",
+                    category=UserWarning,
+                )
+                self._model = Model(
+                    wakeword_model_paths=paths,
+                    enable_speex_noise_suppression=False,
+                    vad_threshold=vad_threshold,
+                )
 
     def wait(self, timeout: float) -> bool:
         """Block until a model score reaches threshold or the timeout elapses."""
@@ -131,6 +151,104 @@ class OpenWakeWord:
     def flush(self) -> None:
         """Reset openwakeword internal state (call after TTS cooldown)."""
         self._model.reset()
+
+
+class SpeechStartWake:
+    """Name-gated activation (engine "name").
+
+    Instead of a keyword-spotting model, wait() watches the mic with the
+    same VAD the capture stage uses and fires on the LEADING EDGE of speech
+    (silence -> speech). The agent name and the command are one utterance
+    ("friday, abri firefox"), so the last ~preroll_s of audio are kept in a
+    ring buffer; rewind() pushes them back into the capturer so the STT sees
+    the name too and the orchestrator's name gate can verify it.
+
+    Implements the WakeDetector protocol: wait(timeout)->bool, flush().
+    gates_by_name=True tells the loop to apply the transcript name gate
+    (and to skip mic-stop/beep between wake and capture, which would clip
+    the utterance). The GUI wake threshold maps to `threshold` (Silero
+    speech probability; clamped to RMS scale for the energy-VAD fallback).
+    """
+
+    gates_by_name = True
+
+    def __init__(
+        self,
+        capturer: Capturer,
+        *,
+        threshold: float = DEFAULT_VAD_THRESHOLD,
+        preroll_s: float = config.WAKE_PREROLL_S,
+        timeout_per_read: float = 1.0,
+        vad=None,
+        clock: Clock | None = None,
+    ) -> None:
+        self.capturer = capturer
+        self.threshold = threshold
+        self._timeout_per_read = timeout_per_read
+        self._clock = clock or _monotonic
+        self._preroll_target = int(preroll_s * SAMPLE_RATE)
+        self._preroll: deque[np.ndarray] = deque()
+        self._preroll_samples = 0
+        self._was_speech = False
+        if vad is not None:
+            self._vad = vad
+        else:
+            self._vad = build_vad(
+                engine=config.VAD_ENGINE if config.VAD_ENGINE == "energy" else "silero",
+                threshold=threshold,
+                sample_rate=SAMPLE_RATE,
+                block_ms=BLOCK_MS,
+            )
+            # Energy fallback: the GUI slider is a Silero probability, not an
+            # RMS gate — clamp so a raised slider can't deafen the mic.
+            if isinstance(self._vad, SilenceVAD):
+                self._vad.threshold = min(0.15, max(0.02, threshold))
+
+    def wait(self, timeout: float) -> bool:
+        """Block until speech onset (leading edge) or the timeout elapses."""
+        deadline = self._clock() + timeout
+        while self._clock() < deadline:
+            block = self.capturer.read_frames(timeout=self._timeout_per_read)
+            if block is None:
+                break
+            if isinstance(block, np.ndarray) and block.ndim > 1:
+                block = block.reshape(-1)
+            self._push_preroll(block)
+            speech = self._vad.is_speech(block)
+            if speech and not self._was_speech:
+                self._was_speech = True
+                return True
+            self._was_speech = speech
+        return False
+
+    def rewind(self) -> bool:
+        """Push the pre-roll back into the capturer so the name is not lost.
+
+        Returns True when any block was re-injected (silent wake fires leave
+        the mic untouched and need no rewind).
+        """
+        blocks = list(self._preroll)
+        enqueue = getattr(self.capturer, "enqueue_back", None)
+        if callable(enqueue) and blocks:
+            enqueue(blocks)
+        self.flush()
+        return bool(blocks)
+
+    def flush(self) -> None:
+        """Discard the pre-roll and VAD state (call after TTS cooldown)."""
+        self._preroll.clear()
+        self._preroll_samples = 0
+        self._was_speech = False
+        reset = getattr(self._vad, "reset", None)
+        if callable(reset):
+            reset()
+
+    def _push_preroll(self, block: np.ndarray) -> None:
+        self._preroll.append(block)
+        self._preroll_samples += len(block)
+        while self._preroll_samples > self._preroll_target and self._preroll:
+            dropped = self._preroll.popleft()
+            self._preroll_samples -= len(dropped)
 
 
 class XLSRWakeWord:
@@ -252,10 +370,7 @@ class XLSRWakeWord:
         # ONNX classifier
         input_name = self._onnx_session.get_inputs()[0].name
         result = self._onnx_session.run(None, {input_name: embedding})
-        # LogisticRegression probability for class 1 (positive)
-        proba = float(result[0][0])
-        if isinstance(proba, (list, np.ndarray)):
-            proba = float(proba[0]) if len(proba) == 1 else float(proba[1])
+        proba = _positive_class_probability(result)
         print(f"[jarvis] wake score: {proba:.3f} (threshold={self.threshold})", flush=True)
         return proba
 
@@ -267,12 +382,16 @@ def build_wake_detector(
     classifier_path: Path | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     **kwargs,
-) -> OpenWakeWord | XLSRWakeWord:
+) -> OpenWakeWord | XLSRWakeWord | SpeechStartWake:
     """Factory: select wake word backend based on config.
 
+    engine="name" uses SpeechStartWake (VAD speech-leading-edge activation
+    with pre-roll rewind for the bare agent name; no ML model).
     engine="xslr" uses the custom trained classifier (gate 5.6).
     engine="openwakeword" (default) uses the pretrained hey_jarvis model.
     """
+    if engine == "name":
+        return SpeechStartWake(capturer, threshold=threshold, **kwargs)
     if engine == "xslr":
         if classifier_path is None or not classifier_path.is_file():
             raise FileNotFoundError(
@@ -286,6 +405,23 @@ def build_wake_detector(
             **kwargs,
         )
     return OpenWakeWord(capturer, threshold=threshold, **kwargs)
+
+
+def _positive_class_probability(outputs: list) -> float:
+    """Extract class-1 probability from sklearn-onnx classifier outputs."""
+    if len(outputs) < 2:
+        raise ValueError("wake classifier did not return probabilities")
+    probabilities = outputs[1]
+    first = probabilities[0] if isinstance(probabilities, (list, tuple)) else probabilities
+    if isinstance(first, dict):
+        value = first.get(1, first.get("1"))
+        if value is None:
+            raise ValueError("wake classifier has no positive class probability")
+        return float(value)
+    values = np.asarray(first, dtype=np.float32).reshape(-1)
+    if values.size < 2:
+        raise ValueError("wake classifier probability tensor has no positive class")
+    return float(values[1])
 
 
 def _monotonic() -> float:

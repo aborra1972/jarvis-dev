@@ -10,6 +10,7 @@ adapters in without rework; tests drive fakes.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -36,6 +37,7 @@ from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
 from jarvis.orchestrator.contracts import CaptureError
 from jarvis.orchestrator.logs import TranscriptLog, clean_logs
+from jarvis.orchestrator.name_gate import strip_agent_prefix
 from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
 from jarvis.orchestrator.supervisor import RealClock
@@ -119,6 +121,10 @@ class _Context:
     # now() is before it, IDLE skips wake-word detection entirely and goes
     # straight to LISTENING for a follow-up. 0.0 means no active window.
     conversation_until: float = 0.0
+    # True when LISTENING was entered from the name-gated wake (engine
+    # "name"): the utterance must start with the active agent's name, verified
+    # after STT. False for conversation-mode follow-ups and reask retries.
+    wake_gated: bool = False
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -142,7 +148,31 @@ def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
     return context.outcome
 
 
+def _read_wake_threshold(default: float) -> float:
+    """Read the GUI-controlled wake threshold without trusting corrupt state."""
+    try:
+        payload = json.loads(config.STATE_FILE.read_text())
+        value = payload.get("wake_threshold", default)
+        if isinstance(value, bool):
+            return default
+        threshold = float(value)
+        return threshold if 0.1 <= threshold <= 0.9 else default
+    except (AttributeError, FileNotFoundError, OSError, TypeError, ValueError):
+        return default
+
+
+def _sync_wake_threshold(wake: object) -> None:
+    if hasattr(wake, "threshold"):
+        wake.threshold = _read_wake_threshold(config.WAKE_THRESHOLD)
+
+
+def _wake_gates_by_name(wake: object) -> bool:
+    """True when the wake backend is the name-gated SpeechStartWake."""
+    return bool(getattr(wake, "gates_by_name", False))
+
+
 def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _Context]:
+    _sync_wake_threshold(pipeline.wake)
     # Process any pending SIGUSR1/SIGUSR2 before checking state.
     # This runs in the main loop (not a signal handler) so I/O is safe.
     _apply_switch(pipeline.session, pipeline.switch_state, pipeline.speaker)
@@ -152,7 +182,14 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.OFF, context
         playing = _speaker_is_playing(pipeline.speaker)
         if playing:
-            if config.BARGE_IN_ENABLED and hasattr(pipeline.wake, 'capturer'):
+            if (
+                config.BARGE_IN_ENABLED
+                and hasattr(pipeline.wake, 'capturer')
+                # Barge-in is inherently broken for VAD speech-start without
+                # AEC — Jarvis's own voice would self-interrupt. The name
+                # engine keeps the mic STOPPED during playback (else branch).
+                and not _wake_gates_by_name(pipeline.wake)
+            ):
                 # Keep the mic open during playback (instead of stopping it)
                 # so a repeated wake word can interrupt Jarvis. No AEC in
                 # this project, so we use a stricter threshold than normal
@@ -187,6 +224,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                         pipeline.wake.capturer.start()
                     pipeline.session.reask_attempts = 0
                     _write_fsm_state("listening")
+                    context.wake_gated = False  # barge-in is legacy-only now
                     return State.LISTENING, context
             else:
                 # PR6 (item 6): never listen over jarvis's own voice.
@@ -239,13 +277,36 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 pipeline.wake.flush()
             context.outcome = "conversation_continue"
             _write_fsm_state("listening")
+            context.wake_gated = False  # follow-up window: no name gate
             return State.LISTENING, context
         context.conversation_until = 0.0
+        # Non-TTS returns from LISTENING stop the mic (silence, wrong_speaker,
+        # name_mismatch) and nothing else restarted it: ensure the mic is open
+        # before the next wake scan. start() is idempotent; flushing the wake
+        # buffer discards any stale frames left from the previous cycle.
+        if hasattr(pipeline.wake, 'capturer'):
+            if hasattr(pipeline.wake, 'flush'):
+                pipeline.wake.flush()
+            capturer_flush = getattr(pipeline.wake.capturer, 'flush', None)
+            if callable(capturer_flush):
+                capturer_flush(ms=config.AUDIO_FLUSH_MS)
+            pipeline.wake.capturer.start()
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
             context.outcome = "no_wake"
             return State.IDLE, context
         pipeline.session.reask_attempts = 0
         context.outcome = "woke"
+        # Name-gated wake (engine "name"): the user is mid-utterance ("friday,
+        # abrí firefox"). Do NOT stop the mic / beep / sleep — that clips the
+        # command. Rewind the pre-roll so the name reaches the STT, then listen.
+        if _wake_gates_by_name(pipeline.wake):
+            rewind = getattr(pipeline.wake, "rewind", None)
+            if callable(rewind):
+                rewind()
+            context.wake_gated = True
+            _write_fsm_state("listening")
+            return State.LISTENING, context
+        context.wake_gated = False
         # Stop mic before beep to prevent capturing our own sound
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
@@ -274,6 +335,17 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
+
+        # Name gate: with the "name" wake engine the utterance must start with
+        # the active agent's name. Test with what produced the wake — a follow-up
+        # in conversation mode (wake_gated False) or a reask retry does not
+        # require the name again.
+        if context.wake_gated and _wake_gates_by_name(pipeline.wake):
+            stripped = strip_agent_prefix(transcript, config.agent_name())
+            if stripped is None:
+                context.outcome = "name_mismatch"
+                return State.IDLE, context
+            transcript = stripped
 
         # --- SPEAKER VERIFICATION ---
         # Check if the voice matches the enrolled speaker
@@ -364,6 +436,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             hint = context.interpretation.suggestion if context.interpretation else None
             pipeline.speaker.speak(f"{base_msg} ¿Quisiste {hint}?" if hint else base_msg)
             context.outcome = "reask"
+            context.wake_gated = False  # reask retry: no name gate
             return State.LISTENING, context
         if step == "reveal":
             pipeline.speaker.speak(_spoken_toward(REVEAL_PREFIX) + transcript)
@@ -589,6 +662,7 @@ def build_pipeline(
             calibrate_ms=config.AUDIO_CALIBRATE_MS,
             calibrate_factor=config.AUDIO_CALIBRATE_FACTOR,
             calibrate_min_threshold=config.AUDIO_CALIBRATE_MIN_THRESHOLD,
+            stop_requested=lambda: _switch_pending is True,
         )
         wake = build_wake_detector(
             capturer,

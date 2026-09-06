@@ -148,6 +148,23 @@ class TestSileroVAD:
         finally:
             patcher.stop()
 
+    def test_is_speech_chunks_capture_blocks_for_silero(self):
+        """Silero only accepts 512 samples at 16 kHz, not 100 ms blocks."""
+        patcher, torch, silero_vad = _inject_deps()
+        patcher.start()
+        try:
+            torch.from_numpy.side_effect = lambda samples: samples
+            vad = SileroVAD(threshold=0.5, sample_rate=16000)
+            mock_model = MagicMock(return_value=_prob_tensor(0.2))
+            silero_vad.load_silero_vad.return_value = mock_model
+
+            assert vad.is_speech(np.zeros(1600, dtype=np.float32)) is False
+            assert mock_model.call_count == 3
+            assert all(call.args[0].shape == (512,) for call in mock_model.call_args_list)
+            assert vad._buffer.size == 64
+        finally:
+            patcher.stop()
+
     def test_interface_attributes(self):
         """SileroVAD exposes the duck-typed capture interface (T-VAD-02)."""
         vad = SileroVAD(silence_s=0.8, max_s=10.0)

@@ -2,7 +2,7 @@
 
 ## Cómo usar
 
-1. Decí **"JARVIS"** para activarlo
+1. Decí la palabra de activación configurada
 2. Decí tu comando
 3. Escuchá la respuesta
 
@@ -42,7 +42,7 @@
 
 | Problema | Solución |
 |----------|----------|
-| No detecta | Bajá sensibilidad (slider a 0.3) |
-| Se activa solo | Subí sensibilidad (slider a 0.7) |
+| No detecta | Bajá el umbral (slider a 0.3) |
+| Se activa solo | Subí el umbral (slider a 0.7) |
 | No hay audio | Verificá `arecord -l` |
 | No ejecuta | Verificá proyecto activo |

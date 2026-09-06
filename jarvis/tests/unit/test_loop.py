@@ -9,6 +9,7 @@ switch off/on (RF-11), and power_off_self → stopped.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from pathlib import Path
 
@@ -26,11 +27,37 @@ from jarvis.orchestrator.loop import (
     UNSUPPORTED_SPOKEN,
     Pipeline,
     _Context,
+    _read_wake_threshold,
+    _sync_wake_threshold,
     _tick,
     run,
 )
 from jarvis.orchestrator.session import Session, load_state
 from jarvis.orchestrator.state import State
+
+
+def test_read_wake_threshold_from_gui_state(tmp_path: Path, monkeypatch) -> None:
+    from jarvis import config
+
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"wake_threshold": 0.65}))
+    monkeypatch.setattr(config, "STATE_FILE", state_file)
+
+    assert _read_wake_threshold(0.7) == 0.65
+
+
+def test_sync_wake_threshold_updates_active_detector(tmp_path: Path, monkeypatch) -> None:
+    from jarvis import config
+
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"wake_threshold": 0.35}))
+    monkeypatch.setattr(config, "STATE_FILE", state_file)
+    wake = FakeWake([])
+    wake.threshold = 0.7
+
+    _sync_wake_threshold(wake)
+
+    assert wake.threshold == 0.35
 
 
 class FakeClock:
@@ -52,6 +79,48 @@ class FakeWake:
         return self.results.popleft() if self.results else False
 
 
+class NameFakeWake(FakeWake):
+    """Name-gated wake (engine "name"): the loop must rewind and skip the beep."""
+
+    gates_by_name = True
+
+    def __init__(self, results: list[bool]) -> None:
+        super().__init__(results)
+        self.rewound = False
+
+    def rewind(self) -> None:
+        self.rewound = True
+
+
+class CountingMic:
+    """Records start/stop/flush calls like the real SoundDeviceCapturer."""
+
+    def __init__(self) -> None:
+        self.started = 0
+        self.stopped = 0
+        self.flushed = 0
+
+    def start(self) -> None:
+        self.started += 1
+
+    def stop(self) -> None:
+        self.stopped += 1
+
+    def flush(self, ms: int = 1000) -> None:
+        self.flushed += 1
+
+
+class MicWake(FakeWake):
+    """FakeWake wired to a counting capturer (mic lifecycle tests)."""
+
+    def __init__(self, results: list[bool], capturer: CountingMic) -> None:
+        super().__init__(results)
+        self.capturer = capturer
+
+    def flush(self) -> None:
+        pass
+
+
 class FakeCapture:
     def __init__(self, transcripts: list[str | None], clock: FakeClock | None = None, advance: float = 0.0) -> None:
         self.transcripts = deque(transcripts)
@@ -70,6 +139,18 @@ class FakeSpeaker:
 
     def speak(self, text: str) -> None:
         self.said.append(text)
+
+
+class BeepRecordingSpeaker(FakeSpeaker):
+    """FakeSpeaker that records activation-beep calls (speaker.playback)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.beeps = 0
+        self.playback = self
+
+    def play_beep(self) -> None:
+        self.beeps += 1
 
 
 class FakeInterpreter:
@@ -546,3 +627,112 @@ def test_cooldown_starts_when_tts_finishes_not_when_it_starts(tmp_path: Path) ->
     assert context.last_spoke_at == 0.0  # cooldown consumed
     # The cooldown sleep should have happened (or been satisfied already)
     assert elapsed >= 0  # basic sanity
+
+
+# --- Name-gated wake (feature "wake por nombre", engine "name") ----------------
+def test_name_wake_skips_beep_and_goes_straight_to_listening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JARVIS_AGENT", "friday")
+    wake = NameFakeWake([True])
+    speaker = BeepRecordingSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=wake,
+        capture=FakeCapture(["friday, abrí firefox"]),
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=speaker,
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    assert wake.rewound is True
+    assert speaker.beeps == 0  # name path never calls speaker.playback
+    assert pipeline.interpreter.calls[0] == "abrí firefox"  # name STRIPPED
+    assert [c.intent for c in pipeline.executor.calls] == ["open_app"]
+    assert speaker.said == ["ok"]
+
+
+def test_name_wake_discards_transcript_without_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JARVIS_AGENT", "friday")
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=NameFakeWake([True]),
+        capture=FakeCapture(["hola che"]),
+        interpreter=FakeInterpreter([]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    outcome = run(pipeline, iterations=2)
+    assert outcome == "name_mismatch"
+    assert pipeline.interpreter.calls == []
+    assert pipeline.speaker.said == []  # discarded silently
+
+
+def test_conversation_followup_skips_name_gate(tmp_path: Path) -> None:
+    import time
+
+    wake = NameFakeWake([True])  # must NOT be consumed: conversation path
+    context = _Context()
+    context.conversation_until = time.monotonic() + 60.0
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=wake,
+        capture=FakeCapture(["friday, abrí firefox"]),
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    state, _ = _tick(State.IDLE, pipeline, context)
+    assert state == State.LISTENING
+    assert len(wake.results) == 1  # wake never consulted
+    state, _ = _tick(state, pipeline, context)
+    assert state == State.EXECUTING
+    # Follow-up window: transcript goes to the interpreter UNSTRIPPED.
+    assert pipeline.interpreter.calls[0] == "friday, abrí firefox"
+
+
+def test_legacy_wake_does_not_gate(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["hey jarvis, abrí firefox"],
+        interpreter_script=[_interp(_intent())],
+        tmp_path=tmp_path,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "executed"
+    # No gates_by_name on FakeWake: full transcript reaches the interpreter.
+    assert pipeline.interpreter.calls[0] == "hey jarvis, abrí firefox"
+
+
+def test_after_listening_without_tts_mic_gets_reopened(tmp_path: Path) -> None:
+    """Non-TTS returns from LISTENING leave the mic stopped; IDLE must reopen
+    it (idempotently) before the next wake scan."""
+    mic = CountingMic()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=MicWake([False], mic),
+        capture=FakeCapture([]),
+        interpreter=FakeInterpreter([]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    state, _ = _tick(State.IDLE, pipeline, _Context())
+    assert state == State.IDLE  # false wake
+    assert mic.started == 1
+    assert mic.flushed == 1
+    assert mic.stopped == 0

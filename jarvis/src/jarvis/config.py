@@ -85,11 +85,16 @@ STT_USE_TINY = False
 # PR6 gate 5.6: a trained jarvis.onnx (see docs/wake-word-training.md); None =
 # the packaged hey_jarvis_v0.1.onnx.
 WAKE_CUSTOM_MODEL: Path | None = None
-WAKE_THRESHOLD = 0.7  # increased from 0.5 — prevent false activations from noise
+WAKE_THRESHOLD = 0.7  # increased from 0.5 — prevent false activations from noise;
+                      # in "name" mode this is the VAD speech-probability gate, not a model score
 WAKE_VAD_THRESHOLD = 0.5
-# Gate 5.6: wake word engine selection — "openwakeword" (default) or "xslr"
-# (custom wav2vec2-XLSR + LogisticRegression trained on operator voice).
-WAKE_ENGINE = "xslr"
+# Gate 5.6: the custom XLSR classifier remains available for retraining, but it
+# is not production-ready: ambient audio saturates its probability at 1.0.
+# Default engine (feature "wake por nombre"): bare-agent-name activation
+# ("jarvis, abrí firefox") detected on the VAD speech leading edge with no ML
+# model; the loop's name gate verifies the agent name after STT.
+WAKE_ENGINE = "name"
+WAKE_PREROLL_S = 2.0  # name engine: seconds of pre-roll re-injected so the name reaches the STT
 WAKE_XLSR_MODEL = SPIKE / "models" / "jarvis_wake.onnx"
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_MS = 100

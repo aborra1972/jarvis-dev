@@ -8,9 +8,10 @@ protocol with fakes (no mic) and swaps in SoundDeviceCapturer for real use.
 
 from __future__ import annotations
 
+from collections import deque
 import wave
 from queue import Empty, Queue
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -114,6 +115,8 @@ class SoundDeviceCapturer:
         self.block_ms = block_ms
         self._blocks = SAMPLE_RATE * block_ms // 1000
         self._queue: Queue[np.ndarray] = Queue()
+        # Re-injected pre-roll (name-gated wake): read BEFORE live frames.
+        self._front: deque[np.ndarray] = deque()
         self._stream = None
 
     def start(self) -> None:
@@ -141,10 +144,22 @@ class SoundDeviceCapturer:
         self._stream = None
 
     def read_frames(self, timeout: float = 1.0) -> np.ndarray | None:
+        if self._front:
+            return self._front.popleft()
         try:
             return self._queue.get(timeout=timeout)
         except Empty:
             return None
+
+    def enqueue_back(self, blocks) -> None:
+        """Insert blocks at the FRONT of the read stream, preserving order.
+
+        Used by the name-gated wake (engine "name"): SpeechStartWake keeps a
+        pre-roll of the last ~2s (which contains the agent name the user is
+        speaking RIGHT NOW); when it fires, rewind() re-injects these blocks
+        so the utterance capture reads the name before any live audio.
+        """
+        self._front.extendleft(reversed(list(blocks)))
 
     def flush(self, ms: int = 1000) -> None:
         """Discard up to ``ms`` of queued audio (post-playback stale mic).
@@ -152,8 +167,12 @@ class SoundDeviceCapturer:
         T-FLUSH-01: after TTS playback the mic may have captured Jarvis's own
         voice; that audio lingers in the queue and can trigger a false wake on
         the next cycle. This drains the buffered blocks for up to ``ms`` so the
-        wake detector only sees fresh, post-reply audio.
+        wake detector only sees fresh, post-reply audio. The re-injected
+        pre-roll front buffer (name wake) is drained entirely first — it is
+        bounded by the pre-roll window and is stale by definition.
         """
+        while self._front:
+            self._front.popleft()
         n_blocks = max(int(ms / self.block_ms), 1)
         for _ in range(n_blocks):
             try:
@@ -167,6 +186,7 @@ def gather_utterance(
     vad: SilenceVAD,
     *,
     read_timeout: float = 1.0,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> tuple[list[np.ndarray], float]:
     """Collect frames until 800ms of trailing silence or max duration.
 
@@ -178,6 +198,8 @@ def gather_utterance(
     silent_s = 0.0
     duration_s = 0.0
     while duration_s < vad.max_s:
+        if stop_requested is not None and stop_requested():
+            break
         block = capturer.read_frames(timeout=read_timeout)
         if block is None:
             break
@@ -241,6 +263,7 @@ class SileroVAD:
         self.max_s = max_s
         self._model = None
         self._init_failed = False
+        self._buffer = np.array([], dtype=np.float32)
 
     def _ensure_loaded(self) -> bool:
         """Lazily load the Silero VAD model (offline ONNX)."""
@@ -269,15 +292,34 @@ class SileroVAD:
             # Fallback to simple energy VAD
             return rms(block) >= DEFAULT_THRESHOLD
 
-        # Silero VAD needs 16kHz mono float32; score the whole block.
+        # Silero accepts fixed 32 ms frames: 512 samples at 16 kHz (256 at
+        # 8 kHz). Capture blocks are normally 100 ms, so score every frame and
+        # pad only the final remainder instead of passing an invalid shape.
         import torch
 
         if block.ndim > 1:
             block = block.reshape(-1)
-        tensor = torch.from_numpy(np.ascontiguousarray(block, dtype=np.float32))
-        with torch.no_grad():
-            prob = float(self._model(tensor, self.sample_rate).item())
-        return prob >= self.threshold
+        samples = np.ascontiguousarray(block, dtype=np.float32)
+        if self._buffer.size:
+            samples = np.concatenate((self._buffer, samples))
+        frame_samples = 512 if self.sample_rate == 16000 else 256
+        complete_samples = samples.size - (samples.size % frame_samples)
+        self._buffer = samples[complete_samples:]
+        max_probability = 0.0
+        for offset in range(0, complete_samples, frame_samples):
+            frame = samples[offset : offset + frame_samples]
+            tensor = torch.from_numpy(frame)
+            with torch.no_grad():
+                prob = float(self._model(tensor, self.sample_rate).item())
+            max_probability = max(max_probability, prob)
+        return max_probability >= self.threshold
+
+    def reset(self) -> None:
+        """Clear buffered audio and the model's recurrent state."""
+        self._buffer = np.array([], dtype=np.float32)
+        reset_states = getattr(self._model, "reset_states", None)
+        if callable(reset_states):
+            reset_states()
 
 
 def build_vad(

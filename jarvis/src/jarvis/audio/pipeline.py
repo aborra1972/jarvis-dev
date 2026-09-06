@@ -20,15 +20,18 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
 from jarvis.audio.capture import (
     SAMPLE_RATE,
+    DEFAULT_THRESHOLD,
     Capturer,
     SilenceVAD,
     SileroVAD,
     gather_utterance,
+    rms,
     write_wav,
 )
 from jarvis.audio.playback import PlaybackError
@@ -64,6 +67,7 @@ class UtteranceCapture:
         calibrate_ms: int = 0,
         calibrate_factor: float = 1.2,
         calibrate_min_threshold: float = 0.01,
+        stop_requested: Callable[[], bool] | None = None,
     ) -> None:
         self.capturer = capturer
         self.stt = stt
@@ -75,6 +79,7 @@ class UtteranceCapture:
         self._calibrate_ms = calibrate_ms
         self._calibrate_factor = calibrate_factor
         self._calibrate_min_threshold = calibrate_min_threshold
+        self._stop_requested = stop_requested
 
     def _calibrate(self) -> None:
         """Measure ambient noise right after the wake word (T-CALIB-01).
@@ -97,14 +102,23 @@ class UtteranceCapture:
         return self.wav_dir / f"jarvis-capture-{uuid.uuid4().hex}.wav"
 
     def capture(self) -> str | None:
+        reset = getattr(self.vad, "reset", None)
+        if callable(reset):
+            reset()
         self._calibrate()
         blocks, duration_s = gather_utterance(
-            self.capturer, self.vad, read_timeout=self.read_timeout
+            self.capturer,
+            self.vad,
+            read_timeout=self.read_timeout,
+            stop_requested=self._stop_requested,
         )
-        if not blocks or not any(self.vad.is_speech(block) for block in blocks):
+        if self._stop_requested is not None and self._stop_requested():
+            return None
+        if not blocks or not any(rms(block) >= DEFAULT_THRESHOLD for block in blocks):
             return None
         # Store audio for speaker verification (before STT deletes the file)
-        self._last_audio = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
+        audio = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
+        self._last_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         wav_path = self._next_wav()
         write_wav(wav_path, blocks, sample_rate=self.sample_rate)
         try:

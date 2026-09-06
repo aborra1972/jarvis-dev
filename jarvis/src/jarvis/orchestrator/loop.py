@@ -889,6 +889,14 @@ def start() -> int:
             calibrated = calibrate_noise_floor(pipeline.wake.capturer)
             vad.threshold = calibrated
             print(f"[jarvis] piso de ruido calibrado: threshold={calibrated:.4f}", flush=True)
+        # Boot readiness handshake with the GUI control panel: it waits for a
+        # stdout line containing "listo" to flip "Iniciando..." →
+        # "Esperando activación..." (jarvis_gui._read_output), and bosses the
+        # same state into the FSM file so a GUI that merely attaches to an
+        # existing process (no stdout pipe) still updates via the 2s poll.
+        # Provider-agnostic: gemini/Silero boots print nothing else.
+        _write_fsm_state("idle")
+        print("[jarvis] listo — esperando activación", flush=True)
         run(pipeline)
     finally:
         _remove_pid()

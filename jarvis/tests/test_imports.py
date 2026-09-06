@@ -144,6 +144,43 @@ def test_cli_start_runs_real_pipeline(
     assert "skeleton" not in capsys.readouterr().err
 
 
+def test_cli_start_prints_boot_readiness_for_gui(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Boot must print a ``listo`` readiness line on stdout for the control panel.
+
+    ``jarvis_gui._read_output()`` waits for a line containing ``listo``/``jarvis``
+    to flip the stuck ``Iniciando...`` detail to ``Esperando activación...``.
+    Gemini/Silero boots print nothing else, so without this line the GUI never
+    leaves the boot state.
+    """
+    monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(jarvis.config, "RUN_DIR", tmp_path / "run")
+    monkeypatch.setattr(jarvis.config, "PID_FILE", tmp_path / "run" / "jarvis.pid")
+    monkeypatch.setattr(jarvis.orchestrator.loop, "run", lambda pipeline, iterations=None: None)
+
+    class _FakeSpeaker:
+        def speak(self, text: str) -> None:
+            pass
+
+        def flush(self) -> None:
+            pass
+
+    monkeypatch.setattr(jarvis.orchestrator.loop, "PiperSpeaker", lambda *a, **k: _FakeSpeaker())
+    monkeypatch.setattr(jarvis.orchestrator.loop, "build_wake_detector", lambda *a, **k: None)
+    monkeypatch.setattr(jarvis.orchestrator.loop, "SoundDeviceCapturer", lambda *a, **k: None)
+    monkeypatch.setattr(jarvis.orchestrator.loop, "MicSwitch", lambda *a, **k: (lambda: False))
+    monkeypatch.setattr(
+        jarvis.orchestrator.loop,
+        "_register_switch_signals",
+        lambda session, switch, speaker=None: None,
+    )
+    monkeypatch.setattr(jarvis.orchestrator.loop, "_proactive_project_note", lambda repo: None)
+
+    assert jarvis.cli.main(["start"]) == 0
+    assert "listo" in capsys.readouterr().out
+
+
 def test_cli_off_sets_switch_flag(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

@@ -68,6 +68,41 @@ def test_save_is_atomic_no_temp_left(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["active_project"] == "/repo/b"
 
 
+def test_save_preserves_gui_preferences(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "agent": "friday",
+                "llm_provider": "auto",
+                "wake_threshold": 0.65,
+            }
+        )
+    )
+    session = load_state(path)
+    session.switched_off = True
+
+    session.save()
+
+    saved = json.loads(path.read_text())
+    assert saved["agent"] == "friday"
+    assert saved["llm_provider"] == "auto"
+    assert saved["wake_threshold"] == 0.65
+    assert saved["switched_off"] is True
+
+
+def test_save_does_not_reuse_another_writer_temp_file(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    legacy_temp = tmp_path / "state.json.tmp"
+    legacy_temp.write_text("owned by another writer")
+    session = load_state(path)
+
+    session.save()
+
+    assert legacy_temp.read_text() == "owned by another writer"
+    assert json.loads(path.read_text())["switched_off"] is False
+
+
 def test_start_detects_active_project_via_git(tmp_path: Path) -> None:
     session = load_state(tmp_path / "state.json")
     root = session.start(str(tmp_path), lambda cwd: "/detected/repo")

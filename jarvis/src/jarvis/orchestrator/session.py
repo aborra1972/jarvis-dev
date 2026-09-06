@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import uuid
+import fcntl
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -120,17 +122,41 @@ class Session:
     def save(self) -> None:
         if not self.state_path:
             return
-        payload = {
-            "active_project": self.active_project,
-            "repos": self.repos,
-            "reask_attempts": self.reask_attempts,
-            "switched_off": self.switched_off,
-        }
         path = Path(self.state_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-        os.replace(temp, path)
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                payload = json.loads(path.read_text())
+                if not isinstance(payload, dict):
+                    payload = {}
+            except (FileNotFoundError, OSError, ValueError):
+                payload = {}
+            payload.update({
+                "active_project": self.active_project,
+                "repos": self.repos,
+                "reask_attempts": self.reask_attempts,
+                "switched_off": self.switched_off,
+            })
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=path.parent,
+                    prefix=path.name + ".",
+                    suffix=".tmp",
+                    delete=False,
+                ) as temp:
+                    temp_path = Path(temp.name)
+                    json.dump(payload, temp, ensure_ascii=False, indent=2)
+                    temp.flush()
+                    os.fsync(temp.fileno())
+                os.replace(temp_path, path)
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
 
 
 def load_state(path: str) -> Session:

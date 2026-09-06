@@ -221,7 +221,7 @@ def run_all() -> list[DiagResult]:
 
 def main() -> int:
     """Run diagnostics and print results. Returns 0 if all OK, 1 otherwise."""
-    print("Diagnosticando componentes de Jarvis...\n")
+    print(f"Diagnosticando componentes de {config.agent_name()}...\n")
     results = run_all()
     for r in results:
         print(r)

@@ -25,9 +25,11 @@ COMMANDS = (
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level ``jarvis`` argument parser."""
+    from jarvis import config
+
     parser = argparse.ArgumentParser(
         prog="jarvis",
-        description="Jarvis de Desarrollo — local voice assistant",
+        description=f"{config.agent_name()} — local voice assistant",
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
     for cmd in COMMANDS:

@@ -14,11 +14,13 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -36,16 +38,17 @@ PID_FILE = Path.home() / ".local" / "state" / "jarvis" / "jarvis.pid"
 FSM_STATE_FILE = Path.home() / ".local" / "state" / "jarvis" / "fsm_state"
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
 DOCS_FILE = JARVIS_ROOT / "jarvis" / "docs" / "comandos_jarvis.md"
+CONTROL_LOG = Path.home() / ".local" / "state" / "jarvis" / "logs" / "control.log"
 
 # FSM state → GUI label mapping
 _FSM_LABELS = {
-    "idle": ("● ESCUCHANDO", "Esperando 'JARVIS'...", "status-active"),
+    "idle": ("● ESCUCHANDO", "Esperando activación...", "status-active"),
     "listening": ("● ESCUCHANDO", "Hable ahora...", "status-active"),
     "thinking": ("● PENSANDO", "Procesando...", "status-active"),
     "executing": ("● EJECUTANDO", "", "status-active"),
     "confirming": ("● CONFIRmando", "Esperando confirmación...", "status-active"),
-    "speaking": ("● HABLANDO", "Jarvis responde...", "status-active"),
-    "off": ("● APAGADO", "Modo off — diga 'jarvis on'", "status-inactive"),
+    "speaking": ("● HABLANDO", "{agent} responde...", "status-active"),
+    "off": ("● APAGADO", "Modo off — use el botón para reactivar", "status-inactive"),
 }
 
 # --- CSS ---
@@ -237,18 +240,36 @@ def _read_pid() -> int | None:
         return None
 
 
+def _process_is_jarvis(pid: int) -> bool:
+    """Verify a PID still belongs to the voice runtime before signaling it."""
+    try:
+        args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return False
+    return any(
+        args[index : index + 3] == [b"-m", b"jarvis", b"start"]
+        for index in range(max(0, len(args) - 2))
+    )
+
+
 def _is_running() -> bool:
     pid = _read_pid()
     if pid is None:
         return False
     try:
         os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        PID_FILE.unlink(missing_ok=True)
         return False
+    if _process_is_jarvis(pid):
+        return True
+    PID_FILE.unlink(missing_ok=True)
+    return False
 
 
 def _send_signal(sig: int) -> bool:
+    if not _is_running():
+        return False
     pid = _read_pid()
     if pid is None:
         return False
@@ -259,12 +280,131 @@ def _send_signal(sig: int) -> bool:
         return False
 
 
+def _read_state() -> dict:
+    try:
+        state = json.loads(STATE_FILE.read_text())
+        return state if isinstance(state, dict) else {}
+    except (FileNotFoundError, OSError, ValueError):
+        return {}
+
+
+def _update_state(**changes) -> None:
+    """Atomically update GUI-owned values without dropping session state."""
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_FILE.with_suffix(STATE_FILE.suffix + ".lock")
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = _read_state()
+        state.update(changes)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=STATE_FILE.parent,
+                prefix=STATE_FILE.name + ".",
+                suffix=".tmp",
+                delete=False,
+            ) as temp:
+                temp_path = Path(temp.name)
+                json.dump(state, temp, ensure_ascii=False, indent=2)
+                temp.flush()
+                os.fsync(temp.fileno())
+            os.replace(temp_path, STATE_FILE)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+
+def _state_switch_is_off() -> bool:
+    if _read_state().get("switched_off") is True:
+        return True
+    try:
+        return FSM_STATE_FILE.read_text().split(":", 1)[0].strip() == "off"
+    except OSError:
+        return False
+
+
+def _read_wake_threshold() -> float:
+    value = _read_state().get("wake_threshold", 0.7)
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError):
+        return 0.7
+    return threshold if 0.1 <= threshold <= 0.9 else 0.7
+
+
+# --- Agent / persona selection (mirror of AGENT_PROFILES keys in
+# jarvis/src/jarvis/config.py — kept local because this script runs with the
+# system python3, not the venv; keys must stay in sync: jarvis | friday | karen)
+_AGENT_META: dict[str, dict] = {
+    "jarvis": {
+        "icon": "🤖",
+        "label": "Jarvis",
+        "status": "🤖 Jarvis — mayordomo formal (voz multilingüe: Andrew)",
+    },
+    "friday": {
+        "icon": "🔴",
+        "label": "Friday",
+        "status": "🔴 Friday — IA de Stark Industries (voz multilingüe: Ava)",
+    },
+    "karen": {
+        "icon": "🕷",
+        "label": "Karen",
+        "status": "🕷 Karen — IA del traje de Spider-Man (voz multilingüe: Emma)",
+    },
+}
+_AGENT_DEFAULT = "jarvis"
+
+
+def _read_agent_preference() -> str:
+    """Active agent key: state.json → repo-root .env → 'jarvis'.
+
+    Mirrors the runtime resolution (JARVIS_AGENT in env/.env) so the GUI and
+    CLI stay in sync. Invalid keys fall back to the default persona.
+    """
+    # 1. GUI preference in state.json wins over the .env.
+    try:
+        if STATE_FILE.exists():
+            state = json.loads(STATE_FILE.read_text())
+            agent = state.get("agent")
+            if agent in _AGENT_META:
+                return agent
+    except Exception:
+        pass
+    # 2. Fallback: JARVIS_AGENT=<key> in the repo-root .env (chosen via CLI).
+    try:
+        env_file = JARVIS_ROOT / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if stripped.startswith("JARVIS_AGENT=") or stripped.startswith("export JARVIS_AGENT="):
+                    key = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                    if key in _AGENT_META:
+                        return key
+    except Exception:
+        pass
+    return _AGENT_DEFAULT
+
+
+def _assistant_name() -> str:
+    return _AGENT_META[_read_agent_preference()]["label"]
+
+
+def _personalize_runtime_text(text: str) -> str:
+    name = _assistant_name()
+    return text.replace("[jarvis]", f"[{name}]").replace("Jarvis", name)
+
+
 class JarvisGUI:
     def __init__(self, auto_launch: bool = True) -> None:
         self._is_on = False
         self._user_off = False  # track manual off
         self._jarvis_proc: subprocess.Popen | None = None
-        self._threshold = 0.5
+        self._restart_pending = False
+        self._threshold = _read_wake_threshold()
         self._log_lines: list[str] = []
 
         self._build_window()
@@ -277,8 +417,9 @@ class JarvisGUI:
         GLib.timeout_add(2000, self._poll_status)
 
     def _build_window(self) -> None:
-        self._window = Gtk.Window(title="Jarvis Control")
-        self._window.set_default_size(360, 450)
+        name = _assistant_name()
+        self._window = Gtk.Window(title=f"{name} Control")
+        self._window.set_default_size(360, 560)
         self._window.set_resizable(False)
         self._window.set_keep_above(True)
         self._window.set_position(Gtk.WindowPosition.CENTER)
@@ -293,32 +434,24 @@ class JarvisGUI:
         main_box.get_style_context().add_class("window-bg")
         self._window.add(main_box)
 
-        # --- Banner Image ---
-        banner_path = JARVIS_ROOT / "jarvis-gui-banner.svg"
-        if banner_path.exists():
-            banner_img = Gtk.Image.new_from_file(str(banner_path))
-            banner_img.set_halign(Gtk.Align.CENTER)
-            banner_img.set_valign(Gtk.Align.CENTER)
-            main_box.pack_start(banner_img, False, False, 0)
-        else:
-            # Fallback to text labels
-            title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-            title_box.set_margin_start(8)
-            title_box.set_margin_end(8)
-            main_box.pack_start(title_box, False, False, 0)
-            title = Gtk.Label(label="J.A.R.V.I.S.")
-            title.get_style_context().add_class("title-label")
-            title.set_margin_top(8)
-            title_box.pack_start(title, False, False, 0)
-            version = Gtk.Label(label="v1.0")
-            version.get_style_context().add_class("subtitle-label")
-            version.set_halign(Gtk.Align.END)
-            title_box.pack_end(version, False, False, 0)
-            subtitle = Gtk.Label(label="Asistente de Voz Local")
-            subtitle.get_style_context().add_class("subtitle-label")
-            subtitle.set_margin_start(8)
-            subtitle.set_margin_end(8)
-            main_box.pack_start(subtitle, False, False, 0)
+        # --- Dynamic assistant header ---
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        title_box.set_margin_start(8)
+        title_box.set_margin_end(8)
+        main_box.pack_start(title_box, False, False, 0)
+        self._assistant_title = Gtk.Label(label=name.upper())
+        self._assistant_title.get_style_context().add_class("title-label")
+        self._assistant_title.set_margin_top(8)
+        title_box.pack_start(self._assistant_title, False, False, 0)
+        version = Gtk.Label(label="v1.0")
+        version.get_style_context().add_class("subtitle-label")
+        version.set_halign(Gtk.Align.END)
+        title_box.pack_end(version, False, False, 0)
+        subtitle = Gtk.Label(label="Asistente de Voz Local")
+        subtitle.get_style_context().add_class("subtitle-label")
+        subtitle.set_margin_start(8)
+        subtitle.set_margin_end(8)
+        main_box.pack_start(subtitle, False, False, 0)
 
         # --- Status Card ---
         status_frame = Gtk.Frame()
@@ -360,20 +493,20 @@ class JarvisGUI:
         slider_box.set_margin_bottom(8)
         slider_frame.add(slider_box)
 
-        slider_title = Gtk.Label(label="Sensibilidad Wake Word")
+        slider_title = Gtk.Label(label="Umbral Wake Word")
         slider_title.get_style_context().add_class("slider-label")
         slider_box.pack_start(slider_title, False, False, 0)
 
-        slider_hint = Gtk.Label(label="Baja ← → Alta")
+        slider_hint = Gtk.Label(label="Más sensible ← → Menos sensible")
         slider_hint.get_style_context().add_class("slider-hint")
         slider_box.pack_start(slider_hint, False, False, 0)
 
-        self._slider_value_label = Gtk.Label(label="0.50")
+        self._slider_value_label = Gtk.Label(label=f"{self._threshold:.2f}")
         self._slider_value_label.get_style_context().add_class("slider-value")
         slider_box.pack_start(self._slider_value_label, False, False, 0)
 
         self._slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.1, 0.9, 0.05)
-        self._slider.set_value(0.5)
+        self._slider.set_value(self._threshold)
         self._slider.connect("value-changed", self._on_slider_changed)
         slider_box.pack_start(self._slider, False, False, 0)
 
@@ -428,6 +561,55 @@ class JarvisGUI:
 
         # Load saved provider preference
         self._load_provider_preference()
+
+        # --- Agent (persona) Selector ---
+        agent_frame = Gtk.Frame()
+        agent_frame.get_style_context().add_class("provider-card")
+        main_box.pack_start(agent_frame, False, False, 0)
+
+        agent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        agent_box.set_margin_start(10)
+        agent_box.set_margin_end(10)
+        agent_box.set_margin_top(8)
+        agent_box.set_margin_bottom(8)
+        agent_frame.add(agent_box)
+
+        agent_title = Gtk.Label(label="Asistente")
+        agent_title.get_style_context().add_class("provider-label")
+        agent_box.pack_start(agent_title, False, False, 0)
+
+        agent_hint = Gtk.Label(label="Seleccioná la personalidad del asistente")
+        agent_hint.get_style_context().add_class("provider-hint")
+        agent_box.pack_start(agent_hint, False, False, 0)
+
+        # --- Segmented pill selector ---
+        agent_pill_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        agent_pill_box.get_style_context().add_class("provider-pill-box")
+        agent_pill_box.set_halign(Gtk.Align.CENTER)
+        agent_box.pack_start(agent_pill_box, False, False, 0)
+
+        self._agent_buttons: dict[str, Gtk.RadioButton] = {}
+        first_agent_btn = None
+        for pid, meta in _AGENT_META.items():
+            btn = Gtk.RadioButton.new_with_label_from_widget(
+                first_agent_btn, f"{meta['icon']} {meta['label']}"
+            )
+            if first_agent_btn is None:
+                first_agent_btn = btn
+            btn._agent_id = pid  # attach ID for handler
+            btn.get_style_context().add_class("provider-pill")
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.connect("toggled", self._on_agent_toggled)
+            agent_pill_box.pack_start(btn, True, True, 0)
+            self._agent_buttons[pid] = btn
+
+        # Status label for active agent
+        self._agent_status = Gtk.Label()
+        self._agent_status.get_style_context().add_class("provider-active")
+        agent_box.pack_start(self._agent_status, False, False, 0)
+
+        # Load saved agent preference
+        self._load_agent_preference()
 
         # --- Buttons Row ---
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -486,49 +668,44 @@ class JarvisGUI:
         )
 
     def _on_power_clicked(self, button) -> None:
-        if self._is_on:
-            self._stop_jarvis()
-            self._user_off = True
-        else:
+        if not _is_running():
             self._user_off = False
             self._reset_switch_state()
             self._launch_jarvis()
+            return
+
+        if self._is_on:
+            if not _send_signal(signal.SIGUSR1):
+                self._log(f"No pude apagar {_assistant_name()}: proceso no disponible")
+                return
+            _update_state(switched_off=True)
+            self._is_on = False
+            self._user_off = True
+            self._log(f"{_assistant_name()} en modo apagado")
+        else:
+            if not _send_signal(signal.SIGUSR2):
+                self._log(f"No pude encender {_assistant_name()}: proceso no disponible")
+                return
+            _update_state(switched_off=False)
+            self._is_on = True
+            self._user_off = False
+            self._log(f"{_assistant_name()} reactivado")
+        self._update_ui()
 
     def _reset_switch_state(self) -> None:
         """Reset switched_off to false so MicSwitch opens the mic."""
         try:
-            state = {}
-            if STATE_FILE.exists():
-                state = json.loads(STATE_FILE.read_text())
-            state["switched_off"] = False
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(json.dumps(state, indent=2))
+            _update_state(switched_off=False)
         except Exception:
             pass
 
     def _launch_jarvis(self) -> bool:
-        import subprocess as _sp
-        import time as _t
         if _is_running():
-            # Kill stale process tree and start fresh
-            self._log("Matando procesos Jarvis viejos...")
-            # Kill our subprocess group
-            if self._jarvis_proc and self._jarvis_proc.poll() is None:
-                try:
-                    os.killpg(os.getpgid(self._jarvis_proc.pid), signal.SIGTERM)
-                except (ProcessLookupError, OSError):
-                    pass
-            # Kill by PID file
-            pid = _read_pid()
-            if pid is not None:
-                try:
-                    os.killpg(os.getpgid(pid), signal.SIGTERM)
-                except (ProcessLookupError, OSError):
-                    pass
-            # Force-kill children
-            _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
-            _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
-            _t.sleep(1)
+            self._is_on = not _state_switch_is_off()
+            self._user_off = not self._is_on
+            self._log(f"Conectado al proceso de {_assistant_name()} existente")
+            self._update_ui()
+            return False
 
         # Ensure state is clean before launching
         self._reset_switch_state()
@@ -555,12 +732,17 @@ class JarvisGUI:
         except Exception:
             pass
 
-        self._log("Iniciando Jarvis...")
+        # Read agent preference (state.json → .env → default "jarvis")
+        agent = _read_agent_preference()
+
+        self._log(f"Iniciando {_assistant_name()}...")
+        self._log(f"Asistente: {_AGENT_META[agent]['label']}")
         self._status_detail.set_text("Iniciando...")
 
         try:
             env = os.environ.copy()
             env["JARVIS_LLM_PROVIDER"] = llm_provider
+            env["JARVIS_AGENT"] = agent
             if gemini_key:
                 env["GEMINI_API_KEY"] = gemini_key
             self._jarvis_proc = subprocess.Popen(
@@ -573,7 +755,7 @@ class JarvisGUI:
                 preexec_fn=os.setsid,  # own process group for clean tree kill
             )
             self._is_on = True
-            self._log(f"Jarvis PID: {self._jarvis_proc.pid}")
+            self._log(f"{_assistant_name()} PID: {self._jarvis_proc.pid}")
             self._update_ui()
             threading.Thread(target=self._read_output, daemon=True).start()
         except Exception as e:
@@ -583,9 +765,7 @@ class JarvisGUI:
         return False  # don't repeat timer
 
     def _stop_jarvis(self) -> None:
-        """Kill Jarvis subprocess and ALL its children (whisper-cli, gst, etc.)."""
-        import subprocess as _sp
-        import time as _t
+        """Terminate only the verified Jarvis process group and its children."""
         killed = False
 
         # 1. Kill the process group of our direct subprocess (catches all children)
@@ -598,34 +778,41 @@ class JarvisGUI:
 
         # 2. Kill by PID file (in case process was adopted or we don't own it)
         pid = _read_pid()
-        if pid is not None:
+        if pid is not None and _process_is_jarvis(pid):
             try:
                 os.killpg(os.getpgid(pid), signal.SIGTERM)
                 killed = True
             except (ProcessLookupError, OSError):
                 pass
 
-        # 3. Wait briefly, then force-kill stragglers (only whisper-cli, NOT jarvis_gui)
-        _t.sleep(0.5)
-        _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
-        _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
-
         if killed:
-            self._log("Jarvis + hijos terminados")
+            self._log(f"{_assistant_name()} y sus procesos terminaron")
         else:
-            self._log("No había procesos Jarvis activos")
+            self._log(f"No había procesos de {_assistant_name()} activos")
         self._is_on = False
         self._update_ui()
 
     def _read_output(self) -> None:
-        if self._jarvis_proc and self._jarvis_proc.stdout:
-            for line in self._jarvis_proc.stdout:
-                line = line.strip()
+        process = self._jarvis_proc
+        if process and process.stdout:
+            for line in process.stdout:
+                line = _personalize_runtime_text(line.strip())
                 if line:
                     GLib.idle_add(self._log, line)
                     # Update status when Jarvis announces readiness
                     if "listo" in line.lower() or "jarvis" in line.lower():
-                        GLib.idle_add(self._status_detail.set_text, "Escuchando 'JARVIS'...")
+                        GLib.idle_add(self._status_detail.set_text, "Esperando activación...")
+            returncode = process.wait()
+            GLib.idle_add(self._on_jarvis_exit, process, returncode)
+
+    def _on_jarvis_exit(self, process: subprocess.Popen, returncode: int) -> bool:
+        if process is not self._jarvis_proc:
+            return False
+        self._is_on = False
+        self._user_off = False
+        self._log(f"{_assistant_name()} terminó (código {returncode})")
+        self._update_ui()
+        return False
 
     def _on_slider_changed(self, scale) -> None:
         self._threshold = scale.get_value()
@@ -634,13 +821,8 @@ class JarvisGUI:
 
     def _apply_threshold(self) -> None:
         try:
-            state = {}
-            if STATE_FILE.exists():
-                state = json.loads(STATE_FILE.read_text())
-            state["wake_threshold"] = self._threshold
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(json.dumps(state, indent=2))
-            self._log(f"Sensibilidad: {self._threshold:.2f}")
+            _update_state(wake_threshold=self._threshold)
+            self._log(f"Umbral wake word: {self._threshold:.2f}")
         except Exception as e:
             self._log(f"Error umbral: {e}")
 
@@ -666,6 +848,8 @@ class JarvisGUI:
 
     def _set_provider(self, pid: str, *, from_load: bool = False) -> None:
         """Update UI, CSS classes, and persist selection."""
+        if pid not in {"local", "gemini", "auto"}:
+            pid = "local"
         # Update radio button states
         for key, btn in self._provider_buttons.items():
             btn.handler_block_by_func(self._on_provider_toggled)
@@ -683,13 +867,10 @@ class JarvisGUI:
         # Persist (skip on initial load to avoid redundant write)
         if not from_load:
             try:
-                state = {}
-                if STATE_FILE.exists():
-                    state = json.loads(STATE_FILE.read_text())
-                state["llm_provider"] = pid
-                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                STATE_FILE.write_text(json.dumps(state, indent=2))
+                _update_state(llm_provider=pid)
                 self._log(f"IA Provider: {pid}")
+                if _is_running():
+                    self._restart_jarvis()
             except Exception as e:
                 self._log(f"Error provider: {e}")
 
@@ -701,6 +882,111 @@ class JarvisGUI:
             "auto": "🔄 Auto (Gemini primero, fallback local)",
         }
         self._provider_status.set_text(labels.get(provider, provider))
+
+    def _load_agent_preference(self) -> None:
+        """Load saved agent preference from state.json (→ .env → default)."""
+        self._set_agent(_read_agent_preference(), from_load=True)
+
+    def _on_agent_toggled(self, button) -> None:
+        """Handle pill toggle — only react to the button being activated."""
+        if not button.get_active():
+            return
+        pid = getattr(button, "_agent_id", None)
+        if pid is None:
+            return
+        self._set_agent(pid)
+
+    def _set_agent(self, pid: str, *, from_load: bool = False) -> None:
+        """Update UI, CSS classes, and persist agent selection."""
+        if pid not in _AGENT_META:
+            pid = _AGENT_DEFAULT
+
+        # Update radio button states
+        for key, btn in self._agent_buttons.items():
+            btn.handler_block_by_func(self._on_agent_toggled)
+            btn.set_active(key == pid)
+            btn.handler_unblock_by_func(self._on_agent_toggled)
+            # Swap CSS class: active vs inactive
+            ctx = btn.get_style_context()
+            ctx.remove_class("provider-pill")
+            ctx.remove_class("provider-pill-active")
+            ctx.add_class("provider-pill-active" if key == pid else "provider-pill")
+
+        # Update status label
+        self._update_agent_status(pid)
+        self._assistant_title.set_text(_AGENT_META[pid]["label"].upper())
+        self._window.set_title(f"{_AGENT_META[pid]['label']} Control")
+
+        # Persist (skip on initial load to avoid redundant write)
+        if not from_load:
+            try:
+                _update_state(agent=pid)
+            except Exception as e:
+                self._log(f"Error agente (state): {e}")
+            self._persist_agent_env(pid)
+            self._log(f"Asistente: {_AGENT_META[pid]['label']}")
+            if _is_running():
+                self._restart_jarvis()
+
+    def _restart_jarvis(self) -> None:
+        """Apply startup-only settings by replacing the runtime process."""
+        if self._restart_pending:
+            return
+        self._restart_pending = True
+        self._log(f"Reiniciando {_assistant_name()} para aplicar la configuración...")
+        self._stop_jarvis()
+        self._reset_switch_state()
+
+        def _wait_and_launch() -> None:
+            for _ in range(50):
+                if not _is_running():
+                    GLib.idle_add(self._finish_restart)
+                    return
+                time.sleep(0.1)
+            GLib.idle_add(self._restart_failed)
+
+        threading.Thread(target=_wait_and_launch, daemon=True).start()
+
+    def _finish_restart(self) -> bool:
+        self._restart_pending = False
+        return self._launch_jarvis()
+
+    def _restart_failed(self) -> bool:
+        self._restart_pending = False
+        self._log(f"{_assistant_name()} no terminó; no inicié un duplicado")
+        return False
+
+    def _update_agent_status(self, agent: str) -> None:
+        """Update the agent status label."""
+        meta = _AGENT_META.get(agent)
+        self._agent_status.set_text(meta["status"] if meta else agent)
+
+    def _persist_agent_env(self, key: str) -> None:
+        """Persist ``JARVIS_AGENT=<key>`` in the repo-root .env.
+
+        Preserves every other line/comment byte-for-byte: replaces an existing
+        JARVIS_AGENT= line, appends at the end if missing, creates the file if
+        needed. Never logs the file contents (may contain secrets).
+        """
+        if key not in _AGENT_META:
+            return
+        try:
+            env_file = JARVIS_ROOT / ".env"
+            lines = env_file.read_text().splitlines() if env_file.exists() else []
+            out: list[str] = []
+            found = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("JARVIS_AGENT=") or stripped.startswith("export JARVIS_AGENT="):
+                    out.append(f"JARVIS_AGENT={key}")
+                    found = True
+                else:
+                    out.append(line)
+            if not found:
+                out.append(f"JARVIS_AGENT={key}")
+            env_file.write_text("\n".join(out) + "\n")
+        except Exception as e:
+            self._log(f"Error agente (.env): {e}")
 
     def _update_ui(self) -> None:
         if self._is_on:
@@ -722,15 +1008,11 @@ class JarvisGUI:
 
     def _poll_status(self) -> bool:
         running = _is_running()
-        if self._user_off:
-            # User manually turned off — keep showing inactive even if process alive
-            if self._is_on:
-                self._is_on = False
-                self._update_ui()
-        else:
-            if running != self._is_on:
-                self._is_on = running
-                self._update_ui()
+        enabled = running and not _state_switch_is_off()
+        if enabled != self._is_on:
+            self._is_on = enabled
+            self._user_off = running and not enabled
+            self._update_ui()
         # Read FSM state for real-time status display
         if running:
             self._update_fsm_display()
@@ -749,6 +1031,7 @@ class JarvisGUI:
             label_text, detail_text, css_class = _FSM_LABELS.get(
                 state, ("● ACTIVO", "", "status-active")
             )
+            detail_text = detail_text.format(agent=_assistant_name())
             # Append detail (transcript or intent) if present
             if detail:
                 label_text = f"{label_text}: {detail[:40]}"
@@ -773,30 +1056,20 @@ class JarvisGUI:
         # Auto-scroll
         end_iter = buf.get_end_iter()
         self._log_view.scroll_to_iter(end_iter, 0.0, False, 0.0, 0.0)
+        try:
+            CONTROL_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with CONTROL_LOG.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+        except OSError:
+            pass
 
     def _on_destroy(self, widget) -> None:
         """Kill jarvis subprocess tree before closing the GUI."""
-        import subprocess as _sp
-        # Kill process group of our direct subprocess
-        if self._jarvis_proc and self._jarvis_proc.poll() is None:
-            try:
-                os.killpg(os.getpgid(self._jarvis_proc.pid), signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
-        # Kill by PID file
-        pid = _read_pid()
-        if pid is not None:
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
-        # Force-kill children
-        _sp.run(["pkill", "-9", "-f", "whisper-cli"], capture_output=True, timeout=3)
-        _sp.run(["pkill", "-9", "-f", "gst-launch-1.0"], capture_output=True, timeout=3)
+        self._stop_jarvis()
         Gtk.main_quit()
 
     def _on_docs_clicked(self, button) -> None:
-        doc_win = Gtk.Window(title="Jarvis — Manual de Comandos")
+        doc_win = Gtk.Window(title=f"{_assistant_name()} — Manual de Comandos")
         doc_win.set_default_size(550, 450)
         doc_win.set_keep_above(True)
 
@@ -824,7 +1097,7 @@ class JarvisGUI:
         doc_win.show_all()
 
     def _on_logs_clicked(self, button) -> None:
-        log_win = Gtk.Window(title="Jarvis — Logs")
+        log_win = Gtk.Window(title=f"{_assistant_name()} — Logs")
         log_win.set_default_size(550, 400)
         log_win.set_keep_above(True)
 
@@ -834,7 +1107,10 @@ class JarvisGUI:
             for f in sorted(logs_dir.glob("*.log"), reverse=True)[:5]:
                 content += f"=== {f.name} ===\n{f.read_text()[:3000]}\n\n"
         if not content:
-            content = "No hay logs disponibles.\nLos logs se generan cuando Jarvis procesa comandos."
+            content = (
+                "No hay logs disponibles.\n"
+                f"Los logs se generan cuando {_assistant_name()} procesa comandos."
+            )
 
         text_view = Gtk.TextView()
         text_view.set_editable(False)
@@ -852,14 +1128,15 @@ class JarvisGUI:
         log_win.show_all()
 
     def _get_builtin_docs(self) -> str:
-        return """═══════════════════════════════════════════════
-  J.A.R.V.I.S. — Manual de Comandos
+        name = _assistant_name()
+        return f"""═══════════════════════════════════════════════
+  {name.upper()} — Manual de Comandos
 ═══════════════════════════════════════════════
 
 COMANDOS DE VOZ
 ════════════════
 
-Decí "JARVIS" para activarlo, y luego tu comando.
+Usá la palabra de activación configurada y luego decí tu comando.
 
 COMANDOS DISPONIBLES:
 ─────────────────────
@@ -904,11 +1181,11 @@ CONTROLES DEL PANEL
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Jarvis GUI")
+    parser = argparse.ArgumentParser(description="GUI del asistente de voz")
     parser.add_argument(
         "--no-launch",
         action="store_true",
-        help="No lanzar Jarvis (ya está corriendo)",
+        help="No lanzar el asistente (ya está corriendo)",
     )
     args = parser.parse_args()
 

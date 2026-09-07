@@ -468,7 +468,9 @@ capa se aplica tanto a Edge TTS como al fallback Piper y no usa SSML personaliza
 El asistente tiene **3 agentes seleccionables**: `jarvis`, `friday` y `karen`.
 Cada uno define **nombre**, **personalidad** (cómo responde, qué tratamiento usa
 con vos) y **voz de edge-tts**. Al cambiar de agente cambian los tres en todo el
-runtime (saludo de boot, mensajes hablados y respuestas del LLM).
+runtime (saludo de boot, mensajes hablados y respuestas del LLM). Las voces de
+producción fueron seleccionadas comparando el catálogo [voice-samples](jarvis/voice-samples/index.html);
+rate y pitch quedan en valores neutrales para no alterar esa comparación.
 
 Se elige desde `.env` (repo root) o con los comandos del CLI:
 
@@ -487,18 +489,18 @@ JARVIS_AGENT=friday       # jarvis | friday | karen
 
 | Agente | Nombre | Voz edge-tts | Perfil | Tratamiento |
 |--------|--------|--------------|--------|-------------|
-| `jarvis` | Jarvis | `en-US-AndrewMultilingualNeural` | formal, cálida y grave | "señor" |
-| `friday` | Friday | `en-US-AvaMultilingualNeural` | ágil y profesional | "jefe" |
-| `karen` | Karen | `en-US-EmmaMultilingualNeural` | joven, clara y cálida | "amigo" |
+| `jarvis` | Jarvis | `es-NI-FedericoNeural` | formal, cálida y grave | "señor" |
+| `friday` | Friday | `es-PE-CamilaNeural` | ágil y profesional | "jefe" |
+| `karen` | Karen | `es-GT-MartaNeural` | joven, clara y cálida | "amigo" |
 
 El default es `jarvis`. Si `JARVIS_AGENT` tiene un valor inválido, Jarvis avisa
 por stderr y usa `jarvis`.
 
 ### Cambiar la voz
 
-La voz, velocidad y tono siguen al agente activo. Los perfiles multilingües
-pronuncian correctamente español e inglés sin perder la identidad perceptual de
-cada asistente.
+La voz, velocidad y tono siguen al agente activo. Los perfiles seleccionados
+pronuncian correctamente español e inglés; rate y pitch parten de valores
+neutrales (`+0%` y `+0Hz`).
 Si querés forzar una voz distinta a la del agente (escape hatch), `EDGE_VOICE`
 en `.env` sigue siendo respetado:
 

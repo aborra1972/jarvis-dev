@@ -325,12 +325,20 @@
 
 ---
 
-## Proxima tarea a ejecutar
+## Estado actual y próxima tarea
 
-Sin próxima tarea definida tras completar T-AGENT-01.
+El roadmap original de 17 tareas está completo. Además, las tres voces de producción
+seleccionadas en `jarvis/voice-samples/index.html` fueron restauradas y documentadas:
+Jarvis (`es-NI-FedericoNeural`), Friday (`es-PE-CamilaNeural`) y Karen
+(`es-GT-MartaNeural`), con rate y pitch neutrales.
 
-Fases 1-2-3-4-5 (Diagnostico, VAD/Audio, Seguridad, NLU, Multi-turn) completadas
-(2026-09-05: fusionados cambios del estudio + robustez al ruido + modo conversacion).
+La primera slice de seguridad del SDD `jarvis-persistent-conversation` está archivada
+y verificada. La próxima tarea pendiente es el SDD
+`jarvis-active-conversation-goodbye`, actualmente en fase de planificación; contempla
+futuros PRs encadenados para (1) control determinista de goodbye, (2) época de
+conversación activa y barrera playback-micrófono, y (3) cierre, invalidación de
+confirmaciones y regresiones de ciclo de vida. Esta planificación no autoriza aún
+implementar la slice.
 
 ## Pendientes retomados el 2026-09-06
 

@@ -24,7 +24,11 @@ from jarvis.audio.capture import (
     gather_utterance,
     rms,
     write_wav,
+    CaptureMode,
+    CaptureStatus,
+    gather_utterance_result,
 )
+import jarvis.config as config
 
 BLOCK = SAMPLE_RATE * BLOCK_MS // 1000
 
@@ -45,6 +49,7 @@ class FakeCapturer:
         self.reads = 0
         self.started = 0
         self.stopped = 0
+        self.timeouts: list[float] = []
 
     def start(self) -> None:
         self.started += 1
@@ -54,7 +59,14 @@ class FakeCapturer:
 
     def read_frames(self, timeout: float = 1.0) -> np.ndarray | None:
         self.reads += 1
+        self.timeouts.append(timeout)
         return self._queue.popleft() if self._queue else None
+
+
+class FailingCapturer(FakeCapturer):
+    def read_frames(self, timeout: float = 1.0) -> np.ndarray | None:
+        self.reads += 1
+        raise OSError("microphone unavailable")
 
 
 def _vad(*, silence_s: float = 0.8, max_s: float = 10.0) -> SilenceVAD:
@@ -133,6 +145,77 @@ def test_gather_speech_only_without_silence_runs_to_max() -> None:
     blocks, duration = gather_utterance(capturer, vad)
     assert len(blocks) == 3
     assert duration == pytest.approx(0.3)
+
+
+# --- cancellable onset capture -----------------------------------------------
+def test_ordinary_capture_waits_through_no_frames_and_bounds_preroll() -> None:
+    idle = [_silence() for _ in range(5)]
+    speech = _sine()
+    result = gather_utterance_result(
+        FakeCapturer([None, None, *idle, speech, _silence(), _silence()]),
+        _vad(silence_s=0.2, max_s=0.3),
+        mode=CaptureMode.ORDINARY,
+        idle_preroll_blocks=2,
+    )
+    assert result.status is CaptureStatus.UTTERANCE
+    assert result.onset_seen is True
+    assert len(result.blocks) == 5
+    assert result.blocks[2] is speech
+    assert result.duration_s == pytest.approx(0.3)
+    assert result.no_frame_polls == 2
+
+
+def test_capture_cancellation_and_device_failure_are_distinct() -> None:
+    cancelled = gather_utterance_result(
+        FakeCapturer([_silence(), _sine()]), _vad(), stop_requested=lambda: True
+    )
+    failed = gather_utterance_result(FailingCapturer([]), _vad())
+    assert cancelled.status is CaptureStatus.CANCELLED
+    assert failed.status is CaptureStatus.DEVICE_FAILURE
+
+
+def test_cancellation_during_collection_returns_no_dispatchable_audio() -> None:
+    capturer = FakeCapturer([_sine(), _sine(), _silence()])
+    result = gather_utterance_result(
+        capturer,
+        _vad(),
+        stop_requested=lambda: capturer.reads >= 2,
+    )
+    assert result.status is CaptureStatus.CANCELLED
+    assert result.blocks == ()
+
+
+def test_post_onset_duration_excludes_pre_onset_wait() -> None:
+    result = gather_utterance_result(
+        FakeCapturer([_silence(), _silence(), _sine(), _sine(), _sine()]),
+        _vad(max_s=0.2, silence_s=0.8),
+        idle_preroll_blocks=2,
+    )
+    assert result.status is CaptureStatus.UTTERANCE
+    assert result.duration_s == pytest.approx(0.2)
+    assert len(result.blocks) == 4
+
+
+def test_confirmation_mode_has_a_finite_deadline() -> None:
+    result = gather_utterance_result(
+        FakeCapturer([_silence()] * 10),
+        _vad(),
+        mode=CaptureMode.CONFIRMATION,
+        deadline=0.0,
+        clock=lambda: 1.0,
+    )
+    assert result.status is CaptureStatus.CANCELLED
+
+
+def test_capture_defaults_use_audio_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "AUDIO_PREROLL_S", 0.3)
+    monkeypatch.setattr(config, "AUDIO_READ_POLL_S", 0.07)
+    capturer = FakeCapturer([_silence() for _ in range(25)] + [_sine(), _silence(), _silence()])
+    result = gather_utterance_result(capturer, _vad(silence_s=0.2, max_s=0.3))
+
+    assert result.status is CaptureStatus.UTTERANCE
+    assert len(result.blocks) == 6  # three configured pre-roll blocks plus utterance
+    assert capturer.timeouts == [0.07] * 28
 
 
 # --- wav output ---------------------------------------------------------------

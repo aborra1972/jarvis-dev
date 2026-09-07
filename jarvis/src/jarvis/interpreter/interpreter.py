@@ -20,7 +20,14 @@ from dataclasses import dataclass, replace
 from jarvis import config as _config
 from jarvis.interpreter import golden, llm, nlu, schema
 from jarvis.interpreter.focus import is_code_editor_focused
-from jarvis.interpreter.normalize import normalize
+from jarvis.interpreter.normalize import normalize, normalize_boundary
+
+GOODBYE_PHRASES: frozenset[str] = frozenset({"terminamos", "hasta luego"})
+
+
+def is_goodbye(text: str) -> bool:
+    """Return true only for an exact, standalone goodbye transcript."""
+    return normalize_boundary(text) in GOODBYE_PHRASES
 
 logger = logging.getLogger("jarvis.interpreter")
 
@@ -185,6 +192,7 @@ class Interpretation:
     # Only ever set alongside needs_reask/unsupported — the orchestrator may
     # SPEAK this, never execute it. See interpreter/nlu.py's module docstring.
     suggestion: str | None = None
+    control: str | None = None
 
 
 def resolve_intent(
@@ -196,6 +204,14 @@ def resolve_intent(
 ) -> Interpretation:
     """Resolve a raw transcript to an Interpretation (never emits unvalidated intents)."""
     allowlist = _config.ALLOWED_APPS if app_allowlist is None else app_allowlist
+
+    # Lifecycle controls are deterministic and must precede every ordinary route.
+    if is_goodbye(text):
+        logger.info("goodbye.accepted(source=voice)")
+        return Interpretation(control="goodbye")
+    boundary_surface = normalize_boundary(text)
+    if any(phrase in boundary_surface for phrase in GOODBYE_PHRASES):
+        logger.info("goodbye.rejected(reason=nonstandalone)")
 
     # Natural surface (no verb canonicalization): golden patterns now accept
     # rioplatense variants via _verb_alt, so free-text entities (ask/web_search

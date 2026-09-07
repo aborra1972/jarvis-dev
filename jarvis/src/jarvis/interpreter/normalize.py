@@ -22,6 +22,11 @@ _WAKE_STRIP = re.compile(
 )
 _WS = re.compile(r"\s+")
 
+
+def normalize_boundary(text: str) -> str:
+    """Apply only case-folding and outer-whitespace normalization."""
+    return text.casefold().strip()
+
 # Rioplatense variants → canonical infinitive (table-driven).
 # Phrase-level entries come first (modal + verb), then single words.
 VARIANT_MAP: dict[str, str] = {

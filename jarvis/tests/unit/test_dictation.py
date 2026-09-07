@@ -128,3 +128,25 @@ def test_type_text_returns_true(mock_xdotool) -> None:
 def test_press_enter_returns_true(mock_xdotool) -> None:
     assert press_enter() is True
     mock_xdotool.assert_called_once()
+
+
+def test_standalone_goodbye_precedes_dictation_content() -> None:
+    dm = DictationManager()
+    dm.activate()
+    should_respond, response = dm.process_transcript("  Hasta Luego  ")
+    assert (should_respond, response) == (True, "goodbye")
+    assert dm.state.get_full_text() == ""
+
+
+def test_goodbye_in_content_remains_dictated_data() -> None:
+    dm = DictationManager()
+    dm.activate()
+    should_respond, _ = dm.process_transcript('escribí "hasta luego" en la nota')
+    assert not should_respond
+    assert dm.state.get_full_text() == 'escribí "hasta luego" en la nota'
+
+
+def test_nonstandalone_goodbye_is_not_dictation_control() -> None:
+    dm = DictationManager()
+    assert dm.is_control_command("no terminamos") is None
+    assert dm.is_control_command("dijo hasta luego") is None

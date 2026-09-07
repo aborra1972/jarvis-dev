@@ -19,6 +19,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from jarvis.interpreter.interpreter import is_goodbye
+
 logger = logging.getLogger("jarvis.interpreter")
 
 # Dictation control patterns (Spanish rioplatense)
@@ -173,6 +175,10 @@ class DictationManager:
         """
         normalized = text.strip().lower()
 
+        # Exact standalone lifecycle control takes precedence over data.
+        if is_goodbye(text):
+            return "goodbye"
+
         # Check exact matches first
         if normalized in _SEND_COMMANDS:
             return "send"
@@ -213,6 +219,9 @@ class DictationManager:
         # Check for control commands
         command = self.is_control_command(text)
 
+        if command == "goodbye":
+            logger.info("goodbye.accepted(source=dictation)")
+            return True, "goodbye"
         if command == "send":
             full_text = self.state.get_full_text()
             if full_text.strip():

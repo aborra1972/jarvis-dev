@@ -140,6 +140,10 @@ class FakeSpeaker:
     def speak(self, text: str) -> None:
         self.said.append(text)
 
+    def speak_and_wait(self, text: str):
+        self.speak(text)
+        return type("Completion", (), {"completed": True})()
+
 
 class BeepRecordingSpeaker(FakeSpeaker):
     """FakeSpeaker that records activation-beep calls (speaker.playback)."""
@@ -250,7 +254,7 @@ def test_confirm_yes_executes_shutdown(tmp_path: Path) -> None:
         interpreter_script=[_interp(_intent(intent="shutdown", confirm_required=True))],
         tmp_path=tmp_path,
     )
-    outcome = run(pipeline, iterations=5)
+    outcome = run(pipeline, iterations=3)
     assert outcome == "executed"
     assert [c.intent for c in pipeline.executor.calls] == ["shutdown"]
 
@@ -805,6 +809,36 @@ def test_legacy_wake_does_not_gate(tmp_path: Path) -> None:
     assert pipeline.interpreter.calls[0] == "hey jarvis, abrí firefox"
 
 
+def test_active_epoch_keeps_ordinary_capture_after_arbitrary_pause(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True, False],
+        transcripts=["abrí firefox", "abrí chromium"],
+        interpreter_script=[_interp(_intent()), _interp(_intent(entities={"app": "chromium"}))],
+        tmp_path=tmp_path,
+    )
+
+    outcome = run(pipeline, iterations=8)
+
+    assert outcome == "executed"
+    assert len(pipeline.executor.calls) == 2
+    assert len(pipeline.wake.results) == 1
+
+
+def test_active_reask_returns_through_playback_barrier(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["no sé", "abrí firefox"],
+        interpreter_script=[_interp(needs_reask=True), _interp(_intent())],
+        tmp_path=tmp_path,
+    )
+
+    outcome = run(pipeline, iterations=7)
+
+    assert outcome in {"executed", "silence"}
+    assert len(pipeline.executor.calls) == 1
+    assert any(REASK_1 in text for text in pipeline.speaker.said)
+
+
 def test_after_listening_without_tts_mic_gets_reopened(tmp_path: Path) -> None:
     """Non-TTS returns from LISTENING leave the mic stopped; IDLE must reopen
     it (idempotently) before the next wake scan."""
@@ -825,3 +859,30 @@ def test_after_listening_without_tts_mic_gets_reopened(tmp_path: Path) -> None:
     assert mic.started == 1
     assert mic.flushed == 1
     assert mic.stopped == 0
+
+
+def test_goodbye_acknowledges_and_returns_to_wake_standby(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True, False],
+        transcripts=["terminamos"],
+        interpreter_script=[Interpretation(control="goodbye")],
+        tmp_path=tmp_path,
+    )
+    outcome = run(pipeline, iterations=3)
+    assert outcome == "goodbye"
+    assert pipeline.speaker.said[-1]
+    assert len(pipeline.wake.results) == 1
+    assert pipeline.executor.calls == []
+
+
+def test_goodbye_during_confirmation_invalidates_without_execution(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["apagá el sistema", "terminamos"],
+        interpreter_script=[_interp(_intent(intent="shutdown", confirm_required=True))],
+        tmp_path=tmp_path,
+    )
+    outcome = run(pipeline, iterations=5)
+    assert outcome == "goodbye"
+    assert pipeline.executor.calls == []
+    assert any("Hasta luego" in text for text in pipeline.speaker.said)

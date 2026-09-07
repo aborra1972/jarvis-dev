@@ -6,14 +6,20 @@ aborts (M6: 100% confirmations, nothing executes without an explicit yes).
 The 15s window runs on an injectable Clock so tests exercise yes/no/timeout
 without waiting. Response classification is fail-closed: any leading negative
 aborts, only an explicit affirmative proceeds.
+
+This PR2 implementation adds the verified-completion authorization seam without
+owning loop cancellation orchestration.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from enum import Enum
+from uuid import uuid4
 
+from jarvis.interpreter.interpreter import is_goodbye
 from jarvis.interpreter.normalize import normalize
 from jarvis.interpreter.schema import Intent
 
@@ -22,7 +28,6 @@ logger = logging.getLogger("jarvis.orchestrator")
 CONFIRM_TIMEOUT_S = 15.0
 CONFIRM_CANCEL_SPOKEN = "Muy bien, señor. Cancelo y no ejecuto nada."
 CONFIRM_TIMEOUT_SPOKEN = "No confirmó a tiempo, señor. He cancelado la operación."
-
 # Safety multiplier: if the loop runs this many times longer than the nominal
 # timeout, something is broken (clock not advancing, capture stuck). Force exit.
 _HARD_SAFETY_MULTIPLIER = 3.0
@@ -32,6 +37,87 @@ class Confirmation(Enum):
     CONFIRMED = "confirmed"
     ABORTED = "aborted"
     TIMED_OUT = "timed_out"
+    GOODBYE = "goodbye"
+
+
+class AuthorizationState(Enum):
+    PENDING = "pending"
+    VALIDATED = "validated"
+    ABORTED = "aborted"
+    EXPIRED = "expired"
+    INVALIDATED = "invalidated"
+    CONSUMED = "consumed"
+
+
+@dataclass
+class Authorization:
+    """One immutable-from-callers authorization lifecycle.
+
+    The record's deadline can only be established once, from verified prompt
+    completion.  ``consume`` is the sole execution handoff and is exactly once.
+    """
+
+    action: str
+    token: object
+    id: str
+    state: AuthorizationState = AuthorizationState.PENDING
+    t0: float | None = None
+    deadline: float | None = None
+    reason: str | None = None
+
+    @classmethod
+    def create(cls, action: str, token: object) -> "Authorization":
+        return cls(action=action, token=token, id=uuid4().hex)
+
+    def verify_prompt_completion(self, completed_at: float) -> bool:
+        if self.state is not AuthorizationState.PENDING:
+            return False
+        self.t0 = completed_at
+        self.deadline = completed_at + CONFIRM_TIMEOUT_S
+        return True
+
+    def invalidate(self, reason: str = "cancelled") -> bool:
+        if self.state in (AuthorizationState.CONSUMED, AuthorizationState.INVALIDATED):
+            return False
+        self.state = AuthorizationState.INVALIDATED
+        self.reason = reason
+        return True
+
+    def abort(self, reason: str = "refused") -> bool:
+        if self.state is not AuthorizationState.PENDING and self.state is not AuthorizationState.VALIDATED:
+            return False
+        self.state = AuthorizationState.ABORTED
+        self.reason = reason
+        return True
+
+    def _live(self, now: float, token: object) -> bool:
+        if token != self.token or self.deadline is None:
+            return False
+        if self.state not in (AuthorizationState.PENDING, AuthorizationState.VALIDATED):
+            return False
+        if now >= self.deadline:
+            self.state = AuthorizationState.EXPIRED
+            self.reason = "deadline"
+            return False
+        return True
+
+    def validate(self, verdict: Confirmation, *, now: float, token: object) -> bool:
+        if not self._live(now, token):
+            return False
+        if verdict is Confirmation.CONFIRMED:
+            self.state = AuthorizationState.VALIDATED
+            return True
+        self.abort("refused")
+        return False
+
+    def consume(self, *, now: float, token: object) -> bool:
+        """Atomically authorize execution, rejecting late or repeated handoff."""
+        if self.state is not AuthorizationState.VALIDATED:
+            return False
+        if not self._live(now, token):
+            return False
+        self.state = AuthorizationState.CONSUMED
+        return True
 
 
 _AFFIRMATIVE: frozenset[str] = frozenset({
@@ -42,7 +128,6 @@ _NEGATIVE: frozenset[str] = frozenset({
     "no", "nop", "nope", "negativo", "para", "cancelalo", "cancela",
     "no hagas nada", "no lo hagas", "nunca", "no se",
 })
-
 _PROMPTS: dict[str, str] = {
     "shutdown": "¿Confirma, señor, que apague la máquina?",
     "reboot": "¿Confirma, señor, que reinicie la máquina?",
@@ -51,11 +136,6 @@ _PROMPTS: dict[str, str] = {
 
 
 def classify_response(text: str) -> Confirmation | None:
-    """Classify a spoken answer; ``None`` = unclear, keep listening.
-
-    Fail-closed: leading affirmative → CONFIRMED, leading negative → ABORTED,
-    anything else (hesitation, noise) → None so only an explicit answer acts.
-    """
     surface = normalize(text)
     if not surface:
         return None
@@ -77,6 +157,28 @@ def confirmation_prompt(intent: Intent) -> str:
     return _PROMPTS.get(intent.intent, "¿Confirma esta operación, señor?")
 
 
+def _prompt_verified(speaker, prompt: str, completion=None) -> bool:
+    """Use explicit completion evidence; never use flush or playback state."""
+    if completion is not None:
+        return bool(getattr(completion, "completed", completion))
+    speak_and_wait = getattr(speaker, "speak_and_wait", None)
+    if callable(speak_and_wait):
+        result = speak_and_wait(prompt)
+        return bool(getattr(result, "completed", result))
+    # The existing PiperSpeaker's flush is a synchronous queue-drain adapter;
+    # retain that source-compatible seam until the loop supplies speak_and_wait.
+    # An arbitrary flush-only speaker remains unverified and fails closed.
+    if callable(getattr(speaker, "flush", None)):
+        speaker.speak(prompt)
+        if speaker.__class__.__module__ == "jarvis.audio.pipeline":
+            speaker.flush()
+            return True
+        return False
+    # ``speak`` alone provides no evidence that playback completed.
+    speaker.speak(prompt)
+    return False
+
+
 def confirm(
     intent: Intent,
     *,
@@ -84,47 +186,66 @@ def confirm(
     capture,
     speaker,
     timeout: float = CONFIRM_TIMEOUT_S,
+    authorization: Authorization | None = None,
+    token: object = None,
+    prompt_completion=None,
+    authorization_sink=None,
 ) -> Confirmation:
-    """Ask for verbal confirmation within ``timeout`` seconds (M6).
+    """Ask for verbal confirmation within the fixed safety window.
 
-    Uses the injectable clock for the nominal timeout. A hard safety timeout
-    using real wall-clock time (``time.monotonic``) forces exit if the loop
-    runs 3x longer than expected — catches broken clocks or stuck captures.
-    Any exception from ``capture()`` is treated as silence (logged, not raised)
-    so the confirmation loop survives transient mic errors.
+    The deadline starts only after explicit prompt-completion evidence. A hard
+    safety timeout using real wall-clock time forces exit if an adapter blocks,
+    while injected-clock checks remain authoritative for authorization.
     """
-    speaker.speak(confirmation_prompt(intent))
-    flush = getattr(speaker, "flush", None)
-    if callable(flush):
-        flush()
-    deadline = clock.now() + timeout
-    hard_deadline = time.monotonic() + (timeout * _HARD_SAFETY_MULTIPLIER)
+    auth = authorization or Authorization.create(intent.intent, token)
+    if authorization is None:
+        if not _prompt_verified(speaker, confirmation_prompt(intent), prompt_completion):
+            auth.invalidate("prompt_completion_unverified")
+            return Confirmation.ABORTED
+        # Authorization deliberately always uses the fixed safety window.
+        auth.verify_prompt_completion(clock.now())
+        if authorization_sink is not None:
+            authorization_sink(auth)
+    elif auth.t0 is None:
+        auth.invalidate("prompt_completion_unverified")
+        return Confirmation.ABORTED
+
+    hard_deadline = time.monotonic() + (CONFIRM_TIMEOUT_S * _HARD_SAFETY_MULTIPLIER)
     while True:
+        if auth.deadline is None or not auth._live(clock.now(), token):
+            speaker.speak(CONFIRM_TIMEOUT_SPOKEN)
+            return Confirmation.TIMED_OUT
         try:
             transcript = capture()
         except Exception as exc:
-            # CaptureError propagates to the loop (which speaks STT_ERROR_SPOKEN).
-            # Any other exception (OSError from mic, etc.) is treated as silence
-            # so the confirmation loop survives transient hardware errors.
+            # Preserve the existing loop's recoverable CaptureError seam. Other
+            # readiness failures are fail-closed on this authorization record.
             from jarvis.orchestrator.contracts import CaptureError
             if isinstance(exc, CaptureError):
                 raise
             logger.warning("capture() failed during confirmation: %s", exc)
-            transcript = None
-        if transcript is not None:
-            verdict = classify_response(transcript)
-            if verdict is Confirmation.CONFIRMED:
-                return Confirmation.CONFIRMED
-            if verdict is Confirmation.ABORTED:
-                speaker.speak(CONFIRM_CANCEL_SPOKEN)
-                return Confirmation.ABORTED
-        if clock.now() >= deadline:
+            auth.invalidate("capture_failure")
+            return Confirmation.ABORTED
+        now = clock.now()
+        if not auth._live(now, token):
+            logger.info("confirmation_late_result", extra={"authorization": auth.id})
             speaker.speak(CONFIRM_TIMEOUT_SPOKEN)
             return Confirmation.TIMED_OUT
+        if transcript is not None:
+            if is_goodbye(transcript):
+                auth.invalidate("goodbye")
+                logger.info("confirmation.invalidated(reason=goodbye)")
+                return Confirmation.GOODBYE
+            verdict = classify_response(transcript)
+            if verdict is Confirmation.CONFIRMED:
+                if not auth.validate(verdict, now=now, token=token):
+                    return Confirmation.ABORTED
+                return Confirmation.CONFIRMED
+            if verdict is Confirmation.ABORTED:
+                auth.abort("refused")
+                speaker.speak(CONFIRM_CANCEL_SPOKEN)
+                return Confirmation.ABORTED
         if time.monotonic() >= hard_deadline:
-            logger.warning(
-                "confirm() hard safety timeout: clock did not advance in %.1fs",
-                timeout * _HARD_SAFETY_MULTIPLIER,
-            )
+            auth.invalidate("safety_timeout")
             speaker.speak(CONFIRM_TIMEOUT_SPOKEN)
             return Confirmation.TIMED_OUT

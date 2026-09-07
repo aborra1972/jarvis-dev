@@ -20,6 +20,7 @@ import signal
 
 from jarvis.orchestrator import loop
 from jarvis.orchestrator.session import Session
+from jarvis.orchestrator.contracts import OperationToken
 
 
 class _SwitchRecorder:
@@ -87,6 +88,27 @@ def test_signal_handler_only_sets_flag(tmp_path) -> None:
     assert session.switched_off is True
     assert switch.calls == 1
     assert (tmp_path / "state.json").exists()
+
+
+def test_apply_switch_cancels_operation_before_releasing_mic(tmp_path) -> None:
+    session = Session(state_path=str(tmp_path / "state.json"))
+    switch = _SwitchRecorder()
+    operation = OperationToken(1)
+
+    loop._switch_pending = True
+    loop._apply_switch(session, switch, operation=operation)
+
+    assert operation.cancelled() is True
+    assert switch.calls == 1
+
+
+def test_operation_tokens_are_monotonic_and_stale_tokens_reject() -> None:
+    first = OperationToken.next()
+    second = OperationToken.next()
+    assert second.generation > first.generation
+    first.cancel("superseded")
+    assert not first.is_current(second)
+    assert second.is_current(second)
 
 
 def test_apply_switch_noop_without_pending_flag(tmp_path) -> None:

@@ -15,6 +15,8 @@ from typing import Callable, Protocol, runtime_checkable
 
 import numpy as np
 
+from jarvis.audio.contracts import CaptureMode, CaptureResult, CaptureStatus
+
 SAMPLE_RATE = 16000
 BLOCK_MS = 100
 SILENCE_MS = 800
@@ -181,6 +183,86 @@ class SoundDeviceCapturer:
                 break
 
 
+def gather_utterance_result(
+    capturer: Capturer,
+    vad: SilenceVAD,
+    *,
+    mode: CaptureMode = CaptureMode.ORDINARY,
+    idle_preroll_blocks: int | None = None,
+    read_timeout: float | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+    deadline: float | None = None,
+    clock: Callable[[], float] | None = None,
+    max_no_frame_polls: int = 3,
+) -> CaptureResult:
+    """Capture a bounded idle pre-roll and a finite post-onset utterance.
+
+    Ordinary mode has no onset deadline. Confirmation mode is always bounded by
+    ``deadline``. ``None`` reads are retryable, while a sustained run is reported
+    as ``NO_FRAME`` rather than being mistaken for silence.
+    """
+    clock = clock or __import__("time").monotonic
+    if idle_preroll_blocks is None or read_timeout is None:
+        from jarvis import config
+
+        if idle_preroll_blocks is None:
+            idle_preroll_blocks = round(config.AUDIO_PREROLL_S * 1000 / BLOCK_MS)
+        if read_timeout is None:
+            read_timeout = config.AUDIO_READ_POLL_S
+    pre_roll: deque[np.ndarray] = deque(maxlen=max(0, idle_preroll_blocks))
+    blocks: list[np.ndarray] = []
+    silent_s = 0.0
+    duration_s = 0.0
+    no_frame_polls = 0
+    speech_started = False
+
+    while not speech_started:
+        if stop_requested is not None and stop_requested():
+            return CaptureResult(CaptureStatus.CANCELLED, tuple(), 0.0, False, no_frame_polls)
+        if mode is CaptureMode.CONFIRMATION and deadline is not None and clock() >= deadline:
+            return CaptureResult(CaptureStatus.CANCELLED, tuple(), 0.0, False, no_frame_polls)
+        try:
+            block = capturer.read_frames(timeout=read_timeout)
+        except Exception as exc:
+            return CaptureResult(CaptureStatus.DEVICE_FAILURE, tuple(), 0.0, False, no_frame_polls, exc)
+        if block is None:
+            no_frame_polls += 1
+            if no_frame_polls >= max_no_frame_polls:
+                return CaptureResult(CaptureStatus.NO_FRAME, tuple(), 0.0, False, no_frame_polls)
+            continue
+        if vad.is_speech(block):
+            speech_started = True
+            blocks.extend(pre_roll)
+            blocks.append(block)
+            duration_s = vad.block_duration
+            continue
+        pre_roll.append(block)
+
+    while duration_s < vad.max_s:
+        if stop_requested is not None and stop_requested():
+            return CaptureResult(CaptureStatus.CANCELLED, tuple(), duration_s, True, no_frame_polls)
+        if mode is CaptureMode.CONFIRMATION and deadline is not None and clock() >= deadline:
+            return CaptureResult(CaptureStatus.CANCELLED, tuple(), duration_s, True, no_frame_polls)
+        try:
+            block = capturer.read_frames(timeout=read_timeout)
+        except Exception as exc:
+            return CaptureResult(CaptureStatus.DEVICE_FAILURE, tuple(), duration_s, True, no_frame_polls, exc)
+        if block is None:
+            no_frame_polls += 1
+            if no_frame_polls >= max_no_frame_polls:
+                break
+            continue
+        blocks.append(block)
+        duration_s += vad.block_duration
+        if vad.is_speech(block):
+            silent_s = 0.0
+        else:
+            silent_s += vad.block_duration
+        if silent_s >= vad.silence_s:
+            break
+    return CaptureResult(CaptureStatus.UTTERANCE, tuple(blocks), duration_s, True, no_frame_polls)
+
+
 def gather_utterance(
     capturer: Capturer,
     vad: SilenceVAD,
@@ -188,12 +270,7 @@ def gather_utterance(
     read_timeout: float = 1.0,
     stop_requested: Callable[[], bool] | None = None,
 ) -> tuple[list[np.ndarray], float]:
-    """Collect frames until 800ms of trailing silence or max duration.
-
-    Returns (blocks, duration_s). Blocks is empty when no frames arrive at all.
-    The trailing-silence rule is the one in design Data Flow ("end of the
-    utterance after 800ms of silence").
-    """
+    """Legacy tuple adapter for existing finite capture callers."""
     blocks: list[np.ndarray] = []
     silent_s = 0.0
     duration_s = 0.0
@@ -201,7 +278,10 @@ def gather_utterance(
     while duration_s < vad.max_s:
         if stop_requested is not None and stop_requested():
             break
-        block = capturer.read_frames(timeout=read_timeout)
+        try:
+            block = capturer.read_frames(timeout=read_timeout)
+        except Exception:
+            break
         if block is None:
             break
         blocks.append(block)

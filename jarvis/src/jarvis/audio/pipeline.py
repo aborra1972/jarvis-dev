@@ -30,10 +30,11 @@ from jarvis.audio.capture import (
     Capturer,
     SilenceVAD,
     SileroVAD,
-    gather_utterance,
+    gather_utterance_result,
     rms,
     write_wav,
 )
+from jarvis.audio.contracts import CaptureMode, CaptureStatus
 from jarvis.audio.playback import PlaybackError
 from jarvis.audio.pronunciation import normalize_for_tts
 from jarvis.audio.stt import STTError
@@ -102,20 +103,41 @@ class UtteranceCapture:
     def _next_wav(self) -> Path:
         return self.wav_dir / f"jarvis-capture-{uuid.uuid4().hex}.wav"
 
-    def capture(self) -> str | None:
+    def capture(
+        self,
+        *,
+        mode: CaptureMode | str = CaptureMode.ORDINARY,
+        deadline: float | None = None,
+        operation: object | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> str | None:
         reset = getattr(self.vad, "reset", None)
         if callable(reset):
             reset()
         self._calibrate()
-        blocks, duration_s = gather_utterance(
+        if isinstance(mode, str):
+            mode = CaptureMode(mode)
+
+        def cancelled() -> bool:
+            return bool(
+                (self._stop_requested is not None and self._stop_requested())
+                or (operation is not None and operation.cancelled())
+            )
+
+        result = gather_utterance_result(
             self.capturer,
             self.vad,
+            mode=mode,
+            deadline=deadline,
             read_timeout=self.read_timeout,
-            stop_requested=self._stop_requested,
+            stop_requested=cancelled,
+            clock=clock,
         )
-        if self._stop_requested is not None and self._stop_requested():
+        if result.status is not CaptureStatus.UTTERANCE or not result.blocks:
             return None
-        if not blocks or not any(rms(block) >= DEFAULT_THRESHOLD for block in blocks):
+        blocks = list(result.blocks)
+        duration_s = result.duration_s
+        if not any(rms(block) >= DEFAULT_THRESHOLD for block in blocks):
             return None
         # Store audio for speaker verification (before STT deletes the file)
         audio = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
@@ -164,6 +186,7 @@ class PiperSpeaker:
         self._closed = False
         self._playing = False
         self._consecutive_tts_failures: int = 0
+        self._last_playback_ok = True
         self._thread = threading.Thread(target=self._worker, name="jarvis-piper", daemon=True)
         self._thread.start()
 
@@ -184,10 +207,12 @@ class PiperSpeaker:
                 self._queue.task_done()
 
     def _play(self, text: str) -> None:
+        self._last_playback_ok = False
         media_path = self._next_media()
         try:
             media_path = self.tts.synthesize(normalize_for_tts(text), media_path)
             self.playback.play(media_path)
+            self._last_playback_ok = True
             self._consecutive_tts_failures = 0  # reset on success
         except (TTSError, PlaybackError) as exc:
             self._consecutive_tts_failures += 1
@@ -213,6 +238,15 @@ class PiperSpeaker:
         if self._closed:
             return
         self._queue.put(text)
+
+    def speak_and_wait(self, text: str):
+        """Speak one prompt and return explicit completion evidence."""
+        self._last_playback_ok = True
+        self.speak(text)
+        self.flush()
+        return type("PromptCompletion", (), {
+            "completed": self._last_playback_ok and not self.is_playing(),
+        })()
 
     def is_playing(self) -> bool:
         return self._queue.unfinished_tasks > 0 or self._playing

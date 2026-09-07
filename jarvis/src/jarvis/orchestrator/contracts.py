@@ -9,6 +9,7 @@ adapters; tests drive fakes. ``Clock`` is injectable everywhere time matters
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import count
 from typing import Callable, Protocol
 
 from jarvis.interpreter.schema import Intent
@@ -26,6 +27,31 @@ class Capture(Protocol):
     def capture(self) -> str | None: ...
 
 
+class OperationToken:
+    """Loop-owned generation token used to reject work after invalidation."""
+
+    _generations = count(1)
+
+    def __init__(self, generation: int | None = None) -> None:
+        self.generation = generation if generation is not None else next(self._generations)
+        self._cancelled = False
+        self.reason: str | None = None
+
+    @classmethod
+    def next(cls) -> "OperationToken":
+        return cls()
+
+    def cancel(self, reason: str = "cancelled") -> None:
+        self._cancelled = True
+        self.reason = reason
+
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def is_current(self, current: "OperationToken") -> bool:
+        return not self.cancelled() and self.generation == current.generation
+
+
 class CaptureError(Exception):
     """Capture/STT hardware failure — the loop replies with a spoken error (PR6).
 
@@ -34,8 +60,18 @@ class CaptureError(Exception):
     """
 
 
+class PromptCompletion(Protocol):
+    """Verified evidence that a specific prompt finished playing."""
+
+    @property
+    def completed(self) -> bool: ...
+
+
 class Speaker(Protocol):
     def speak(self, text: str) -> None: ...
+
+    # Optional adapter: confirmation must use this seam when playback is async.
+    def speak_and_wait(self, text: str) -> PromptCompletion: ...
 
 
 @dataclass(frozen=True)

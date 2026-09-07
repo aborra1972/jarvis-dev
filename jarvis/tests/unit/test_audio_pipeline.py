@@ -18,7 +18,9 @@ import numpy as np
 import pytest
 
 from jarvis.audio.capture import BLOCK_MS, SAMPLE_RATE, SilenceVAD
+from jarvis.audio.contracts import CaptureResult, CaptureStatus
 from jarvis.audio.playback import PlaybackError
+import jarvis.audio.pipeline as audio_pipeline
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
@@ -263,6 +265,55 @@ def test_utterance_capture_returns_none_when_no_frames(tmp_path: Path) -> None:
     assert capture.capture() is None
 
 
+def test_capture_forwards_confirmation_mode_deadline_and_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = {}
+    result = CaptureResult(CaptureStatus.CANCELLED, (), 0.0, False)
+
+    def fake_gather(*args, **kwargs):
+        seen.update(kwargs)
+        return result
+
+    monkeypatch.setattr(audio_pipeline, "gather_utterance_result", fake_gather)
+    operation = type("Operation", (), {"cancelled": lambda self: False})()
+    capture = UtteranceCapture(FakeCapturer([]), FakeSTT("unused"), _vad(), wav_dir=tmp_path)
+
+    assert capture.capture(mode="confirmation", deadline=12.0, operation=operation) is None
+    assert seen["deadline"] == 12.0
+    assert seen["stop_requested"]() is False
+
+
+@pytest.mark.parametrize(
+    "status",
+    [CaptureStatus.CANCELLED, CaptureStatus.NO_FRAME, CaptureStatus.DEVICE_FAILURE],
+)
+def test_non_dispatchable_capture_results_stop_pipeline_at_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: CaptureStatus
+) -> None:
+    stt = FakeSTT("should not be used")
+    result = CaptureResult(status, (), 0.0, False)
+    monkeypatch.setattr(audio_pipeline, "gather_utterance_result", lambda *args, **kwargs: result)
+    capture = UtteranceCapture(FakeCapturer([]), stt, _vad(), wav_dir=tmp_path)
+
+    assert capture.capture() is None
+    assert stt.calls == []
+    assert list(tmp_path.glob("jarvis-capture-*.wav")) == []
+
+
+def test_empty_capture_result_stops_pipeline_at_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stt = FakeSTT("should not be used")
+    result = CaptureResult(CaptureStatus.UTTERANCE, (), 0.0, True)
+    monkeypatch.setattr(audio_pipeline, "gather_utterance_result", lambda *args, **kwargs: result)
+    capture = UtteranceCapture(FakeCapturer([]), stt, _vad(), wav_dir=tmp_path)
+
+    assert capture.capture() is None
+    assert stt.calls == []
+    assert list(tmp_path.glob("jarvis-capture-*.wav")) == []
+
+
 def test_utterance_capture_raises_on_stt_error(tmp_path: Path) -> None:
     # PR6 (item 5): an STT failure must surface so the loop replies with a
     # spoken error instead of pretending nothing was heard.
@@ -275,6 +326,14 @@ def test_utterance_capture_raises_on_stt_error(tmp_path: Path) -> None:
 
 
 # --- PiperSpeaker (contracts.Speaker, PR6 async queue) -------------------------
+def test_piper_speaker_reports_prompt_failure_to_readiness_barrier(tmp_path: Path) -> None:
+    speaker = PiperSpeaker(FakeTTS(error=True), FakePlayback(), out_dir=tmp_path)
+
+    completion = speaker.speak_and_wait("no disponible")
+
+    assert completion.completed is False
+
+
 def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
     tts = FakeTTS()
     playback = FakePlayback()

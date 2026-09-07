@@ -34,8 +34,11 @@ from jarvis.audio.wake import build_wake_detector
 from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.interpreter.dictation import DictationManager
 from jarvis.interpreter.focus import is_code_editor_focused
-from jarvis.orchestrator.confirm import CONFIRM_TIMEOUT_S, Confirmation, confirm
-from jarvis.orchestrator.contracts import CaptureError
+from jarvis.orchestrator.confirm import (
+    CONFIRM_TIMEOUT_S, Authorization, Confirmation, confirm,
+)
+from jarvis.orchestrator.contracts import CaptureError, OperationToken
+from jarvis.audio.contracts import CaptureMode
 from jarvis.orchestrator.logs import TranscriptLog, clean_logs
 from jarvis.orchestrator.name_gate import strip_agent_prefix
 from jarvis.orchestrator.session import GitRunner, Session, load_state
@@ -67,6 +70,7 @@ REJECTED_SPOKEN = "Eso no es válido, señor. No puedo hacerlo."
 UNSUPPORTED_SPOKEN = "Aún no sé hacer eso, señor."
 NO_ACTIVE_PROJECT = "No hay un proyecto activo, señor. Abra uno primero."
 STT_ERROR_SPOKEN = "Lo lamento, señor, no pude escucharlo. Intente de nuevo."
+GOODBYE_SPOKEN = "Hasta luego, señor. Quedo en espera."
 # Verify fix (voice-pipeline "Long LLM operation"): spoken ack emitted BEFORE a
 # long-running executor call (ask/implement/review/create_artifact can take up
 # to 30s). Non-blocking: PiperSpeaker.speak enqueues and returns, so the ack
@@ -112,6 +116,9 @@ class Pipeline:
 @dataclass
 class _Context:
     transcript: str = ""
+    # The loop is the sole owner of active conversation identity.
+    active_epoch: int | None = None
+    epoch_serial: int = 0
     interpretation: Interpretation | None = None
     outcome: str = ""
     last_spoke_at: float = 0.0  # cooldown: skip wake detection right after TTS
@@ -126,6 +133,8 @@ class _Context:
     # "name"): the utterance must start with the active agent's name, verified
     # after STT. False for conversation-mode follow-ups and reask retries.
     wake_gated: bool = False
+    operation: OperationToken | None = None
+    authorization: Authorization | None = None
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -142,6 +151,8 @@ def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
             count += 1
             state, context = _tick(state, pipeline, context)
     finally:
+        if state is State.EXECUTING:
+            state, context = _tick(state, pipeline, context)
         session.save()
         flush = getattr(pipeline.speaker, "flush", None)
         if callable(flush):
@@ -176,7 +187,19 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     _sync_wake_threshold(pipeline.wake)
     # Process any pending SIGUSR1/SIGUSR2 before checking state.
     # This runs in the main loop (not a signal handler) so I/O is safe.
-    _apply_switch(pipeline.session, pipeline.switch_state, pipeline.speaker)
+    _apply_switch(
+        pipeline.session, pipeline.switch_state, pipeline.speaker,
+        operation=context.operation,
+        authorization=context.authorization,
+    )
+    if _is_switched_off(pipeline):
+        if context.active_epoch is not None:
+            logger.info("off_precedence")
+        context.active_epoch = None
+        context.operation = None
+        if state is not State.OFF:
+            context.outcome = "switched_off"
+            return State.OFF, context
     if state is State.IDLE:
         playback_just_finished = False
         if _is_switched_off(pipeline):
@@ -234,7 +257,8 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 if hasattr(pipeline.wake, 'capturer'):
                     pipeline.wake.capturer.stop()
             context.was_playing = True
-            context.outcome = "speaking"
+            if context.authorization is None:
+                context.outcome = "speaking"
             return State.IDLE, context
         # TTS just finished — start cooldown from the actual playback end,
         # not from when the FSM entered SPEAKING (which was seconds earlier).
@@ -271,6 +295,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # the person say "jarvis" again for every single exchange. Expires
         # on its own (config.CONVERSATION_WINDOW_S) so Jarvis doesn't keep
         # listening indefinitely after the conversation is actually over.
+        if context.active_epoch is not None:
+            if not _prepare_ordinary_capture(pipeline, context):
+                return State.IDLE, context
+            logger.info("turn.waiting epoch=%s", context.active_epoch)
+            _write_fsm_state("listening")
+            return State.LISTENING, context
         if (
             not playback_just_finished
             and context.conversation_until
@@ -303,7 +333,8 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 capturer_flush(ms=config.AUDIO_FLUSH_MS)
             pipeline.wake.capturer.start()
         if not pipeline.wake.wait(WAKE_TIMEOUT_S):
-            context.outcome = "no_wake"
+            if context.outcome not in ("executed", "failed", "powered_off", "confirmed", "goodbye"):
+                context.outcome = "no_wake"
             return State.IDLE, context
         pipeline.session.reask_attempts = 0
         context.outcome = "woke"
@@ -311,6 +342,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # abrí firefox"). Do NOT stop the mic / beep / sleep — that clips the
         # command. Rewind the pre-roll so the name reaches the STT, then listen.
         if _wake_gates_by_name(pipeline.wake):
+            context.epoch_serial += 1
+            context.active_epoch = context.epoch_serial
+            logger.info("conversation.activated(epoch=%s)", context.active_epoch)
             rewind = getattr(pipeline.wake, "rewind", None)
             if callable(rewind):
                 rewind()
@@ -318,6 +352,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             _write_fsm_state("listening")
             return State.LISTENING, context
         context.wake_gated = False
+        context.epoch_serial += 1
+        context.active_epoch = context.epoch_serial
+        logger.info("conversation.activated(epoch=%s)", context.active_epoch)
         # Stop mic before beep to prevent capturing our own sound
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
@@ -337,12 +374,20 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.LISTENING, context
 
     if state is State.LISTENING:
+        if context.active_epoch is not None and _speaker_is_playing(pipeline.speaker):
+            logger.info("turn.waiting epoch=%s", context.active_epoch)
+            return State.IDLE, context
+        if context.operation is None:
+            context.operation = OperationToken.next()
+        if context.operation.cancelled() or _is_switched_off(pipeline):
+            context.outcome = "cancelled"
+            return State.OFF if _is_switched_off(pipeline) else State.IDLE, context
         try:
-            transcript = pipeline.capture.capture()
+            transcript = _capture(pipeline.capture, context.operation, clock=pipeline.clock.now)
         except CaptureError:
             pipeline.speaker.speak(_spoken_toward(STT_ERROR_SPOKEN))
             context.outcome = "stt_error"
-            return State.IDLE, context
+            return (State.SPEAKING if context.active_epoch is not None else State.IDLE), context
         if transcript is None:
             context.outcome = "silence"
             return State.IDLE, context
@@ -385,6 +430,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if pipeline.dictation is not None and pipeline.dictation.is_active:
             should_respond, response_text = pipeline.dictation.process_transcript(transcript)
             if should_respond:
+                if response_text == "goodbye":
+                    if _is_switched_off(pipeline):
+                        context.outcome = "switched_off"
+                        return State.OFF, context
+                    _close_goodbye(pipeline, context)
+                    return State.SPEAKING, context
                 pipeline.speaker.speak(response_text)
                 _write_fsm_state("speaking")
                 context.outcome = "dictation_" + response_text.replace(" ", "_")
@@ -424,6 +475,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
 
         context.transcript = transcript
         context.interpretation = interpretation
+        if interpretation.control == "goodbye":
+            if _is_switched_off(pipeline):
+                context.outcome = "switched_off"
+                return State.OFF, context
+            _close_goodbye(pipeline, context)
+            return State.SPEAKING, context
         step = pipeline.session.next_step(interpretation)
         if pipeline.transcript_log is not None:
             pipeline.transcript_log.record(
@@ -470,13 +527,27 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
 
     if state is State.CONFIRMING:
         intent = context.interpretation.intent
+        if context.operation is None:
+            context.operation = OperationToken.next()
+        if context.operation.cancelled() or _is_switched_off(pipeline):
+            context.outcome = "cancelled"
+            return State.OFF if _is_switched_off(pipeline) else State.SPEAKING, context
         try:
             verdict = confirm(
                 intent,
                 clock=pipeline.clock,
-                capture=pipeline.capture.capture,
+                capture=lambda: _capture(
+                    pipeline.capture,
+                    context.operation,
+                    mode=CaptureMode.CONFIRMATION,
+                    deadline=(context.authorization.deadline if context.authorization else None),
+                    clock=pipeline.clock.now,
+                ),
                 speaker=pipeline.speaker,
                 timeout=pipeline.confirm_timeout,
+                authorization=context.authorization,
+                token=context.operation,
+                authorization_sink=lambda auth: setattr(context, "authorization", auth),
             )
         except CaptureError:
             # PR6 (item 5): a capture failure during the confirmation gate is
@@ -485,6 +556,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             pipeline.speaker.speak(_spoken_toward(STT_ERROR_SPOKEN))
             context.outcome = "stt_error"
             return State.CONFIRMING, context
+        if verdict is Confirmation.GOODBYE:
+            if _is_switched_off(pipeline):
+                context.outcome = "switched_off"
+                return State.OFF, context
+            _close_goodbye(pipeline, context)
+            return State.SPEAKING, context
         if verdict is Confirmation.CONFIRMED:
             context.outcome = "confirmed"
             return State.EXECUTING, context
@@ -492,6 +569,15 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.SPEAKING, context
 
     if state is State.EXECUTING:
+        if context.operation is not None and context.operation.cancelled():
+            context.outcome = "cancelled"
+            return State.OFF if _is_switched_off(pipeline) else State.SPEAKING, context
+        if context.authorization is not None and not context.authorization.consume(
+            now=pipeline.clock.now(), token=context.operation
+        ):
+            pipeline.speaker.speak(_spoken_toward(CONFIRM_TIMEOUT_SPOKEN))
+            context.outcome = "timed_out"
+            return State.SPEAKING, context
         intent = context.interpretation.intent
         if _needs_repo(intent.intent) and _resolve_repo(pipeline, context) is None:
             pipeline.speaker.speak(_spoken_toward(NO_ACTIVE_PROJECT))
@@ -524,6 +610,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if result.spoken:
             pipeline.speaker.speak(result.spoken)
         if intent.intent == "power_off_self":
+            context.active_epoch = None
             context.outcome = "powered_off"
             return State.STOPPED, context
         context.outcome = "executed" if result.ok else "failed"
@@ -549,6 +636,49 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.OFF, context
 
     return State.STOPPED, context
+
+
+def _close_goodbye(pipeline: Pipeline, context: _Context) -> None:
+    """Atomically leave active conversation before emitting its acknowledgement."""
+    if context.authorization is not None:
+        context.authorization.invalidate("goodbye")
+        logger.info("confirmation.invalidated(reason=goodbye)")
+    if context.operation is not None:
+        context.operation.cancel("goodbye")
+    context.authorization = None
+    context.operation = None
+    context.active_epoch = None
+    context.conversation_until = 0.0
+    context.conversation_after_playback = False
+    context.outcome = "goodbye"
+    logger.info("goodbye.accepted(source=voice)")
+    _write_fsm_state("idle", "goodbye")
+    pipeline.speaker.speak(_spoken_toward(GOODBYE_SPOKEN))
+
+
+def _prepare_ordinary_capture(pipeline: Pipeline, context: _Context) -> bool:
+    """Establish the playback-to-microphone readiness barrier."""
+    if context.active_epoch is None or _is_switched_off(pipeline):
+        return False
+    if _speaker_is_playing(pipeline.speaker):
+        return False
+    flush = getattr(pipeline.wake, "flush", None)
+    if callable(flush):
+        flush()
+    capturer = getattr(pipeline.wake, "capturer", None)
+    if capturer is not None:
+        drain = getattr(capturer, "flush", None)
+        if callable(drain):
+            drain(ms=config.AUDIO_FLUSH_MS)
+        start = getattr(capturer, "start", None)
+        if callable(start):
+            start()
+    if _is_switched_off(pipeline):
+        logger.info("barrier.failed epoch=%s", context.active_epoch)
+        context.active_epoch = None
+        return False
+    logger.info("barrier.ready epoch=%s", context.active_epoch)
+    return True
 
 
 def _needs_repo(intent: str) -> bool:
@@ -580,6 +710,20 @@ def _resolve_repo(pipeline: Pipeline, context: _Context) -> str | None:
         pipeline.session.switch_active_project(repo)
     pipeline.session.allocate(repo, pipeline.base_port)
     return repo
+
+
+def _capture(capture: object, operation: OperationToken, *, mode=CaptureMode.ORDINARY, deadline=None, clock=None):
+    """Call modern capture adapters while retaining source-compatible fakes."""
+    if operation.cancelled():
+        return None
+    method = getattr(capture, "capture", capture)
+    try:
+        result = method(mode=mode, deadline=deadline, operation=operation, clock=clock)
+    except TypeError as exc:
+        if "unexpected keyword" not in str(exc):
+            raise
+        result = method()
+    return None if operation.cancelled() else result
 
 
 def _is_switched_off(pipeline: Pipeline) -> bool:
@@ -994,7 +1138,7 @@ def _register_switch_signals(session: Session, switch_state, speaker=None) -> No
     signal.signal(signal.SIGUSR2, lambda *_: _flip(False))
 
 
-def _apply_switch(session: Session, switch_state=None, speaker=None) -> None:
+def _apply_switch(session: Session, switch_state=None, speaker=None, *, operation=None, authorization=None) -> None:
     """Process any pending switch signal in the main loop (safe: no signal context).
 
     Called at the top of each _tick() to apply SIGUSR1/SIGUSR2 without
@@ -1006,6 +1150,11 @@ def _apply_switch(session: Session, switch_state=None, speaker=None) -> None:
     off = _switch_pending
     _switch_pending = None
 
+    if off:
+        if operation is not None:
+            operation.cancel("switch_off")
+        if authorization is not None:
+            authorization.invalidate("switch_off")
     session.switched_off = off
     session.save()
     if off and speaker is not None:

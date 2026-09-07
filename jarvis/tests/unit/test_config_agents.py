@@ -19,7 +19,7 @@ def test_agent_profiles_have_exactly_three_expected_keys() -> None:
 def test_agent_profiles_are_complete() -> None:
     for key, profile in config.AGENT_PROFILES.items():
         assert profile["name"], key
-        assert profile["voice"].endswith("MultilingualNeural"), key
+        assert profile["voice"].endswith("Neural"), key
         assert profile["rate"], key
         assert profile["pitch"], key
         assert profile["address"], key
@@ -28,9 +28,15 @@ def test_agent_profiles_are_complete() -> None:
 
 
 def test_agent_profiles_voices_match_spec() -> None:
-    assert config.AGENT_PROFILES["jarvis"]["voice"] == "en-US-AndrewMultilingualNeural"
-    assert config.AGENT_PROFILES["friday"]["voice"] == "en-US-AvaMultilingualNeural"
-    assert config.AGENT_PROFILES["karen"]["voice"] == "en-US-EmmaMultilingualNeural"
+    assert config.AGENT_PROFILES["jarvis"]["voice"] == "es-NI-FedericoNeural"
+    assert config.AGENT_PROFILES["friday"]["voice"] == "es-PE-CamilaNeural"
+    assert config.AGENT_PROFILES["karen"]["voice"] == "es-GT-MartaNeural"
+
+
+def test_agent_profiles_use_neutral_voice_shaping() -> None:
+    for profile in config.AGENT_PROFILES.values():
+        assert profile["rate"] == "+0%"
+        assert profile["pitch"] == "+0Hz"
 
 
 def test_default_agent_is_jarvis(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,17 +49,17 @@ def test_env_override_selects_friday(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JARVIS_AGENT", "friday")
     assert config.active_agent() == config.AGENT_PROFILES["friday"]
     assert config.agent_name() == "Friday"
-    assert config.agent_voice() == "en-US-AvaMultilingualNeural"
-    assert config.agent_rate() == "+5%"
+    assert config.agent_voice() == "es-PE-CamilaNeural"
+    assert config.agent_rate() == "+0%"
     assert config.agent_pitch() == "+0Hz"
 
 
 def test_env_override_selects_karen(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JARVIS_AGENT", "karen")
     assert config.agent_name() == "Karen"
-    assert config.agent_voice() == "en-US-EmmaMultilingualNeural"
-    assert config.agent_rate() == "+3%"
-    assert config.agent_pitch() == "+5Hz"
+    assert config.agent_voice() == "es-GT-MartaNeural"
+    assert config.agent_rate() == "+0%"
+    assert config.agent_pitch() == "+0Hz"
 
 
 def test_invalid_agent_env_falls_back_to_jarvis_with_warning(

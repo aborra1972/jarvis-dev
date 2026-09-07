@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.interpreter.normalize import normalize
+from jarvis.interpreter.normalize import normalize, normalize_boundary
 
 CASES: list[tuple[str, str]] = [
     # --- basic pipeline ---
@@ -51,3 +51,9 @@ CASES: list[tuple[str, str]] = [
 @pytest.mark.parametrize(("raw", "expected"), CASES)
 def test_normalize_cases(raw: str, expected: str) -> None:
     assert normalize(raw) == expected
+
+
+def test_goodbye_boundary_normalization() -> None:
+    assert normalize_boundary("  TERMINAMOS  ") == "terminamos"
+    assert normalize_boundary("Hasta Luego") == "hasta luego"
+    assert normalize_boundary('"hasta luego"') == '"hasta luego"'

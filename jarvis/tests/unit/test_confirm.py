@@ -52,7 +52,7 @@ DESTRUCTIVE = Intent(intent="shutdown", entities={}, confidence=1.0, confirm_req
 def _run(responses: list[str | None], advance: float = 0.0) -> tuple[Confirmation, FakeSpeaker]:
     clock = FakeClock()
     capture = FakeCapture(responses)
-    speaker = FakeSpeaker()
+    speaker = VerifiedSpeaker()
 
     def advancing_capture():
         clock.advance(advance)
@@ -81,9 +81,11 @@ def test_confirm_waits_for_spoken_prompt_before_capture() -> None:
             events.append("speak:start")
             self.prompt_completed = False
 
-        def flush(self) -> None:
+        def speak_and_wait(self, text: str):
+            self.speak(text)
             self.prompt_completed = True
             events.append("speak:done")
+            return type("Completion", (), {"completed": True})()
 
     speaker = AsyncPromptSpeaker()
 
@@ -106,7 +108,7 @@ def test_confirm_aborts_on_no() -> None:
 
 def test_confirm_times_out_after_15s_of_silence() -> None:
     clock = FakeClock()
-    speaker = FakeSpeaker()
+    speaker = VerifiedSpeaker()
 
     def silence_until_deadline():
         clock.advance(CONFIRM_TIMEOUT_S + 0.1)
@@ -120,7 +122,7 @@ def test_confirm_times_out_after_15s_of_silence() -> None:
 def test_unclear_answer_keeps_listening_then_confirms() -> None:
     clock = FakeClock()
     capture = FakeCapture(["¿qué?", "dale"])
-    speaker = FakeSpeaker()
+    speaker = VerifiedSpeaker()
     verdict = confirm(DESTRUCTIVE, clock=clock, capture=capture.capture, speaker=speaker)
     assert verdict is Confirmation.CONFIRMED
 
@@ -148,3 +150,119 @@ def test_classify_response(text: str, expected: Confirmation | None) -> None:
 
 def test_confirm_timeout_constant() -> None:
     assert CONFIRM_TIMEOUT_S == 15.0
+
+
+class VerifiedSpeaker(FakeSpeaker):
+    def speak_and_wait(self, text: str):
+        self.speak(text)
+        return type("Completion", (), {"completed": True})()
+
+
+def test_prompt_completion_is_the_only_start_of_authorization_window() -> None:
+    from jarvis.orchestrator.confirm import Authorization, AuthorizationState
+
+    clock = FakeClock(10.0)
+    auth = Authorization.create("shutdown", token="op-1")
+    assert auth.state is AuthorizationState.PENDING
+    auth.verify_prompt_completion(clock.now())
+    assert auth.t0 == 10.0
+    assert auth.deadline == 25.0
+
+
+def test_unverified_prompt_fails_closed_even_when_flush_exists() -> None:
+    class UnverifiedSpeaker(FakeSpeaker):
+        def flush(self):
+            pass
+
+    verdict = confirm(
+        DESTRUCTIVE,
+        clock=FakeClock(),
+        capture=lambda: "sí",
+        speaker=UnverifiedSpeaker(),
+    )
+    assert verdict is Confirmation.ABORTED
+
+
+def test_speak_only_prompt_fails_closed_before_capture() -> None:
+    speaker = FakeSpeaker()
+    captured = False
+
+    def capture():
+        nonlocal captured
+        captured = True
+        return "sí"
+
+    verdict = confirm(DESTRUCTIVE, clock=FakeClock(), capture=capture, speaker=speaker)
+
+    assert verdict is Confirmation.ABORTED
+    assert captured is False
+
+
+def test_rejected_authorization_validation_fails_closed(monkeypatch) -> None:
+    from jarvis.orchestrator.confirm import Authorization
+
+    auth = Authorization.create("shutdown", token="op-1")
+    auth.verify_prompt_completion(0.0)
+    monkeypatch.setattr(auth, "validate", lambda *args, **kwargs: False)
+
+    verdict = confirm(
+        DESTRUCTIVE,
+        clock=FakeClock(),
+        capture=lambda: "sí",
+        speaker=VerifiedSpeaker(),
+        authorization=auth,
+        token="op-1",
+    )
+
+    assert verdict is Confirmation.ABORTED
+
+
+def test_authorization_expires_at_exclusive_deadline_and_consumes_once() -> None:
+    from jarvis.orchestrator.confirm import Authorization, AuthorizationState
+
+    auth = Authorization.create("shutdown", token="op-1")
+    auth.verify_prompt_completion(100.0)
+    assert auth.validate(Confirmation.CONFIRMED, now=114.99, token="op-1")
+    assert not auth.validate(Confirmation.CONFIRMED, now=115.0, token="op-1")
+    assert auth.state is AuthorizationState.EXPIRED
+    assert not auth.consume(now=114.0, token="op-1")
+
+
+def test_invalidation_rejects_late_result_without_renewing_prompt() -> None:
+    from jarvis.orchestrator.confirm import Authorization, AuthorizationState
+
+    auth = Authorization.create("shutdown", token="op-1")
+    auth.verify_prompt_completion(100.0)
+    auth.invalidate("off")
+    assert auth.state is AuthorizationState.INVALIDATED
+    assert not auth.validate(Confirmation.CONFIRMED, now=101.0, token="op-1")
+    assert auth.t0 == 100.0
+
+
+def test_verified_prompt_allows_confirmation() -> None:
+    verdict = confirm(
+        DESTRUCTIVE,
+        clock=FakeClock(),
+        capture=lambda: "sí",
+        speaker=VerifiedSpeaker(),
+    )
+    assert verdict is Confirmation.CONFIRMED
+
+
+def test_goodbye_invalidates_authorization_and_rejects_late_affirmative() -> None:
+    from jarvis.orchestrator.confirm import Authorization, AuthorizationState
+
+    auth = Authorization.create("shutdown", token="op-1")
+    auth.verify_prompt_completion(0.0)
+    verdict = confirm(
+        DESTRUCTIVE,
+        clock=FakeClock(),
+        capture=lambda: "terminamos",
+        speaker=VerifiedSpeaker(),
+        authorization=auth,
+        token="op-1",
+    )
+    assert verdict is Confirmation.GOODBYE
+    assert auth.state is AuthorizationState.INVALIDATED
+    assert auth.reason == "goodbye"
+    assert not auth.validate(Confirmation.CONFIRMED, now=1.0, token="op-1")

@@ -122,6 +122,8 @@ AUDIO_SAMPLE_RATE = 16000
 AUDIO_BLOCK_MS = 100
 AUDIO_SILENCE_MS = 800
 AUDIO_MAX_UTTERANCE_S = 120.0
+AUDIO_PREROLL_S = 2.0
+AUDIO_READ_POLL_S = 0.1
 AUDIO_VAD_THRESHOLD = 0.02
 # Silero VAD (T-VAD-01/02): neural voice-activity detector used as the primary
 # utterance VAD gate. Falls back to the energy SilenceVAD if the model can't
@@ -165,9 +167,9 @@ PLAYER_BIN = "paplay"
 AGENT_PROFILES: dict[str, dict] = {
     "jarvis": {
         "name": "Jarvis",
-        "voice": "en-US-AndrewMultilingualNeural",
-        "rate": "-5%",
-        "pitch": "-10Hz",
+        "voice": "es-NI-FedericoNeural",
+        "rate": "+0%",
+        "pitch": "+0Hz",
         "address": "señor",
         "announcement": "Buen día, señor. Soy Jarvis, a su servicio.",
         "personality": (
@@ -178,8 +180,8 @@ AGENT_PROFILES: dict[str, dict] = {
     },
     "friday": {
         "name": "Friday",
-        "voice": "en-US-AvaMultilingualNeural",
-        "rate": "+5%",
+        "voice": "es-PE-CamilaNeural",
+        "rate": "+0%",
         "pitch": "+0Hz",
         "address": "jefe",
         "announcement": "Buen día, jefe. Soy Friday, a su servicio.",
@@ -192,9 +194,9 @@ AGENT_PROFILES: dict[str, dict] = {
     },
     "karen": {
         "name": "Karen",
-        "voice": "en-US-EmmaMultilingualNeural",
-        "rate": "+3%",
-        "pitch": "+5Hz",
+        "voice": "es-GT-MartaNeural",
+        "rate": "+0%",
+        "pitch": "+0Hz",
         "address": "amigo",
         "announcement": "Buen día, amigo. Soy Karen, a su servicio.",
         "personality": (
@@ -302,8 +304,8 @@ TTS_ENGINE = "edge"
 # A manual EDGE_VOICE=... in .env/shell still overrides the agent's voice —
 # kept for backwards compatibility, but the agent's voice is the intended knob.
 EDGE_VOICE: str = os.environ.get("EDGE_VOICE") or AGENT_PROFILES[AGENT]["voice"]
-# Voice shaping preserves each persona's pacing and tonal profile after moving
-# to multilingual voices. Environment values remain available for fine tuning.
+# Keep shaping neutral for the selected Spanish production voices.
+# Environment values remain available for fine tuning.
 EDGE_RATE: str | None = os.environ.get("EDGE_RATE") or AGENT_PROFILES[AGENT]["rate"]
 EDGE_PITCH: str | None = os.environ.get("EDGE_PITCH") or AGENT_PROFILES[AGENT]["pitch"]
 # edge-tts chunks long text internally (~4s per 1000 chars); task results are

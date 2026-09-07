@@ -272,3 +272,18 @@ def test_policy_blocked_destructive_intent_flagged() -> None:
     assert result.intent.blocked is True
     assert result.intent.source == "golden"
     assert result.intent.confirm_required is True
+
+
+def test_exact_goodbye_is_lifecycle_control_without_llm() -> None:
+    result = resolve_intent("  HASTA LUEGO  ", provider=None, app_allowlist=ALLOWLIST)
+    assert result.control == "goodbye"
+    assert result.intent is None
+    assert result.needs_reask is False
+
+
+def test_goodbye_like_content_is_not_control() -> None:
+    result = resolve_intent('escribí "hasta luego" en la nota', provider=None, app_allowlist=ALLOWLIST)
+    assert result.control is None
+    assert result.intent is None
+    assert result.needs_reask is True
+    assert result.reason == "no_provider"

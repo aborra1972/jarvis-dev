@@ -35,6 +35,7 @@ from jarvis.audio.capture import (
     write_wav,
 )
 from jarvis.audio.playback import PlaybackError
+from jarvis.audio.pronunciation import normalize_for_tts
 from jarvis.audio.stt import STTError
 from jarvis.audio.tts import TTSError
 from jarvis.orchestrator.contracts import CaptureError
@@ -185,7 +186,7 @@ class PiperSpeaker:
     def _play(self, text: str) -> None:
         media_path = self._next_media()
         try:
-            media_path = self.tts.synthesize(text, media_path)
+            media_path = self.tts.synthesize(normalize_for_tts(text), media_path)
             self.playback.play(media_path)
             self._consecutive_tts_failures = 0  # reset on success
         except (TTSError, PlaybackError) as exc:

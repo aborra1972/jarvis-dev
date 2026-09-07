@@ -27,11 +27,13 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_22_commands_in_8_domains() -> None:
+def test_23_commands_in_8_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 22
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 22
-    assert set(DOMAIN_INTENTS) == {"opencode", "system", "files", "web", "lifecycle", "conversation", "voice"}
+    assert len(commands) == 23
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 23
+    assert set(DOMAIN_INTENTS) == {
+        "opencode", "system", "files", "web", "lifecycle", "conversation", "voice", "reminders"
+    }
 
 
 def test_destructive_intents_are_gated() -> None:
@@ -58,6 +60,7 @@ VALID_PAYLOADS: list[tuple[dict, str]] = [
     ({"intent": "create_doc", "entities": {"text": "resumen del sprint"}, "confidence": 0.95}, "create_doc"),
     ({"intent": "open_url", "entities": {"url": "https://github.com/x"}, "confidence": 0.7}, "open_url"),
     ({"intent": "web_search", "entities": {"query": "tal libreria"}, "confidence": 0.6}, "web_search"),
+    ({"intent": "set_reminder", "entities": {"text": "tomar agua en 10 minutos"}, "confidence": 0.9}, "set_reminder"),
     ({"intent": "unknown", "entities": {}, "confidence": 0.9}, "unknown"),
     # confidence coerced: int ok, missing → 0.0
     ({"intent": "help", "entities": {}, "confidence": 1}, "help"),

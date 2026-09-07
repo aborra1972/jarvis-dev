@@ -112,6 +112,7 @@ _OPEN_APP = re.compile(rf"^{_verb_alt('abrir')} (.+)$")
 _WEB_SEARCH = re.compile(rf"^{_verb_alt('buscar')} (.+)$")
 _ASK = re.compile(rf"^{_verb_alt('preguntar')}(?: a opencode)? (.+)$")
 _HELP = re.compile(rf"^(?:{_verb_alt('ayudar')}|que podes hacer|que sabes hacer|que puede hacer)$")
+_REMINDER = re.compile(r"^(?:recordame|recuerdame|recordar) (.+)$")
 
 # Create-doc patterns: common verbs that map to create_doc intent.
 # These extract free-text content (the LLM generates the document, not a shell cmd).
@@ -198,6 +199,7 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),
+    (_REMINDER, "set_reminder", _single_group("text")),
     (_HELP, "help", lambda m: {}),
 )
 

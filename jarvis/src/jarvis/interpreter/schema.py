@@ -31,6 +31,7 @@ ALLOWED_INTENTS: frozenset[str] = frozenset({
     "shutdown", "reboot", "power_off_self", "open_app", "create_doc",
     "open_file_dir", "web_search", "open_url", "help", "unknown", "execute",
     "general_qa", "register_voice",
+    "set_reminder",
     # T-SAFE-01: expanded destructive intent set (hardline golden gate).
     "format_disk", "wipe_system", "delete_all", "kill_process",
 })
@@ -58,6 +59,7 @@ DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
     "lifecycle": ("power_off_self", "help"),
     "conversation": ("general_qa",),
     "voice": ("register_voice",),
+    "reminders": ("set_reminder",),
 }
 
 INTENT_DOMAIN: dict[str, str] = {
@@ -77,6 +79,7 @@ REQUIRED_ENTITIES: dict[str, tuple[str, ...]] = {
     "open_file_dir": ("text",),
     "web_search": ("query",),
     "open_url": ("url",),
+    "set_reminder": ("text",),
 }
 
 CONFIDENCE_THRESHOLD = 0.6  # design "Interpreter": below → re-ask (RNF-4)
@@ -269,6 +272,9 @@ def build_system_prompt() -> str:
         "  'mandale un commit' → intent='execute', command='git commit'\n"
         "  'haceme un backup' → intent='execute', command='cp -r . .backup'\n"
         "  'tirá todo' → intent='execute', command='rm -rf *'\n"
+        "- set_reminder: for reminders. Keep the complete reminder request, including when, "
+        "in entities.text. Example: 'recordame sacar la ropa en 10 minutos' → "
+        "intent='set_reminder', text='sacar la ropa en 10 minutos'.\n"
         "- general_qa: for ANY question that is NOT a command, NOT a search, NOT about a repo. "
         "Use entities.query with the full question.\n"
         "  Examples:\n"

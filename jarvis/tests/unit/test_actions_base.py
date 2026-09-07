@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.actions import assistant_lifecycle, base, files, opencode, system, web
+from jarvis.actions import assistant_lifecycle, base, files, opencode, reminders, system, web
 from jarvis.interpreter.schema import ALLOWED_INTENTS, Intent
 from jarvis.orchestrator.contracts import ActionResult
 
@@ -25,6 +25,7 @@ ACTIONS_SOURCES = (
     Path(files.__file__),
     Path(web.__file__),
     Path(assistant_lifecycle.__file__),
+    Path(reminders.__file__),
 )
 
 

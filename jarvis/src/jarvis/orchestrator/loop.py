@@ -500,6 +500,16 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             )
         else:
             result = pipeline.executor.execute(intent, pipeline.session)
+        streamed_response = result.data.get("response", "")
+        history_response = result.spoken or (
+            streamed_response if isinstance(streamed_response, str) else ""
+        )
+        pipeline.session.record_turn(
+            context.transcript,
+            history_response,
+            intent=intent.intent,
+            ok=result.ok,
+        )
         if result.spoken:
             pipeline.speaker.speak(result.spoken)
         if intent.intent == "power_off_self":
@@ -646,7 +656,7 @@ def build_pipeline(
             whisper_cli=config.WHISPER_CLI,
             model_small=config.WHISPER_MODEL_TINY if config.STT_USE_TINY else config.WHISPER_MODEL,
             model_medium=config.WHISPER_MODEL_MEDIUM if config.STT_MEDIUM_PROMOTED else None,
-            prompt=config.WHISPER_PROMPT,
+            prompt=config.STT_PROMPT,
             language="es",
             gate_duration_s=config.STT_GATE_DURATION_S,
             timeout_s=config.STT_TIMEOUT_S,
@@ -691,7 +701,7 @@ def build_pipeline(
         playback = Playback(player=config.PLAYER_BIN, timeout_s=config.PLAY_TIMEOUT_S)
         speaker = PiperSpeaker(tts, playback, out_dir=config.LOGS_REPLY_DIR)
     if executor is None:
-        executor = build_registry()
+        executor = build_registry(speaker=speaker)
 
     # Wire LLM provider for interpreter (ADR-2: Ollama = Jarvis's brain)
     _ollama = None
@@ -828,7 +838,10 @@ def start() -> int:
     another terminal can signal this process. The loop runs until
     power_off_self (PR6).
     """
-    session = load_state(str(config.STATE_FILE))
+    session = load_state(
+        str(config.STATE_FILE),
+        history_path=str(config.HISTORY_FILE),
+    )
     # Ensure Ollama is running before building the LLM pipeline
     provider_mode = config.LLM_PROVIDER
     if provider_mode in ("local", "auto"):

@@ -114,7 +114,7 @@ def test_build_pipeline_writes_logs_under_logs_dir(monkeypatch) -> None:
     monkeypatch.setattr(loop, "UtteranceCapture", _rec("UtteranceCapture"))
     monkeypatch.setattr(loop, "PiperSpeaker", _rec("PiperSpeaker"))
     monkeypatch.setattr(loop, "MicSwitch", lambda *a, **k: (lambda: False))
-    monkeypatch.setattr(loop, "build_registry", lambda: "executor")
+    monkeypatch.setattr(loop, "build_registry", lambda **kwargs: "executor")
 
     pipeline = loop.build_pipeline(Session(), cwd="/tmp")
 

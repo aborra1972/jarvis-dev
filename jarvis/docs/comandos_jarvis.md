@@ -36,6 +36,12 @@
 - "¿Cuál es tu nombre?"
 - "apagá" / "power off"
 
+### Recordatorios
+- "recordame sacar la ropa en 10 minutos"
+- "recordame revisar el horno en media hora"
+- "recordame llamar a mamá a las 3 pm"
+- "recordame tomar el remedio a las 21:30"
+
 ---
 
 ## Solución rápida

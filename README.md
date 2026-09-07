@@ -20,6 +20,8 @@ español rioplatense, y ejecuta acciones — todo sin enviar datos a la nube.
 - **GUI GTK3**: panel de control con estado en tiempo real (escuchando/pensando/ejecutando)
 - **Privacidad total**: todo queda en tu máquina
 - **Dictation mode**: input de texto por voz en cualquier app (`jarvis dictation`)
+- **Recordatorios persistentes**: aviso de escritorio y por voz, incluso tras reiniciar Jarvis
+- **Historial de conversación**: turnos completos guardados atómicamente entre reinicios
 - **Detección robusta al ruido**: Silero VAD ONNX + calibración de ruido ambiente al wake
 - **Modo conversación**: tras un comando exitoso, respondé seguimientos sin repetir "jarvis" (8s configurables)
 - **Barge-in**: interrumpí a Jarvis en medio de la respuesta repitiendo el wake word (opcional, off por defecto)
@@ -269,6 +271,17 @@ kill -SIGUSR2 $(cat ~/.local/state/jarvis/jarvis.pid)
 | "mostrá el estado" | Estado del proyecto activo |
 | "ayuda" | Muestra ayuda |
 
+### Recordatorios
+
+| Comando | Acción |
+|---------|--------|
+| "recordame sacar la ropa en 10 minutos" | Programa un aviso relativo |
+| "recordame llamar a mamá a las 3 pm" | Programa un aviso para una hora concreta |
+
+Los recordatorios pendientes se guardan en
+`~/.local/share/jarvis/reminders.json`. Al vencer, Jarvis muestra una
+notificación de escritorio con `notify-send` y reproduce el aviso por voz.
+
 ### Desarrollo (agentes IA por voz)
 
 | Comando | Acción |
@@ -411,7 +424,8 @@ EDGE_VOICE = "<voz del agente>"  # Sigue al agente activo (ver "Agente" abajo)
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1                 # 1=rápido, 5=preciso
 STT_USE_TINY = False             # True: ggml-tiny.bin (~2-5x más rápido)
-WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+STT_PHRASES_FILE = "jarvis/data/standard_phrases_rioplatense.txt"
+STT_PROMPT = "<cargado desde STT_PHRASES_FILE>"  # STT_PROMPT en .env lo reemplaza
 
 # LLM
 LLM_PROVIDER = "local"           # "local" | "gemini" | "auto"
@@ -422,6 +436,9 @@ OLLAMA_TIMEOUT_S = 30.0          # cold start necesita tiempo
 USAGE_SUGGESTIONS_FILE = "~/.local/state/jarvis/usage_suggestions.json"
 USAGE_PATTERN_MIN_COUNT = 5      # Mínima frecuencia para sugerir un patrón
 
+# Historial persistente
+HISTORY_FILE = "~/.local/share/jarvis/history.json"
+
 # Seguridad
 AUTO_EXECUTE = False             # False = confirmar antes de ejecutar comandos
 SAFETY_GATE = "strict"           # "auto" | "strict" | "yolo" (Capa 3, T-SAFE-02)
@@ -430,6 +447,21 @@ DANGEROUS_PATTERNS = 40          # conteo real de patrones de peligro (Capa 2, d
 # Apps permitidas
 ALLOWED_APPS = {"firefox", "terminal", "gnome-terminal", "nemo", ...}
 ```
+
+Cada acción completada agrega un turno a `HISTORY_FILE` con timestamp, texto
+del usuario, respuesta del asistente, intent y resultado. La escritura usa un
+archivo temporal y reemplazo atómico para evitar corrupción ante cortes.
+
+### Pronunciación y vocabulario
+
+`STT_PHRASES_FILE` contiene nombres, órdenes rioplatenses y términos de
+desarrollo que se pasan a `whisper-cli --prompt`. Podés reemplazar la lista
+completa con `STT_PROMPT` o apuntar a otro archivo con `STT_PHRASES_FILE`.
+
+Antes de sintetizar, Jarvis corrige tildes seguras, normaliza puntuación y aplica
+un diccionario fonético verificable para términos extranjeros. Por ejemplo,
+`Google`, `GitHub`, `OpenCode` y `pytest` se preparan como texto castellano. La
+capa se aplica tanto a Edge TTS como al fallback Piper y no usa SSML personalizado.
 
 ### Agente / personaje
 
@@ -641,7 +673,7 @@ Ver `docs/github-jarvis-study.md` para el estudio completo de 10+ proyectos.
 | Dictation mode | ✅ | ✅ | ❌ | ❌ |
 | UI cinematográfica | 🟡 Post-MVP | ❌ | ❌ | ✅ Three.js orb |
 | Fuzzy matching | ✅ rapidfuzz | ✅ rapidfuzz | ❌ | ❌ |
-| Recordatorios | 🟡 Post-MVP | ✅ | ❌ | ✅ |
+| Recordatorios | ✅ Persistentes + TTS | ✅ | ❌ | ✅ |
 
 ---
 

@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from jarvis import config
 from jarvis.interpreter.schema import Intent
 from jarvis.orchestrator.contracts import ActionResult
 
@@ -98,9 +99,9 @@ def blocked_destructive(intent: Intent, session: object) -> ActionResult:
     )
 
 
-def build_registry() -> Registry:
-    """Wire every executor handler (8 domains, 22 intents) into one registry."""
-    from jarvis.actions import assistant_lifecycle, files, opencode, system, web
+def build_registry(*, speaker: object | None = None) -> Registry:
+    """Wire every executor handler into one registry."""
+    from jarvis.actions import assistant_lifecycle, files, opencode, reminders, system, web
 
     registry = Registry()
     oc = opencode.OpenCodeExecutor()
@@ -119,6 +120,11 @@ def build_registry() -> Registry:
     registry.register("help", assistant_lifecycle.handle_help)
     registry.register("general_qa", assistant_lifecycle.handle_general_qa)
     registry.register("register_voice", assistant_lifecycle.handle_register_voice)
+    if speaker is None:
+        registry.register("set_reminder", reminders.unavailable)
+    else:
+        scheduler = reminders.ReminderScheduler(config.REMINDERS_FILE, speaker=speaker)
+        registry.register("set_reminder", scheduler.handle_set_reminder)
     # T-SAFE-01 expanded destructive intents: recognized, never executable.
     for intent in ("format_disk", "wipe_system", "delete_all", "kill_process"):
         registry.register(intent, blocked_destructive)

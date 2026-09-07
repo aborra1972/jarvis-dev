@@ -84,3 +84,26 @@ def test_agent_announcement_follows_active_agent(
 ) -> None:
     monkeypatch.setenv("JARVIS_AGENT", "karen")
     assert config.agent_announcement() == config.AGENT_PROFILES["karen"]["announcement"]
+
+
+def test_stt_prompt_loads_rioplatense_phrases() -> None:
+    assert config.STT_PHRASES_FILE.name == "standard_phrases_rioplatense.txt"
+    assert "abrí" in config.STT_PROMPT
+    assert "recordame" in config.STT_PROMPT
+    assert config.WHISPER_PROMPT == config.STT_PROMPT
+
+
+def test_stt_prompt_ignores_comments_and_blank_lines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    path = tmp_path / "phrases.txt"
+    path.write_text("# comentario\n\nabrí\nGitHub\n", encoding="utf-8")
+    monkeypatch.delenv("STT_PROMPT", raising=False)
+    assert config._load_stt_prompt(path) == "abrí, GitHub"
+
+
+def test_stt_prompt_environment_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("STT_PROMPT", "frase personalizada")
+    assert config._load_stt_prompt(tmp_path / "missing.txt") == "frase personalizada"

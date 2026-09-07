@@ -348,6 +348,7 @@ class FakeTranscriptLog:
 
 def test_loop_records_transcripts_to_journal(tmp_path: Path) -> None:
     journal = FakeTranscriptLog()
+    history_path = tmp_path / "history.json"
     pipeline = Pipeline(
         clock=FakeClock(),
         wake=FakeWake([True]),
@@ -355,7 +356,10 @@ def test_loop_records_transcripts_to_journal(tmp_path: Path) -> None:
         interpreter=FakeInterpreter([_interp(_intent())]),
         speaker=FakeSpeaker(),
         executor=FakeExecutor(),
-        session=load_state(str(tmp_path / "state.json")),
+        session=load_state(
+            str(tmp_path / "state.json"),
+            history_path=str(history_path),
+        ),
         cwd=str(tmp_path),
         git_runner=lambda cwd: "/repo",
         transcript_log=journal,
@@ -363,6 +367,11 @@ def test_loop_records_transcripts_to_journal(tmp_path: Path) -> None:
     outcome = run(pipeline, iterations=4)
     assert outcome == "executed"
     assert journal.records == [("abrí firefox", "open_app", "execute")]
+    history = json.loads(history_path.read_text())
+    assert history[0]["user"] == "abrí firefox"
+    assert history[0]["assistant"] == "ok"
+    assert history[0]["intent"] == "open_app"
+    assert history[0]["ok"] is True
 
 
 def test_loop_off_state_never_consults_wake_or_capture(tmp_path: Path) -> None:

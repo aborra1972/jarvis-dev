@@ -41,7 +41,7 @@ def _recording(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
     monkeypatch.setattr(loop, "UtteranceCapture", lambda *a, **k: "capture")
     monkeypatch.setattr(loop, "PiperSpeaker", lambda *a, **k: "speaker")
     monkeypatch.setattr(loop, "MicSwitch", lambda *a, **k: (lambda: False))
-    monkeypatch.setattr(loop, "build_registry", lambda: "executor")
+    monkeypatch.setattr(loop, "build_registry", lambda **kwargs: "executor")
     return calls
 
 
@@ -61,6 +61,7 @@ def test_build_pipeline_wires_real_adapters_from_config(
     assert calls["build_wake_detector"]["kwargs"]["engine"] == config.WAKE_ENGINE
     stt = calls["WhisperSTT"]["kwargs"]
     assert stt["whisper_cli"] == config.WHISPER_CLI
+    assert stt["prompt"] == config.STT_PROMPT
     assert stt["model_small"] == config.WHISPER_MODEL
     assert stt["beam"] == config.WHISPER_BEAM
     assert stt["vad_model"] == config.WHISPER_VAD_MODEL

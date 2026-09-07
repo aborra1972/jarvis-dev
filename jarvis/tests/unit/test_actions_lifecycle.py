@@ -103,6 +103,7 @@ def test_stream_general_qa_uses_agent_personality_as_system_prompt(
         _intent("general_qa", {"query": "hola"}), None, spoken.append
     )
     assert result.ok is True
+    assert result.data["response"] == "Hola, jefe. Listo."
     assert "Friday" in captured["body"]["system"]
     assert "jefe" in captured["body"]["system"]
     assert spoken == ["Hola, jefe.", "Listo."]  # sentence split consumes the space

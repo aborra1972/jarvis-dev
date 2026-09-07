@@ -69,7 +69,29 @@ PIPER_CONFIG = SPIKE / "es_MX-ald-medium.onnx.json"
 EDGE_TTS_BIN = APP_ROOT / ".venv" / "bin" / "edge-tts"
 
 # --- Voice pipeline (PR5) -----------------------------------------------------
-WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+STT_PHRASES_FILE = Path(
+    os.environ.get("STT_PHRASES_FILE", APP_ROOT / "data" / "standard_phrases_rioplatense.txt")
+)
+
+
+def _load_stt_prompt(path: Path = STT_PHRASES_FILE) -> str:
+    override = os.environ.get("STT_PROMPT")
+    if override is not None:
+        return override.strip()
+    try:
+        phrases = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    except OSError:
+        phrases = []
+    return ", ".join(phrases) or "asistente de desarrollo, comandos de sistema y navegador"
+
+
+STT_PROMPT = _load_stt_prompt()
+# Existing callers may still import this public configuration name.
+WHISPER_PROMPT = STT_PROMPT
 # PR6 integration: whisper.cpp 1.9.x beam size flag is -bs; keep it at 1 (fast).
 WHISPER_BEAM = 1
 # whisper's own VAD model (silero). None = omit `--vad`; the app-level
@@ -294,6 +316,8 @@ OPCODE_BASE_PORT = 32111
 
 # --- Session state (RF-6): active project + repo→{port, sessionIDs} ----------
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
+REMINDERS_FILE = Path.home() / ".local" / "share" / "jarvis" / "reminders.json"
+HISTORY_FILE = Path.home() / ".local" / "share" / "jarvis" / "history.json"
 
 # --- Runtime dirs (task 6.3): local deletable logs (RNF-3) + signal switch ---
 RUN_DIR = Path.home() / ".local" / "state" / "jarvis"

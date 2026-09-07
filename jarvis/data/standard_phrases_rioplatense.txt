@@ -1,0 +1,33 @@
+# Wake names
+Jarvis
+Friday
+Karen
+
+# Common Rioplatense commands
+abrí
+cerrá
+buscá
+creá
+mandá
+mostrá
+mirá
+ejecutá
+configurá
+implementá
+revisá
+corregí
+recordame
+apagá
+reiniciá
+
+# Development vocabulary
+OpenCode
+GitHub
+pytest
+commit
+push
+pull request
+repositorio
+terminal
+Firefox
+Google

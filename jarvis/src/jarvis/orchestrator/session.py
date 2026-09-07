@@ -17,6 +17,7 @@ import tempfile
 import uuid
 import fcntl
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -35,12 +36,23 @@ class RepoSession:
     session_interp: str
 
 
+@dataclass(frozen=True)
+class ConversationTurn:
+    timestamp: str
+    user: str
+    assistant: str
+    intent: str
+    ok: bool
+
+
 @dataclass
 class Session:
     active_project: str | None = None
     repos: dict[str, int] = field(default_factory=dict)
     reask_attempts: int = 0
     state_path: str = ""
+    history_path: str = ""
+    history: list[ConversationTurn] = field(default_factory=list)
     switched_off: bool = False
     work_sessions: dict[str, str] = field(default_factory=dict)
     _allocated: dict[str, RepoSession] = field(default_factory=dict)
@@ -119,6 +131,54 @@ class Session:
             return "reask"
         return "ignore"
 
+    def record_turn(self, user: str, assistant: str, *, intent: str, ok: bool) -> None:
+        """Append and immediately persist one completed conversation turn."""
+        if not self.history_path or not user:
+            return
+        self.history.append(
+            ConversationTurn(
+                timestamp=datetime.now().astimezone().isoformat(timespec="seconds"),
+                user=user,
+                assistant=assistant,
+                intent=intent,
+                ok=ok,
+            )
+        )
+        self._save_history()
+
+    def _save_history(self) -> None:
+        path = Path(self.history_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [
+            {
+                "timestamp": turn.timestamp,
+                "user": turn.user,
+                "assistant": turn.assistant,
+                "intent": turn.intent,
+                "ok": turn.ok,
+            }
+            for turn in self.history
+        ]
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=path.name + ".",
+                suffix=".tmp",
+                delete=False,
+            ) as temp:
+                temp_path = Path(temp.name)
+                json.dump(payload, temp, ensure_ascii=False, indent=2)
+                temp.write("\n")
+                temp.flush()
+                os.fsync(temp.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
     def save(self) -> None:
         if not self.state_path:
             return
@@ -159,8 +219,30 @@ class Session:
                     temp_path.unlink(missing_ok=True)
 
 
-def load_state(path: str) -> Session:
-    session = Session(state_path=path)
+def load_state(path: str, *, history_path: str = "") -> Session:
+    session = Session(state_path=path, history_path=history_path)
+    if history_path:
+        history_file = Path(history_path)
+        try:
+            history_payload = json.loads(history_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            history_payload = []
+        if isinstance(history_payload, list):
+            for item in history_payload:
+                try:
+                    if not isinstance(item, dict) or not isinstance(item["ok"], bool):
+                        continue
+                    session.history.append(
+                        ConversationTurn(
+                            timestamp=str(item["timestamp"]),
+                            user=str(item["user"]),
+                            assistant=str(item["assistant"]),
+                            intent=str(item["intent"]),
+                            ok=item["ok"],
+                        )
+                    )
+                except (KeyError, TypeError):
+                    continue
     file = Path(path)
     try:
         payload = json.loads(file.read_text())

@@ -283,7 +283,7 @@ def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
     speaker.speak("hecho")
     speaker.flush()
 
-    assert tts.texts == ["hecho"]
+    assert tts.texts == ["hecho."]
     assert playback.played == tts.outs
 
 
@@ -342,7 +342,7 @@ def test_piper_speaker_preserves_order_and_delivers_all(tmp_path: Path) -> None:
     speaker.speak("tres")
     speaker.flush()
 
-    assert tts.texts == ["uno", "dos", "tres"]
+    assert tts.texts == ["uno.", "dos.", "tres."]
     assert playback.played == tts.outs
 
 
@@ -370,7 +370,7 @@ def test_piper_speaker_is_playing_reports_true_until_drained(tmp_path: Path) -> 
 
     speaker.flush()
     assert speaker.is_playing() is False
-    assert tts.texts == ["hola"]
+    assert tts.texts == ["hola."]
 
 
 def test_piper_speaker_worker_survives_error_and_continues(tmp_path: Path) -> None:
@@ -382,7 +382,7 @@ def test_piper_speaker_worker_survives_error_and_continues(tmp_path: Path) -> No
     speaker.speak("sigue")
     speaker.flush()
 
-    assert tts.texts == ["sigue"]
+    assert tts.texts == ["sigue."]
     assert playback.played == tts.outs
     assert speaker.is_playing() is False
 
@@ -395,7 +395,7 @@ def test_piper_speaker_close_stops_worker_and_speak_after_is_safe(tmp_path: Path
     speaker.flush()
     speaker.close()
     speaker.speak("b")  # must not raise after close
-    assert tts.texts == ["a"]
+    assert tts.texts == ["a."]
 
 
 def test_loop_drops_wake_while_speaker_is_playing(tmp_path: Path) -> None:
@@ -510,7 +510,7 @@ def test_loop_listening_uses_capturer_wake_and_stt(
     assert outcome == "executed"
     assert wake.calls == 1
     assert len(stt.calls) == 1  # listening transcribes one captured utterance
-    assert tts.texts == ["ok"]  # speaking goes through TTS + playback
+    assert tts.texts == ["ok."]  # speaking goes through TTS + playback
     assert playback.played == tts.outs
     assert capturer.reads > 0
 
@@ -572,7 +572,7 @@ def test_loop_confirmation_survives_stt_failure_and_retries(
 
     assert outcome == "executed"
     assert STT_ERROR_SPOKEN in tts.texts
-    assert tts.texts[-1] == "ok"
+    assert tts.texts[-1] == "ok."
     assert stt.calls == 3  # listen + failed confirm + successful confirm
 
 

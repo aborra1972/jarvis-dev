@@ -251,7 +251,11 @@ def stream_general_qa(intent: Intent, session: object, speak_fn) -> ActionResult
         logger.error("stream_general_qa failed: %s", exc)
         if not full_text_parts:
             speak_fn(f"Lo lamento, {config.agent_address()}, no puedo responder eso ahora.")
-        return ActionResult(ok=bool(full_text_parts), spoken="")
+        return ActionResult(
+            ok=bool(full_text_parts),
+            spoken="",
+            data={"response": " ".join(full_text_parts)},
+        )
 
     remainder = buffer.strip()
     if remainder:
@@ -263,4 +267,8 @@ def stream_general_qa(intent: Intent, session: object, speak_fn) -> ActionResult
         return ActionResult(ok=True, spoken="")
 
     logger.info("stream_general_qa response: %s", " ".join(full_text_parts)[:100])
-    return ActionResult(ok=True, spoken="")
+    return ActionResult(
+        ok=True,
+        spoken="",
+        data={"response": " ".join(full_text_parts)},
+    )

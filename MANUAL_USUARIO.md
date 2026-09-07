@@ -275,6 +275,41 @@ Ver la referencia completa en `docs/comandos_jarvis.md`.
 | **Web** | "buscá [término]", "abrí [url]" |
 | **Desarrollo** | "implementá el test", "revisá el PR", "corregí warnings" |
 | **Asistente** | "¿Qué podés hacer?", "apagá", "dictation" |
+| **Recordatorios** | "recordame tomar agua en 10 minutos", "recordame llamar a mamá a las 3 pm" |
+
+### Recordatorios
+
+Podés indicar un tiempo relativo o una hora concreta:
+
+```text
+"recordame sacar la ropa en 10 minutos"
+"recordame revisar el horno en media hora"
+"recordame llamar a mamá a las 3 pm"
+"recordame tomar el remedio a las 21:30"
+```
+
+Jarvis guarda los pendientes en `~/.local/share/jarvis/reminders.json`. Cuando
+vence uno, muestra una notificación de escritorio y lo anuncia por voz. Los
+recordatorios futuros se restauran automáticamente al volver a iniciar Jarvis.
+
+### Historial de conversación
+
+Los turnos completados se guardan en
+`~/.local/share/jarvis/history.json`. Cada entrada contiene la solicitud, la
+respuesta, el intent ejecutado, el resultado y la fecha. Jarvis carga este
+archivo al iniciar y lo actualiza mediante reemplazo atómico para que un corte
+no deje JSON incompleto.
+
+### Pronunciación del asistente
+
+El vocabulario de `jarvis/data/standard_phrases_rioplatense.txt` ayuda a Whisper
+a reconocer órdenes como "abrí", "buscá", "revisá" y "recordame". Es una ayuda
+de entrada y no modifica la respuesta.
+
+La salida TTS usa otra capa: corrige tildes conocidas, conserva la puntuación y
+convierte términos extranjeros mediante excepciones fonéticas verificadas. El
+diccionario inicial incluye Google, GitHub, OpenCode y pytest. No se agregan
+tildes inventadas de forma general porque podrían empeorar la pronunciación.
 
 ### Comandos de confirmación
 
@@ -341,7 +376,8 @@ EDGE_VOICE = "es-MX-JorgeNeural"
 WHISPER_MODEL = SPIKE / "ggml-small.bin"
 WHISPER_BEAM = 1
 STT_USE_TINY = False
-WHISPER_PROMPT = "asistente de desarrollo, comandos de sistema y navegador"
+STT_PHRASES_FILE = "jarvis/data/standard_phrases_rioplatense.txt"
+STT_PROMPT = "<cargado desde STT_PHRASES_FILE>"
 
 # LLM
 LLM_PROVIDER = "local"           # "local" | "gemini" | "auto"

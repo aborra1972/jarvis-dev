@@ -131,8 +131,8 @@
 **Archivos**: `jarvis/src/jarvis/config.py`
 **Que hacer**:
 - `AUTO_EXECUTE = False` ✅ (ya existe: False = confirmar antes de ejecutar)
-- `SAFETY_GATE = "strict"` (auto/strict/yolo) — pendiente
-- `DANGEROUS_PATTERNS = 40` — pendiente
+- `SAFETY_GATE = "strict"` (auto/strict/yolo) — completado
+- `DANGEROUS_PATTERNS = 40` — completado
 
 **Criterio de completitud**:
 - [x] `AUTO_EXECUTE` existe y está documentado (README + MANUAL)
@@ -238,30 +238,40 @@
 - Persistencia en `~/.local/share/jarvis/reminders.json`
 
 **Criterio de completitud**:
-- [ ] Parseo de tiempo funciona
-- [ ] Timer dispara notificacion
-- [ ] notify-send + TTS al vencer
-- [ ] Persistencia funciona
+- [x] Parseo de tiempo funciona
+- [x] Timer dispara notificacion
+- [x] notify-send + TTS al vencer
+- [x] Persistencia funciona
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
 ## Fase 7: Standard Phrases y Persistencia (Prioridad 17-18)
 
 ### T-PHRASES-01: Standard phrases rioplatenses
-**Archivos**: `jarvis/src/jarvis/config.py`, `jarvis/data/standard_phrases_rioplatense.txt`
+**Archivos**: `jarvis/src/jarvis/config.py`, `jarvis/data/standard_phrases_rioplatense.txt`, capa TTS
 **Que hacer**:
 - Crear archivo con palabras que el usuario realmente dice
 - Pasar como `--prompt` a whisper-cli para sesgar STT
 - Incluir: "abri", "cerre", "busca", "crea", "manda", etc.
+- Agregar una normalizacion TTS separada que prepare el texto hablado en castellano
+
+**Reglas solicitadas para TTS**:
+1. Usar siempre tildes ortograficas estrictas, incluso en mayusculas.
+2. Usar comas y puntos para marcar pausas naturales de respiracion y enfasis.
+3. Escribir foneticamente en castellano las palabras ambiguas o extranjeras cuando sea necesario (por ejemplo, "Gugel" en vez de "Google").
+4. Forzar la silaba tonica solo mediante excepciones foneticas verificadas; no introducir tildes invalidas globalmente.
+
+**Separacion tecnica**: el archivo de frases sesga la entrada STT de Whisper. Las reglas anteriores transforman exclusivamente la salida enviada al sintetizador TTS.
 
 **Criterio de completitud**:
-- [ ] Archivo `standard_phrases_rioplatense.txt` creado
-- [ ] Whisper usa prompt con frases
-- [ ] Config option `STT_PROMPT`
+- [x] Archivo `standard_phrases_rioplatense.txt` creado
+- [x] Whisper usa prompt con frases
+- [x] Config option `STT_PROMPT`
+- [x] Normalizador TTS cubierto por pruebas de tildes, puntuacion y terminos extranjeros
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ### T-HIST-01: Persistencia de conversacion atomica
 **Archivos**: `jarvis/src/jarvis/orchestrator/session.py`
@@ -272,11 +282,11 @@
 - No se corrompe si se corta
 
 **Criterio de completitud**:
-- [ ] Historial se guarda atomicamente
-- [ ] Se carga al iniciar
-- [ ] No se corrompe con cortes
+- [x] Historial se guarda atomicamente
+- [x] Se carga al iniciar
+- [x] No se corrompe con cortes
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -308,21 +318,27 @@
 | 3. Seguridad | 2 | 2 | 0 |
 | 4. NLU | 2 | 2 | 0 |
 | 5. Multi-turn | 2 | 2 | 0 |
-| 6. Rapidfuzz | 2 | 0 | 2 |
-| 7. Phrases/Hist | 2 | 0 | 2 |
+| 6. Rapidfuzz/Recordatorios | 2 | 2 | 0 |
+| 7. Phrases/Hist | 2 | 2 | 0 |
 | 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **12** | **5** |
+| **Total** | **17** | **16** | **1** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-FUZZY-01**: reemplazar difflib con rapidfuzz (fuzzy matching)
-(ver sección Fase 6). T-SAFE-01 y T-SAFE-02 completadas.
+**T-AGENT-01**: expandir comandos de agente por voz
+(ver sección Fase 8).
 
 Fases 1-2-3-4-5 (Diagnostico, VAD/Audio, Seguridad, NLU, Multi-turn) completadas
 (2026-09-05: fusionados cambios del estudio + robustez al ruido + modo conversacion).
 
+## Pendientes retomados el 2026-09-06
+
+1. Validar manualmente el flujo completo de microfono y GUI con Jarvis, Friday y Karen.
+2. Ejecutar **T-AGENT-01** (comandos de OpenCode por voz expandidos).
+3. Tras validar Jarvis Control, escanear cada proyecto de Windows con su propio indice CodeGraph.
+
 ---
 
-*Ultima actualizacion: 2026-09-05*
+*Ultima actualizacion: 2026-09-06*

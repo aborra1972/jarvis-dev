@@ -14,7 +14,7 @@ import pytest
 
 from jarvis.interpreter import Interpretation
 from jarvis.interpreter.schema import Intent
-from jarvis.orchestrator.session import RepoSession, Session, load_state
+from jarvis.orchestrator.session import ConversationTurn, RepoSession, Session, load_state
 
 
 def _intent(**overrides) -> Intent:
@@ -101,6 +101,54 @@ def test_save_does_not_reuse_another_writer_temp_file(tmp_path: Path) -> None:
 
     assert legacy_temp.read_text() == "owned by another writer"
     assert json.loads(path.read_text())["switched_off"] is False
+
+
+def test_conversation_history_is_saved_immediately_and_loaded(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    history_path = tmp_path / "history.json"
+    session = load_state(state_path, history_path=str(history_path))
+
+    session.record_turn(
+        "abrí firefox",
+        "Abriendo firefox, señor.",
+        intent="open_app",
+        ok=True,
+    )
+
+    saved = json.loads(history_path.read_text())
+    assert saved[0]["user"] == "abrí firefox"
+    assert saved[0]["assistant"] == "Abriendo firefox, señor."
+    assert saved[0]["intent"] == "open_app"
+    assert saved[0]["ok"] is True
+    assert saved[0]["timestamp"]
+    assert not list(tmp_path.glob("history.json.*.tmp"))
+
+    loaded = load_state(state_path, history_path=str(history_path))
+    assert loaded.history == [ConversationTurn(**saved[0])]
+
+
+def test_conversation_history_recovers_from_corrupt_json(tmp_path: Path) -> None:
+    history_path = tmp_path / "history.json"
+    history_path.write_text("{not json")
+
+    session = load_state(tmp_path / "state.json", history_path=str(history_path))
+
+    assert session.history == []
+    session.record_turn("hola", "Hola.", intent="general_qa", ok=True)
+    assert json.loads(history_path.read_text())[0]["user"] == "hola"
+
+
+def test_conversation_history_skips_malformed_entries(tmp_path: Path) -> None:
+    history_path = tmp_path / "history.json"
+    history_path.write_text(json.dumps([
+        {"timestamp": "x", "user": "hola", "assistant": "hola", "intent": "general_qa", "ok": True},
+        {"timestamp": "x", "user": "bad", "assistant": "bad", "intent": "general_qa", "ok": "yes"},
+        {"missing": "fields"},
+    ]))
+
+    session = load_state(tmp_path / "state.json", history_path=str(history_path))
+
+    assert [turn.user for turn in session.history] == ["hola"]
 
 
 def test_start_detects_active_project_via_git(tmp_path: Path) -> None:

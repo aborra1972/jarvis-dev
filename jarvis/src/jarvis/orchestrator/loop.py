@@ -121,6 +121,7 @@ class _Context:
     # now() is before it, IDLE skips wake-word detection entirely and goes
     # straight to LISTENING for a follow-up. 0.0 means no active window.
     conversation_until: float = 0.0
+    conversation_after_playback: bool = False
     # True when LISTENING was entered from the name-gated wake (engine
     # "name"): the utterance must start with the active agent's name, verified
     # after STT. False for conversation-mode follow-ups and reask retries.
@@ -177,6 +178,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     # This runs in the main loop (not a signal handler) so I/O is safe.
     _apply_switch(pipeline.session, pipeline.switch_state, pipeline.speaker)
     if state is State.IDLE:
+        playback_just_finished = False
         if _is_switched_off(pipeline):
             context.outcome = "switched_off"
             return State.OFF, context
@@ -238,7 +240,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # not from when the FSM entered SPEAKING (which was seconds earlier).
         if context.was_playing:
             context.last_spoke_at = time.monotonic()
+            if context.conversation_after_playback and config.CONVERSATION_WINDOW_S > 0:
+                context.conversation_until = context.last_spoke_at + config.CONVERSATION_WINDOW_S
+                context.conversation_after_playback = False
             context.was_playing = False
+            playback_just_finished = True
         # Post-TTS cooldown: wait for speaker hardware to fully stop after
         # the last reply so the mic doesn't capture residual audio.
         if context.last_spoke_at:
@@ -265,7 +271,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # the person say "jarvis" again for every single exchange. Expires
         # on its own (config.CONVERSATION_WINDOW_S) so Jarvis doesn't keep
         # listening indefinitely after the conversation is actually over.
-        if context.conversation_until and time.monotonic() < context.conversation_until:
+        if (
+            not playback_just_finished
+            and context.conversation_until
+            and time.monotonic() < context.conversation_until
+        ):
             context.conversation_until = 0.0
             pipeline.session.reask_attempts = 0
             try:
@@ -279,7 +289,8 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             _write_fsm_state("listening")
             context.wake_gated = False  # follow-up window: no name gate
             return State.LISTENING, context
-        context.conversation_until = 0.0
+        if not playback_just_finished:
+            context.conversation_until = 0.0
         # Non-TTS returns from LISTENING stop the mic (silence, wrong_speaker,
         # name_mismatch) and nothing else restarted it: ensure the mic is open
         # before the next wake scan. start() is idempotent; flushing the wake
@@ -517,7 +528,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.STOPPED, context
         context.outcome = "executed" if result.ok else "failed"
         if result.ok and config.CONVERSATION_WINDOW_S > 0:
-            context.conversation_until = time.monotonic() + config.CONVERSATION_WINDOW_S
+            context.conversation_after_playback = True
         _write_fsm_state("speaking")
         return State.SPEAKING, context
 

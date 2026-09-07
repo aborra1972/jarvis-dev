@@ -94,6 +94,9 @@ def confirm(
     so the confirmation loop survives transient mic errors.
     """
     speaker.speak(confirmation_prompt(intent))
+    flush = getattr(speaker, "flush", None)
+    if callable(flush):
+        flush()
     deadline = clock.now() + timeout
     hard_deadline = time.monotonic() + (timeout * _HARD_SAFETY_MULTIPLIER)
     while True:

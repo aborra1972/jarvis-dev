@@ -69,6 +69,35 @@ def test_confirm_proceeds_on_yes() -> None:
     assert len(speaker.said) == 1
 
 
+def test_confirm_waits_for_spoken_prompt_before_capture() -> None:
+    """The mic must not open for confirmation until the prompt has completed."""
+    events: list[str] = []
+
+    class AsyncPromptSpeaker:
+        def __init__(self) -> None:
+            self.prompt_completed = False
+
+        def speak(self, text: str) -> None:
+            events.append("speak:start")
+            self.prompt_completed = False
+
+        def flush(self) -> None:
+            self.prompt_completed = True
+            events.append("speak:done")
+
+    speaker = AsyncPromptSpeaker()
+
+    def capture() -> str:
+        events.append("capture")
+        return "sí"
+
+    verdict = confirm(DESTRUCTIVE, clock=FakeClock(), capture=capture, speaker=speaker)
+
+    assert verdict is Confirmation.CONFIRMED
+    assert speaker.prompt_completed is True
+    assert events == ["speak:start", "speak:done", "capture"]
+
+
 def test_confirm_aborts_on_no() -> None:
     verdict, speaker = _run(["no"])
     assert verdict is Confirmation.ABORTED

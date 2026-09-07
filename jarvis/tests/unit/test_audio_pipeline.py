@@ -373,6 +373,41 @@ def test_piper_speaker_is_playing_reports_true_until_drained(tmp_path: Path) -> 
     assert tts.texts == ["hola."]
 
 
+def test_piper_speaker_interrupt_clears_pending_queued_speech(tmp_path: Path) -> None:
+    """Barge-in should stop active playback and discard replies still queued."""
+    first_play_started = threading.Event()
+    release_playback = threading.Event()
+
+    class BlockingPlayback:
+        def __init__(self) -> None:
+            self.played: list[Path] = []
+            self.stops = 0
+
+        def play(self, wav_path: Path) -> None:
+            self.played.append(Path(wav_path))
+            first_play_started.set()
+            release_playback.wait(timeout=2)
+
+        def stop(self) -> None:
+            self.stops += 1
+            release_playback.set()
+
+    tts = FakeTTS()
+    playback = BlockingPlayback()
+    speaker = PiperSpeaker(tts, playback, out_dir=tmp_path)
+    speaker.speak("primero")
+    assert first_play_started.wait(timeout=2), "first queued reply must start playback"
+    speaker.speak("segundo")
+
+    speaker.interrupt()
+    speaker.flush()
+
+    assert playback.stops == 1
+    assert tts.texts == ["primero."]
+    assert len(playback.played) == 1
+    assert speaker.is_playing() is False
+
+
 def test_piper_speaker_worker_survives_error_and_continues(tmp_path: Path) -> None:
     tts = _FlakyTTS()
     playback = FakePlayback()

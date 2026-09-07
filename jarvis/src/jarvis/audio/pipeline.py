@@ -218,7 +218,7 @@ class PiperSpeaker:
         return self._queue.unfinished_tasks > 0 or self._playing
 
     def interrupt(self) -> None:
-        """Stop any in-progress playback immediately (barge-in, RF-11 off).
+        """Stop in-progress playback and discard pending queued replies.
 
         Duck-typed: a playback backend without ``stop`` (e.g. a test fake)
         simply does nothing.
@@ -226,6 +226,15 @@ class PiperSpeaker:
         stop = getattr(self.playback, "stop", None)
         if callable(stop):
             stop()
+        while True:
+            try:
+                pending = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if pending is None:
+                self._queue.put(None)
+                break
+            self._queue.task_done()
 
     def flush(self, timeout: float = 10.0) -> None:
         if self._closed:

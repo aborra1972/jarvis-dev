@@ -84,6 +84,21 @@ def test_gather_until_800ms_silence() -> None:
     assert capturer.reads == 3
 
 
+def test_gather_initial_silence_does_not_trigger_trailing_silence_before_speech() -> None:
+    """Trailing silence should be measured only after speech has started."""
+    vad = _vad(silence_s=0.2, max_s=1.0)
+    capturer = FakeCapturer(
+        [_silence(), _silence(), _silence(), _sine(), _silence(), _silence(), _sine()]
+    )
+
+    blocks, duration = gather_utterance(capturer, vad)
+
+    assert len(blocks) == 6
+    assert duration == pytest.approx(0.6)
+    assert any(vad.is_speech(block) for block in blocks)
+    assert capturer.reads == 6
+
+
 def test_gather_stops_at_max_duration() -> None:
     vad = _vad(max_s=0.2, silence_s=0.8)
     capturer = FakeCapturer([_sine(), _sine(), _sine(), _sine()])

@@ -197,6 +197,7 @@ def gather_utterance(
     blocks: list[np.ndarray] = []
     silent_s = 0.0
     duration_s = 0.0
+    speech_started = False
     while duration_s < vad.max_s:
         if stop_requested is not None and stop_requested():
             break
@@ -205,8 +206,12 @@ def gather_utterance(
             break
         blocks.append(block)
         duration_s += vad.block_duration
-        silent_s = 0.0 if vad.is_speech(block) else silent_s + vad.block_duration
-        if silent_s >= vad.silence_s:
+        if vad.is_speech(block):
+            speech_started = True
+            silent_s = 0.0
+        elif speech_started:
+            silent_s += vad.block_duration
+        if speech_started and silent_s >= vad.silence_s:
             break
     return blocks, duration_s
 

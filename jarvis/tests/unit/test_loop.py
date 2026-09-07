@@ -638,6 +638,61 @@ def test_cooldown_starts_when_tts_finishes_not_when_it_starts(tmp_path: Path) ->
     assert elapsed >= 0  # basic sanity
 
 
+def test_conversation_window_starts_after_playback_completion_not_executor_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Follow-up listening should be timed from actual TTS completion."""
+    from jarvis import config
+
+    monkeypatch.setattr(config, "CONVERSATION_WINDOW_S", 30.0)
+    monkeypatch.setattr("jarvis.orchestrator.loop.time.sleep", lambda seconds: None)
+
+    class ManualPlaybackSpeaker(FakeSpeaker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.playing = False
+
+        def speak(self, text: str) -> None:
+            super().speak(text)
+            self.playing = True
+
+        def is_playing(self) -> bool:
+            return self.playing
+
+        def finish(self) -> None:
+            self.playing = False
+
+    speaker = ManualPlaybackSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["abrí firefox"]),
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=speaker,
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context()
+
+    state, context = _tick(State.IDLE, pipeline, context)
+    state, context = _tick(state, pipeline, context)
+    state, context = _tick(state, pipeline, context)
+
+    assert state == State.SPEAKING
+    assert speaker.is_playing() is True
+    assert context.conversation_until == 0.0
+
+    state, context = _tick(state, pipeline, context)
+    assert state == State.IDLE
+    state, context = _tick(state, pipeline, context)
+    assert context.outcome == "speaking"
+    speaker.finish()
+    state, context = _tick(state, pipeline, context)
+    assert context.conversation_until > 0.0
+
+
 # --- Name-gated wake (feature "wake por nombre", engine "name") ----------------
 def test_name_wake_skips_beep_and_goes_straight_to_listening(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -300,12 +300,12 @@
 - Notificacion cuando termine
 
 **Criterio de completitud**:
-- [ ] Nuevos intents en schema
-- [ ] Executors implementados
-- [ ] Notificacion al terminar
-- [ ] Tests para cada intent
+- [x] Nuevos intents en schema
+- [x] Executors implementados
+- [x] Notificacion al terminar (respuesta hablada final del agente)
+- [x] Tests para cada intent
 
-**Estado**: `[ ]` Pendiente
+**Estado**: `[x]` Completada
 
 ---
 
@@ -320,15 +320,14 @@
 | 5. Multi-turn | 2 | 2 | 0 |
 | 6. Rapidfuzz/Recordatorios | 2 | 2 | 0 |
 | 7. Phrases/Hist | 2 | 2 | 0 |
-| 8. Agentes IA | 1 | 0 | 1 |
-| **Total** | **17** | **16** | **1** |
+| 8. Agentes IA | 1 | 1 | 0 |
+| **Total** | **17** | **17** | **0** |
 
 ---
 
 ## Proxima tarea a ejecutar
 
-**T-AGENT-01**: expandir comandos de agente por voz
-(ver sección Fase 8).
+Sin próxima tarea definida tras completar T-AGENT-01.
 
 Fases 1-2-3-4-5 (Diagnostico, VAD/Audio, Seguridad, NLU, Multi-turn) completadas
 (2026-09-05: fusionados cambios del estudio + robustez al ruido + modo conversacion).
@@ -336,8 +335,7 @@ Fases 1-2-3-4-5 (Diagnostico, VAD/Audio, Seguridad, NLU, Multi-turn) completadas
 ## Pendientes retomados el 2026-09-06
 
 1. Validar manualmente el flujo completo de microfono y GUI con Jarvis, Friday y Karen.
-2. Ejecutar **T-AGENT-01** (comandos de OpenCode por voz expandidos).
-3. Tras validar Jarvis Control, escanear cada proyecto de Windows con su propio indice CodeGraph.
+2. Tras validar Jarvis Control, escanear cada proyecto de Windows con su propio indice CodeGraph.
 
 ---
 

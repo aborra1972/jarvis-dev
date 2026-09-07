@@ -71,6 +71,8 @@ def test_build_registry_marks_opencode_work_intents_long_running() -> None:
         "create_artifact",
         "implement",
         "review",
+        "review_pr",
+        "fix_warnings",
     }
 
 

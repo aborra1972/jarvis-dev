@@ -30,12 +30,21 @@ from jarvis.orchestrator.contracts import ActionResult
 from jarvis.orchestrator.session import Session
 from jarvis.orchestrator.supervisor import RealClock, tcp_healthy
 
-OPCODE_INTENTS = ("open_repo", "ask", "configure", "create_artifact", "implement", "review")
+OPCODE_INTENTS = (
+    "open_repo",
+    "ask",
+    "configure",
+    "create_artifact",
+    "implement",
+    "review",
+    "review_pr",
+    "fix_warnings",
+)
 
 # Verify fix (voice-pipeline "Long LLM operation"): the LLM work commands ride
 # the persistent session and can take up to 30s, so the loop speaks an "En ello
 # estoy, señor" acknowledgment before they run. Non-work commands are not long-running.
-LONG_RUNNING_INTENTS = frozenset({"ask", "create_artifact", "implement", "review"})
+LONG_RUNNING_INTENTS = frozenset({"ask", "create_artifact", "implement", "review", "review_pr", "fix_warnings"})
 
 NO_ACTIVE_PROJECT = "No hay un proyecto activo, señor. Abra uno primero."
 OFFLINE_SPOKEN = "Necesito conexión a red para eso, señor."
@@ -50,6 +59,8 @@ _PROMPTS = {
     "create_artifact": "Creá un artefacto solicitado: {q}",
     "implement": "Implementá en este proyecto: {q}",
     "review": "Revisá este proyecto: {q}",
+    "review_pr": "Revisá el pull request en este proyecto: {q}",
+    "fix_warnings": "Corregí los warnings en este proyecto: {q}",
 }
 
 
@@ -141,7 +152,7 @@ class ServerManager:
 
 
 class OpenCodeExecutor:
-    """Executes the 6 opencode intents against the persistent serve."""
+    """Executes the opencode intents against the persistent serve."""
 
     def __init__(
         self,
@@ -198,13 +209,19 @@ class OpenCodeExecutor:
     def handle_review(self, intent: Intent, session: Session) -> ActionResult:
         return self._attached(intent, session)
 
+    def handle_review_pr(self, intent: Intent, session: Session) -> ActionResult:
+        return self._attached(intent, session)
+
+    def handle_fix_warnings(self, intent: Intent, session: Session) -> ActionResult:
+        return self._attached(intent, session)
+
     def _attached(self, intent: Intent, session: Session) -> ActionResult:
         if not session.active_project:
             return ActionResult(ok=False, spoken=NO_ACTIVE_PROJECT)
         allocated = session.allocate(session.active_project, self._base_port)
         prompt = _PROMPTS.get(intent.intent, "")
-        query = (intent.entities.get("query") or "").strip()
-        if query:
+        query = (intent.entities.get("query") or intent.entities.get("text") or "").strip()
+        if prompt:
             prompt = prompt.format(q=query)
         # PR6 (integration): pass `-s` only once a server-created sessionID is
         # bound; the first run after serve spawn creates it (see llm.build_opencode_command).

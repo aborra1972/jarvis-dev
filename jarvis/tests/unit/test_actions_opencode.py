@@ -206,7 +206,7 @@ def test_open_repo_degrades_when_server_unhealthy(tmp_path) -> None:
     assert result.spoken == opencode.OFFLINE_SPOKEN
 
 
-# --- run intents (ask/create_artifact/implement/review/configure) -------------
+# --- run intents (ask/create_artifact/implement/review/review_pr/fix_warnings/configure) -------------
 def test_ask_requires_active_project() -> None:
     executor = opencode.OpenCodeExecutor(manager=FakeManager())
     result = executor.handle_ask(_intent("ask", {"query": "hola"}), Session())
@@ -271,22 +271,28 @@ def test_ask_retries_once_then_degrades(tmp_path) -> None:
     assert len(runner.commands) == 2
 
 
-def test_run_intent_builds_opencode_command_per_intent(tmp_path) -> None:
-    for intent_name in ("create_artifact", "implement", "review"):
-        runner = FakeRunner(_result(_assistant("listo")))
-        executor = opencode.OpenCodeExecutor(manager=FakeManager(), runner=runner)
-        session = Session()
-        session.start(str(tmp_path), git_runner=lambda cwd: str(tmp_path))
-        result = executor.handle_create_artifact(
-            _intent(intent_name), session
-        ) if intent_name == "create_artifact" else executor.handle_implement(
-            _intent(intent_name), session
-        ) if intent_name == "implement" else executor.handle_review(
-            _intent(intent_name), session
-        )
-        assert result.ok is True
-        assert result.spoken == "listo"
-        assert runner.commands[0][0] == "opencode"
+@pytest.mark.parametrize(
+    ("intent_name", "handler_name", "text", "expected_prompt"),
+    [
+        ("create_artifact", "handle_create_artifact", "un diagrama", "Creá un artefacto solicitado: un diagrama"),
+        ("implement", "handle_implement", "login", "Implementá en este proyecto: login"),
+        ("review", "handle_review", "auth", "Revisá este proyecto: auth"),
+        ("review_pr", "handle_review_pr", "123", "Revisá el pull request en este proyecto: 123"),
+        ("fix_warnings", "handle_fix_warnings", "ruff", "Corregí los warnings en este proyecto: ruff"),
+    ],
+)
+def test_run_intent_builds_specific_opencode_prompt_per_intent(
+    tmp_path, intent_name: str, handler_name: str, text: str, expected_prompt: str
+) -> None:
+    runner = FakeRunner(_result(_assistant("listo")))
+    executor = opencode.OpenCodeExecutor(manager=FakeManager(), runner=runner)
+    session = Session()
+    session.start(str(tmp_path), git_runner=lambda cwd: str(tmp_path))
+    result = getattr(executor, handler_name)(_intent(intent_name, {"text": text}), session)
+    assert result.ok is True
+    assert result.spoken == "listo"
+    assert runner.commands[0][0] == "opencode"
+    assert runner.commands[0][-1] == expected_prompt
 
 
 def test_configure_writes_agents_md_and_does_not_run_subprocess(tmp_path, monkeypatch) -> None:

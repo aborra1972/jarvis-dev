@@ -111,6 +111,8 @@ _OPEN_REPO_POINTER = re.compile(rf"^{_verb_alt('abrir')} (?:el |la )?(?:este|aca
 _OPEN_APP = re.compile(rf"^{_verb_alt('abrir')} (.+)$")
 _WEB_SEARCH = re.compile(rf"^{_verb_alt('buscar')} (.+)$")
 _ASK = re.compile(rf"^{_verb_alt('preguntar')}(?: a opencode)? (.+)$")
+_REVIEW_PR = re.compile(rf"^{_verb_alt('revisar')} (?:el |la )?(?:pr|pull request)(?: (.*))?$")
+_FIX_WARNINGS = re.compile(r"^(?:arregla|corregi|corregir|fixea|fixear) (?:los |las )?(?:warnings|advertencias)(?: (.*))?$")
 _HELP = re.compile(rf"^(?:{_verb_alt('ayudar')}|que podes hacer|que sabes hacer|que puede hacer)$")
 _REMINDER = re.compile(r"^(?:recordame|recuerdame|recordar) (.+)$")
 
@@ -152,6 +154,13 @@ def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
 
 def _web_search_from_match(m: re.Match[str]) -> dict[str, str]:
     return {"query": m.group(1).strip(), "engine": "google"}
+
+
+def _optional_text(default: str) -> Callable[[re.Match[str]], dict[str, str]]:
+    def extract(m: re.Match[str]) -> dict[str, str]:
+        value = m.group(1).strip() if m.group(1) else default
+        return {"text": value}
+    return extract
 
 
 def _single_group(key: str) -> Callable[[re.Match[str]], dict[str, str]]:
@@ -199,6 +208,8 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),
+    (_REVIEW_PR, "review_pr", _optional_text("actual")),
+    (_FIX_WARNINGS, "fix_warnings", _optional_text("todos")),
     (_REMINDER, "set_reminder", _single_group("text")),
     (_HELP, "help", lambda m: {}),
 )

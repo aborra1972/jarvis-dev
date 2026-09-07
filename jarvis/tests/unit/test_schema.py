@@ -27,10 +27,10 @@ from jarvis.interpreter.schema import Intent
 
 
 # --- allowlist shape ---------------------------------------------------------
-def test_23_commands_in_8_domains() -> None:
+def test_25_commands_in_8_domains() -> None:
     commands = ALLOWED_INTENTS - {"unknown"}
-    assert len(commands) == 23
-    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 23
+    assert len(commands) == 25
+    assert sum(len(v) for v in DOMAIN_INTENTS.values()) == 25
     assert set(DOMAIN_INTENTS) == {
         "opencode", "system", "files", "web", "lifecycle", "conversation", "voice", "reminders"
     }
@@ -58,6 +58,8 @@ VALID_PAYLOADS: list[tuple[dict, str]] = [
     # empty repo = active project delegation (orchestrator PR3)
     ({"intent": "open_repo", "entities": {"repo": ""}, "confidence": 0.8}, "open_repo"),
     ({"intent": "create_doc", "entities": {"text": "resumen del sprint"}, "confidence": 0.95}, "create_doc"),
+    ({"intent": "review_pr", "entities": {"text": "PR actual"}, "confidence": 0.9}, "review_pr"),
+    ({"intent": "fix_warnings", "entities": {"text": "warnings de mypy"}, "confidence": 0.9}, "fix_warnings"),
     ({"intent": "open_url", "entities": {"url": "https://github.com/x"}, "confidence": 0.7}, "open_url"),
     ({"intent": "web_search", "entities": {"query": "tal libreria"}, "confidence": 0.6}, "web_search"),
     ({"intent": "set_reminder", "entities": {"text": "tomar agua en 10 minutos"}, "confidence": 0.9}, "set_reminder"),

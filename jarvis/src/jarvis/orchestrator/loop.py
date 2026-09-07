@@ -563,6 +563,8 @@ def _needs_repo(intent: str) -> bool:
         "create_artifact",
         "implement",
         "review",
+        "review_pr",
+        "fix_warnings",
     )
 
 

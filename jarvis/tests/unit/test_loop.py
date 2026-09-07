@@ -450,18 +450,19 @@ def test_persists_session_state_after_run(tmp_path: Path) -> None:
 
 
 # --- Verify fixes: spoken ack before long-running ops (voice-pipeline) --------
-def test_long_llm_operation_speaks_ack_before_executing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("intent_name", ["implement", "review_pr", "fix_warnings"])
+def test_long_llm_operation_speaks_ack_before_executing(tmp_path: Path, intent_name: str) -> None:
     speaker = FakeSpeaker()
     executor = TrackingExecutor(
         speaker,
-        ActionResult(ok=True, spoken="listo, implementé el login"),
-        long_running={"implement"},
+        ActionResult(ok=True, spoken="listo, terminé"),
+        long_running={intent_name},
     )
     pipeline = Pipeline(
         clock=FakeClock(),
         wake=FakeWake([True]),
-        capture=FakeCapture(["implementá el login"]),
-        interpreter=FakeInterpreter([_interp(_intent(intent="implement", entities={"text": "login"}))]),
+        capture=FakeCapture(["hacelo"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent=intent_name, entities={"text": "login"}))]),
         speaker=speaker,
         executor=executor,
         session=load_state(str(tmp_path / "state.json")),
@@ -471,7 +472,31 @@ def test_long_llm_operation_speaks_ack_before_executing(tmp_path: Path) -> None:
     outcome = run(pipeline, iterations=4)
     assert outcome == "executed"
     assert executor.spoken_before_execute == [LONG_OPERATION_ACK]
-    assert speaker.said == [LONG_OPERATION_ACK, "listo, implementé el login"]
+    assert speaker.said == [LONG_OPERATION_ACK, "listo, terminé"]
+
+
+def test_new_opencode_agent_intents_require_repo_before_ack(tmp_path: Path) -> None:
+    speaker = FakeSpeaker()
+    executor = TrackingExecutor(
+        speaker,
+        ActionResult(ok=True, spoken="no debería ejecutar"),
+        long_running={"review_pr"},
+    )
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=FakeCapture(["revisá el pr"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="review_pr", entities={"text": "PR actual"}))]),
+        speaker=speaker,
+        executor=executor,
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: None,
+    )
+    outcome = run(pipeline, iterations=4)
+    assert outcome == "rejected"
+    assert executor.spoken_before_execute == []
+    assert speaker.said == ["No hay un proyecto activo, señor. Abra uno primero."]
 
 
 def test_short_operation_speaks_no_ack(tmp_path: Path) -> None:

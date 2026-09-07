@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover — rapidfuzz absent, use difflib
 # command — drives the re-ask flow per spec RNF-4).
 ALLOWED_INTENTS: frozenset[str] = frozenset({
     "open_repo", "ask", "configure", "create_artifact", "implement", "review",
+    "review_pr", "fix_warnings",
     "shutdown", "reboot", "power_off_self", "open_app", "create_doc",
     "open_file_dir", "web_search", "open_url", "help", "unknown", "execute",
     "general_qa", "register_voice",
@@ -52,7 +53,10 @@ def is_destructive_intent(intent_name: str) -> bool:
     return intent_name in DESTRUCTIVE_INTENTS
 
 DOMAIN_INTENTS: dict[str, tuple[str, ...]] = {
-    "opencode": ("open_repo", "ask", "configure", "create_artifact", "implement", "review"),
+    "opencode": (
+        "open_repo", "ask", "configure", "create_artifact", "implement", "review",
+        "review_pr", "fix_warnings",
+    ),
     "system": ("shutdown", "reboot", "open_app", "execute", "kill_process", "format_disk", "wipe_system"),
     "files": ("create_doc", "open_file_dir", "delete_all"),
     "web": ("web_search", "open_url"),
@@ -74,6 +78,8 @@ REQUIRED_ENTITIES: dict[str, tuple[str, ...]] = {
     "create_artifact": ("text",),
     "implement": ("text",),
     "review": ("text",),
+    "review_pr": ("text",),
+    "fix_warnings": ("text",),
     "open_app": ("app",),
     "create_doc": ("text",),
     "open_file_dir": ("text",),
@@ -275,6 +281,10 @@ def build_system_prompt() -> str:
         "- set_reminder: for reminders. Keep the complete reminder request, including when, "
         "in entities.text. Example: 'recordame sacar la ropa en 10 minutos' → "
         "intent='set_reminder', text='sacar la ropa en 10 minutos'.\n"
+        "- review_pr: for reviewing the current pull request in the active repo. "
+        "Use entities.text for the PR number, branch, URL, or 'actual'.\n"
+        "- fix_warnings: for asking OpenCode to fix warnings in the active repo. "
+        "Use entities.text for the warning source, linter, test output, or 'todos'.\n"
         "- general_qa: for ANY question that is NOT a command, NOT a search, NOT about a repo. "
         "Use entities.query with the full question.\n"
         "  Examples:\n"

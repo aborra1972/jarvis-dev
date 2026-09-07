@@ -90,6 +90,8 @@ FAST_PATH_CASES: list[tuple[str, str, dict]] = [
     ("buscá en internet qué es tal librería", "web_search", {"query": "en internet que es tal libreria", "engine": "google"}),
     ("preguntale a opencode cómo se usa pytest", "ask", {"query": "como se usa pytest"}),
     ("preguntale cómo funciona el middleware de auth", "ask", {"query": "como funciona el middleware de auth"}),
+    ("revisá el pr actual", "review_pr", {"text": "actual"}),
+    ("arreglá los warnings de ruff", "fix_warnings", {"text": "de ruff"}),
     ("recordame sacar la ropa en 10 minutos", "set_reminder", {"text": "sacar la ropa en 10 minutos"}),
     ("ayuda", "help", {}),
     ("que podes hacer", "help", {}),

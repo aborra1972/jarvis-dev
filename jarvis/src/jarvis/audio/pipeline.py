@@ -31,6 +31,7 @@ from jarvis.audio.capture import (
     SilenceVAD,
     SileroVAD,
     gather_utterance_result,
+    normalize_audio_block,
     rms,
     write_wav,
 )
@@ -135,7 +136,7 @@ class UtteranceCapture:
         )
         if result.status is not CaptureStatus.UTTERANCE or not result.blocks:
             return None
-        blocks = list(result.blocks)
+        blocks = [normalize_audio_block(block) for block in result.blocks]
         duration_s = result.duration_s
         if not any(rms(block) >= DEFAULT_THRESHOLD for block in blocks):
             return None

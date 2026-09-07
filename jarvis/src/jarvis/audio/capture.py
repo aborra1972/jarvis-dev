@@ -39,6 +39,14 @@ class Capturer(Protocol):
         ...
 
 
+def normalize_audio_block(block: np.ndarray) -> np.ndarray:
+    """Return one captured block as a mono, one-dimensional float32 array."""
+    array = np.asarray(block, dtype=np.float32)
+    if array.ndim == 1:
+        return array
+    return array.reshape(-1)
+
+
 def rms(block: np.ndarray) -> float:
     """Root-mean-square energy of a float32 audio block."""
     if block.size == 0:
@@ -230,6 +238,7 @@ def gather_utterance_result(
             if no_frame_polls >= max_no_frame_polls:
                 return CaptureResult(CaptureStatus.NO_FRAME, tuple(), 0.0, False, no_frame_polls)
             continue
+        block = normalize_audio_block(block)
         if vad.is_speech(block):
             speech_started = True
             blocks.extend(pre_roll)
@@ -252,6 +261,7 @@ def gather_utterance_result(
             if no_frame_polls >= max_no_frame_polls:
                 break
             continue
+        block = normalize_audio_block(block)
         blocks.append(block)
         duration_s += vad.block_duration
         if vad.is_speech(block):
@@ -284,6 +294,7 @@ def gather_utterance(
             break
         if block is None:
             break
+        block = normalize_audio_block(block)
         blocks.append(block)
         duration_s += vad.block_duration
         if vad.is_speech(block):

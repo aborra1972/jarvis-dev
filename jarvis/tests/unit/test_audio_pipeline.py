@@ -228,6 +228,22 @@ def test_utterance_capture_flattens_audio_for_speaker_verification(tmp_path: Pat
     assert capture.last_audio().ndim == 1
 
 
+def test_utterance_capture_normalizes_mixed_block_shapes_at_capture_boundary(
+    tmp_path: Path,
+) -> None:
+    capturer = FakeCapturer(
+        [_speech(), _speech().reshape(-1, 1), _silence().reshape(-1, 1)]
+    )
+    stt = FakeSTT("hola")
+    capture = UtteranceCapture(capturer, stt, _vad(), wav_dir=tmp_path)
+
+    assert capture.capture() == "hola"
+    assert capture.last_audio() is not None
+    assert capture.last_audio().ndim == 1
+    assert capture.last_audio().dtype == np.float32
+    assert stt.calls[0][1] == pytest.approx(0.3)
+
+
 def test_utterance_capture_cleans_wav_after_transcription(tmp_path: Path) -> None:
     """Capture WAV files must be deleted after STT to avoid disk fill."""
     capturer = FakeCapturer([_speech(), _silence()])

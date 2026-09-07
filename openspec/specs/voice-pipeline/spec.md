@@ -8,34 +8,28 @@ Voice front/back end of the voice→action bridge: wake word gating (RF-1), loca
 
 ### Requirement: Wake word activation (RF-1)
 
-The system MUST gate all audio processing on detection of the configured wake word ("Jarvis" by default, configurable) using a local wake-word detector (openWakeWord). Audio that does not contain the wake word MUST be ignored.
+The system MUST gate entry into an active conversation on detection of the configured wake word ("Jarvis" by default, configurable) using the local wake-word detector. Audio without the wake word MUST be ignored while in wake-name standby. Once active conversation is established, subsequent ordinary turns MUST NOT require another wake word until goodbye, GUI off, restart, or another terminal lifecycle interruption.
+(Previously: Every audio processing path was gated on wake-word detection and activation transitioned only to command capture.)
 
-#### Scenario: Activation
+#### Scenario: Activation and continued conversation
 
-- GIVEN the assistant is listening
+- GIVEN the assistant is in wake-name standby
 - WHEN the user says "Jarvis, abrí OpenCode"
-- THEN the system MUST transition to command capture
-- AND the remainder of the utterance MUST be transcribed
+- THEN the remainder MUST be transcribed and the assistant MUST enter active conversation
+- AND a later ordinary request after a long pause MUST be accepted without "Jarvis"
 
-#### Scenario: False activation from ambient voice
+#### Scenario: Standby remains wake-gated
 
-- GIVEN the assistant is listening
-- WHEN ambient conversation does not include the wake word
-- THEN the system MUST NOT activate
-- AND no audio MUST be transcribed or processed as a command
+- GIVEN the assistant is in wake-name standby
+- WHEN ambient speech does not contain the configured wake word
+- THEN the assistant MUST NOT activate, transcribe, or process it as a command
 
-#### Scenario: Noise rejection
+#### Scenario: Fresh activation after reset
 
-- GIVEN the assistant is listening
-- WHEN background noise (keyboard, music) occurs without speech
-- THEN the system MUST NOT activate
-- AND the STT MUST NOT be invoked on silence (VAD gate)
-
-#### Scenario: Configurable wake word
-
-- GIVEN the user configured a custom wake word
-- WHEN the user speaks the configured word
-- THEN activation MUST use the configured word
+- GIVEN the assistant has restarted or has been reactivated through GUI/on
+- WHEN ordinary speech occurs without a fresh wake word
+- THEN it MUST be ignored
+- AND only a new verified wake word MAY establish active conversation
 
 ### Requirement: Local STT (RNF-2, M3)
 
@@ -96,3 +90,71 @@ While TTS output is playing, the system MUST discard captured audio.
 - WHEN audio is captured during playback
 - THEN the audio MUST be dropped
 - AND it MUST NOT trigger the wake word
+
+### Requirement: Active conversation uses bounded ordinary capture
+
+After a verified wake activation, the voice pipeline MUST keep ordinary conversation capture available across arbitrary pauses without requiring another wake word. Each turn MUST reuse ordinary capture with unbounded pre-onset waiting, finite post-onset utterance limits, bounded idle retention, cancellation polling, and the existing playback-to-microphone readiness barrier. Confirmation capture MUST remain separate and finite.
+
+#### Scenario: Speech after an arbitrary pause
+
+- GIVEN a verified wake has established an active conversation
+- WHEN the user speaks an ordinary request after an arbitrary silent pause
+- THEN the request MUST be captured without another wake word
+- AND its post-onset audio MUST remain within the existing finite utterance bound
+
+#### Scenario: Active conversation remains open after recoverable input
+
+- GIVEN an active conversation
+- WHEN ordinary capture produces silence, a recoverable STT failure, unsupported input, or a re-ask
+- THEN the pipeline MUST return to cancellable ordinary listening
+- AND MUST NOT require a new wake word solely because of that outcome
+
+#### Scenario: Playback readiness prevents overlap
+
+- GIVEN the assistant has spoken an acknowledgement, reply, or re-ask
+- WHEN the next active turn begins
+- THEN capture MUST start only after verified playback completion and microphone readiness
+- AND TTS audio MUST NOT be transcribed as user input or trigger the wake word
+
+#### Scenario: Stronger lifecycle interruption
+
+- GIVEN active conversation capture is waiting or collecting speech
+- WHEN GUI off, shutdown, or cancellation occurs
+- THEN capture MUST terminate promptly
+- AND the cancelled or interrupted result MUST NOT dispatch a command
+
+### Requirement: Separate speech-onset waiting from utterance endpoint (PC-V04)
+
+Ordinary capture MUST wait without a speech-onset deadline and MUST remain cancellable. Pre-onset silence MUST NOT consume the finite post-onset utterance duration or trigger phrase endpoint detection. After speech starts, the existing finite utterance cap and phrase endpoint behavior MUST remain in force. Idle audio retention MUST have a finite bound independent of wait duration; indefinite waiting MUST NOT accumulate recordings of silence or background audio. Dangerous-action confirmation MUST use its finite deadline before indefinite ordinary waiting is enabled.
+
+#### Scenario: Indefinite onset wait
+
+- GIVEN ordinary capture is waiting after activation
+- WHEN silence continues beyond former onset limits and speech then begins
+- THEN capture MUST still accept the speech
+- AND the pre-onset wait MUST NOT shorten its post-onset utterance duration
+
+#### Scenario: Finite utterance after onset
+
+- GIVEN speech has begun
+- WHEN the existing phrase endpoint or finite post-onset duration cap is reached
+- THEN the utterance MUST end under the applicable endpoint policy
+- AND the capture MUST NOT become an unlimited recording
+
+#### Scenario: Bounded idle retention
+
+- GIVEN ordinary capture is waiting without speech onset
+- WHEN idle waiting continues repeatedly
+- THEN retained idle audio MUST remain within its finite bound
+- AND idle/background audio MUST NOT become a persistent recording
+
+#### Scenario: Cancelled or failed capture
+
+- GIVEN capture is waiting for onset or collecting speech
+- WHEN cancellation, GUI off, or shutdown occurs
+- THEN capture MUST terminate without waiting for speech or an endpoint
+- AND cancelled results MUST NOT dispatch a command
+- GIVEN a transient no-frame read occurs without device failure
+- THEN it MUST NOT be treated as a completed utterance
+- GIVEN the audio device fails
+- THEN capture MUST report failure without fabricating a transcript or executing a guessed command

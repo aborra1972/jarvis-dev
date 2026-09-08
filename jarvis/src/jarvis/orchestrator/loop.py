@@ -332,8 +332,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             if callable(capturer_flush):
                 capturer_flush(ms=config.AUDIO_FLUSH_MS)
             pipeline.wake.capturer.start()
-        if not pipeline.wake.wait(WAKE_TIMEOUT_S):
-            if context.outcome not in ("executed", "failed", "powered_off", "confirmed", "goodbye"):
+        wake_fired = pipeline.wake.wait(WAKE_TIMEOUT_S)
+        if not wake_fired:
+            if context.outcome not in ("executed", "failed", "powered_off", "confirmed", "goodbye", "name_mismatch"):
                 context.outcome = "no_wake"
             return State.IDLE, context
         pipeline.session.reask_attempts = 0
@@ -399,6 +400,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if context.wake_gated and _wake_gates_by_name(pipeline.wake):
             stripped = strip_agent_prefix(transcript, config.agent_name())
             if stripped is None:
+                context.active_epoch = None
+                context.operation = None
+                context.wake_gated = False
                 context.outcome = "name_mismatch"
                 return State.IDLE, context
             transcript = stripped

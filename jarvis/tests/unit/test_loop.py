@@ -770,6 +770,31 @@ def test_name_wake_discards_transcript_without_name(
     assert pipeline.speaker.said == []  # discarded silently
 
 
+def test_name_mismatch_ends_active_turn_before_next_wake_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rejected name-gated utterance must not re-enter ordinary capture."""
+    monkeypatch.setenv("JARVIS_AGENT", "friday")
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=NameFakeWake([True, False]),
+        capture=FakeCapture(["hola che"]),
+        interpreter=FakeInterpreter([]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+
+    outcome = run(pipeline, iterations=4)
+
+    assert outcome == "name_mismatch"
+    assert len(pipeline.wake.results) == 0
+    assert pipeline.interpreter.calls == []
+    assert pipeline.speaker.said == []  # discarded silently
+
+
 def test_conversation_followup_skips_name_gate(tmp_path: Path) -> None:
     import time
 

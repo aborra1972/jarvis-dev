@@ -332,7 +332,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             if callable(capturer_flush):
                 capturer_flush(ms=config.AUDIO_FLUSH_MS)
             pipeline.wake.capturer.start()
+        logger.info("wake.waiting timeout=%s", WAKE_TIMEOUT_S)
         wake_fired = pipeline.wake.wait(WAKE_TIMEOUT_S)
+        logger.info("wake.result fired=%s", wake_fired)
         if not wake_fired:
             if context.outcome not in ("executed", "failed", "powered_off", "confirmed", "goodbye", "name_mismatch"):
                 context.outcome = "no_wake"
@@ -390,8 +392,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             context.outcome = "stt_error"
             return (State.SPEAKING if context.active_epoch is not None else State.IDLE), context
         if transcript is None:
+            logger.info("capture.result transcript=none")
             context.outcome = "silence"
             return State.IDLE, context
+        logger.info("capture.result chars=%d", len(transcript))
 
         # Name gate: with the "name" wake engine the utterance must start with
         # the active agent's name. Test with what produced the wake — a follow-up
@@ -400,11 +404,17 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if context.wake_gated and _wake_gates_by_name(pipeline.wake):
             stripped = strip_agent_prefix(transcript, config.agent_name())
             if stripped is None:
+                first_token = transcript.strip().split(maxsplit=1)[0] if transcript.strip() else ""
+                logger.info(
+                    "name_gate.rejected expected=%s observed_first_token=%r",
+                    config.agent_name(), first_token,
+                )
                 context.active_epoch = None
                 context.operation = None
                 context.wake_gated = False
                 context.outcome = "name_mismatch"
                 return State.IDLE, context
+            logger.info("name_gate.accepted agent=%s", config.agent_name())
             transcript = stripped
 
         # --- SPEAKER VERIFICATION ---
@@ -999,6 +1009,11 @@ def start() -> int:
     another terminal can signal this process. The loop runs until
     power_off_self (PR6).
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(name)s] %(message)s",
+        stream=sys.stderr,
+    )
     session = load_state(
         str(config.STATE_FILE),
         history_path=str(config.HISTORY_FILE),

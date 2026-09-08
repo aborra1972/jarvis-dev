@@ -10,6 +10,13 @@ be discarded silently (it was ambient speech, not an activation).
 from __future__ import annotations
 
 _WORD_PUNCTUATION = " \t,.;:!?¡¿"
+# Whisper occasionally renders the Spanish /y/ onset in Jarvis as
+# "Charvis". Keep this explicit and narrow; do not use fuzzy matching for
+# activation because arbitrary near-matches would turn ambient speech into
+# commands.
+_NAME_ALIASES = {
+    "jarvis": frozenset({"yarvis", "charvis"}),
+}
 
 
 def strip_agent_prefix(transcript: str, name: str) -> str | None:
@@ -24,7 +31,9 @@ def strip_agent_prefix(transcript: str, name: str) -> str | None:
     if not text:
         return None
     first, _, rest = text.partition(" ")
-    if first.strip(_WORD_PUNCTUATION).lower() != name.lower():
+    observed = first.strip(_WORD_PUNCTUATION).lower()
+    expected = name.lower()
+    if observed != expected and observed not in _NAME_ALIASES.get(expected, ()):
         return None
     remainder = rest.strip(_WORD_PUNCTUATION)
     return remainder or None

@@ -99,6 +99,15 @@ def test_stt_prompt_loads_rioplatense_phrases() -> None:
     assert config.WHISPER_PROMPT == config.STT_PROMPT
 
 
+def test_stt_prompt_avoids_catalog_terms_that_bias_silence() -> None:
+    # Whisper's initial prompt is a decoding bias, not a neutral vocabulary
+    # list. Product/catalog nouns made silent or musical audio transcribe as
+    # "Google"/"Web", which then reaches the name gate as a false wake.
+    assert "Google" not in config.STT_PROMPT
+    assert "GitHub" not in config.STT_PROMPT
+    assert "pytest" not in config.STT_PROMPT
+
+
 def test_stt_prompt_ignores_comments_and_blank_lines(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

@@ -24,6 +24,11 @@ def test_strips_name_without_comma() -> None:
     assert strip_agent_prefix("friday abre firefox", "Friday") == "abre firefox"
 
 
+def test_accepts_explicit_jarvis_whisper_aliases() -> None:
+    assert strip_agent_prefix("Yarvis, abrí firefox", "Jarvis") == "abrí firefox"
+    assert strip_agent_prefix("Charvis, abrí firefox", "Jarvis") == "abrí firefox"
+
+
 def test_name_not_at_start_is_none() -> None:
     assert strip_agent_prefix("cómo estás friday", "friday") is None
 

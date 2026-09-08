@@ -41,6 +41,23 @@ DEFAULT_THRESHOLD = 0.7
 DEFAULT_VAD_THRESHOLD = 0.6
 HEY_JARVIS_MODEL = "hey_jarvis_v0.1.onnx"
 
+# The GUI wake slider is a Silero probability (0..1), while SilenceVAD uses
+# normalized RMS (also 0..1, but on a different scale). Keep the conversion
+# deliberately conservative: ordinary room noise stays below the floor while
+# realistic speech (~0.1 RMS in the production mic path) remains detectable.
+ENERGY_WAKE_MIN_RMS = 0.02
+ENERGY_WAKE_MAX_RMS = 0.10
+ENERGY_WAKE_RMS_PER_PROBABILITY = 0.10
+
+
+def energy_threshold_from_wake_probability(probability: float) -> float:
+    """Map the GUI/Silero wake probability to an energy-VAD RMS threshold."""
+    probability = min(1.0, max(0.0, float(probability)))
+    return min(
+        ENERGY_WAKE_MAX_RMS,
+        max(ENERGY_WAKE_MIN_RMS, probability * ENERGY_WAKE_RMS_PER_PROBABILITY),
+    )
+
 # XLSR wake word constants
 XLSR_WINDOW_S = 2.0       # audio window for XLSR inference
 XLSR_HOP_S = 1.0          # hop between windows (1s overlap)
@@ -200,9 +217,9 @@ class SpeechStartWake:
                 block_ms=BLOCK_MS,
             )
             # Energy fallback: the GUI slider is a Silero probability, not an
-            # RMS gate — clamp so a raised slider can't deafen the mic.
+            # RMS gate — convert scales so a raised slider still detects speech.
             if isinstance(self._vad, SilenceVAD):
-                self._vad.threshold = min(0.15, max(0.02, threshold))
+                self._vad.threshold = energy_threshold_from_wake_probability(threshold)
 
     def wait(self, timeout: float) -> bool:
         """Block until speech onset (leading edge) or the timeout elapses."""

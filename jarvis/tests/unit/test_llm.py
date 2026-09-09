@@ -196,6 +196,7 @@ def test_gemini_provider_builds_correct_request() -> None:
         assert "test-key-123" in header_vals
         assert "gemini-2.0-flash" in captured["url"]
         assert captured["body"]["generationConfig"]["temperature"] == 0.1
+        assert captured["body"]["generationConfig"]["maxOutputTokens"] == 512
     finally:
         urllib.request.urlopen = original
 

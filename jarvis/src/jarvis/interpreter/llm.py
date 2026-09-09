@@ -158,7 +158,9 @@ class GeminiProvider:
             "systemInstruction": {"parts": [{"text": system}]},
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 64,
+                # The intent schema includes a full entity object; 64 tokens
+                # truncates valid JSON before the interpreter can parse it.
+                "maxOutputTokens": 512,
                 "responseMimeType": "application/json",
             },
         }).encode("utf-8")

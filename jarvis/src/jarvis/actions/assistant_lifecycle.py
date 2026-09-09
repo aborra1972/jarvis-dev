@@ -89,7 +89,9 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
 
     try:
         # Build provider from config (same as interpreter)
-        from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
+        from jarvis.interpreter.llm import (
+            OllamaProvider, GeminiProvider, CodexProvider, FallbackProvider
+        )
         import json
         import urllib.request
         import urllib.error
@@ -101,7 +103,13 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
             timeout=config.OLLAMA_TIMEOUT_S,
         )
 
-        if provider_mode == "gemini" and config.GEMINI_API_KEY:
+        if provider_mode == "codex":
+            provider = CodexProvider(
+                workdir=os.getcwd(),
+                model=config.CODEX_MODEL,
+                timeout=config.CODEX_TIMEOUT_S,
+            )
+        elif provider_mode == "gemini" and config.GEMINI_API_KEY:
             provider = GeminiProvider(
                 api_key=config.GEMINI_API_KEY,
                 model=config.GEMINI_MODEL,
@@ -157,7 +165,11 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
             return ActionResult(ok=True, spoken=text)
 
         else:
-            # Gemini/Fallback - use resolve with a special prompt
+            # Codex/Gemini/Fallback - use direct text completion when available.
+            if hasattr(provider, "complete"):
+                text = provider.complete(query, system_prompt).strip()
+                logger.info("general_qa response: %s", text[:100])
+                return ActionResult(ok=True, spoken=text)
             result = provider.resolve(
                 f"Respondé esta pregunta directamente (no como JSON, solo texto plano):\n{query}",
                 system_prompt

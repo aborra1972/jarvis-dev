@@ -24,3 +24,5 @@ speaker_embedding.json
 
 # FUSE leftover handles from Windows mounts (deleted file still open)
 .fuse_hidden*
+# Local AI runtime state
+.atl/

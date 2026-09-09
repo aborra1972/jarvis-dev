@@ -13,6 +13,7 @@ import pytest
 from jarvis.interpreter.llm import (
     FakeProvider,
     FallbackProvider,
+    CodexProvider,
     OpenCodeProvider,
     build_opencode_command,
     parse_assistant_text,
@@ -153,6 +154,36 @@ def test_open_code_provider_fails_on_non_json_output() -> None:
     provider = OpenCodeProvider("http://127.0.0.1:32111", "interp-1", runner=TextRunner())
     with pytest.raises(RuntimeError, match="non-JSON"):
         provider.resolve("p", "sys")
+
+
+# --- CodexProvider ----------------------------------------------------------
+def test_codex_provider_parses_agent_message_and_uses_read_only_oauth_cli() -> None:
+    from jarvis.interpreter.llm import CodexProvider
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = (
+            '{"type":"item.completed","item":{"type":"agent_message",'
+            '"text":"{\\"intent\\":\\"general_qa\\",\\"confidence\\":0.95}"}}\n'
+        )
+
+    captured = {}
+
+    def runner(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Result()
+
+    provider = CodexProvider(workdir="/repo", runner=runner)
+    result = provider.resolve("qué hora es", "system")
+
+    assert result["intent"] == "general_qa"
+    assert captured["command"][:6] == [
+        "codex", "exec", "-m", "gpt-5.6-luna", "--ephemeral", "--json"
+    ]
+    assert "--sandbox" in captured["command"]
+    assert captured["kwargs"]["timeout"] == 30.0
 
 
 # --- GeminiProvider ---------------------------------------------------------

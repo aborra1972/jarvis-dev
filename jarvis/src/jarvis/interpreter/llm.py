@@ -392,6 +392,53 @@ class DirectProvider:
             raise RuntimeError(f"opencode returned non-JSON output: {text[:200]}") from exc
 
 
+class CodexProvider:
+    """Codex CLI transport using the user's existing OAuth session."""
+
+    def __init__(
+        self,
+        workdir: str | Path | None = None,
+        timeout: float = 30.0,
+        model: str = "gpt-5.6-luna",
+        runner: object | None = None,
+    ) -> None:
+        self.workdir = Path(workdir) if workdir else None
+        self.timeout = timeout
+        self.model = model
+        self.runner = runner or subprocess.run
+
+    def complete(self, prompt: str, system: str) -> str:
+        command = [
+            "codex", "exec", "-m", self.model, "--ephemeral", "--json",
+            "--sandbox", "read-only",
+        ]
+        if self.workdir is not None:
+            command += ["-C", str(self.workdir)]
+        command.append(f"{system}\n\n{prompt}")
+        result = self.runner(command, capture_output=True, text=True, timeout=self.timeout)
+        if result.returncode != 0:
+            raise RuntimeError(f"codex exec exited {result.returncode}: {result.stderr[:200]}")
+        text = ""
+        for line in result.stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = event.get("item") or {}
+            if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+                text = item.get("text", "")
+        if not text:
+            raise RuntimeError("codex exec returned no assistant message")
+        return text
+
+    def resolve(self, prompt: str, system: str) -> dict:
+        text = self.complete(prompt, system)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"codex returned non-JSON output: {text[:200]}") from exc
+
+
 def resolve(prompt: str, system: str, provider: IntentProvider) -> schema.Intent:
     """Resolve and validate through the injected provider."""
     payload = provider.resolve(prompt, system)

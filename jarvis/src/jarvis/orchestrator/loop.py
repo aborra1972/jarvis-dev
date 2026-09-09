@@ -600,7 +600,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(_spoken_toward(LONG_OPERATION_ACK))
-        if intent.intent == "general_qa" and config.LLM_PROVIDER != "gemini":
+        if intent.intent == "general_qa" and config.LLM_PROVIDER not in ("gemini", "codex"):
             # Stream sentence-by-sentence so Jarvis starts speaking before
             # Ollama finishes generating the full answer (see
             # assistant_lifecycle.stream_general_qa). Falls back to the
@@ -878,14 +878,22 @@ def build_pipeline(
     _ollama = None
     _llm_provider = None
     if interpreter is resolve_intent and config.INTERPRETER_LLM_MODEL:
-        from jarvis.interpreter.llm import OllamaProvider, GeminiProvider, FallbackProvider
+        from jarvis.interpreter.llm import (
+            OllamaProvider, GeminiProvider, CodexProvider, FallbackProvider
+        )
         provider_mode = config.LLM_PROVIDER
         _ollama = OllamaProvider(
             model=config.INTERPRETER_LLM_MODEL,
             base_url=config.OLLAMA_BASE_URL,
             timeout=config.OLLAMA_TIMEOUT_S,
         )
-        if provider_mode == "gemini" and config.GEMINI_API_KEY:
+        if provider_mode == "codex":
+            _provider = CodexProvider(
+                workdir=os.getcwd(),
+                model=config.CODEX_MODEL,
+                timeout=config.CODEX_TIMEOUT_S,
+            )
+        elif provider_mode == "gemini" and config.GEMINI_API_KEY:
             _provider = GeminiProvider(
                 api_key=config.GEMINI_API_KEY,
                 model=config.GEMINI_MODEL,

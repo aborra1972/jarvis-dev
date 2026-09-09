@@ -10,6 +10,7 @@ enrolls the user's voice for speaker verification.
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from jarvis.actions import base

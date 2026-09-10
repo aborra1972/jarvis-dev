@@ -40,6 +40,7 @@ from jarvis.audio.capture import (
 DEFAULT_THRESHOLD = 0.7
 DEFAULT_VAD_THRESHOLD = 0.6
 HEY_JARVIS_MODEL = "hey_jarvis_v0.1.onnx"
+MAX_EMPTY_READ_RETRIES = 3
 
 # The GUI wake slider is a Silero probability (0..1), while SilenceVAD uses
 # normalized RMS (also 0..1, but on a different scale). Keep the conversion
@@ -146,10 +147,15 @@ class OpenWakeWord:
     def wait(self, timeout: float) -> bool:
         """Block until a model score reaches threshold or the timeout elapses."""
         deadline = self._clock() + timeout
+        empty_reads = 0
         while self._clock() < deadline:
             block = self.capturer.read_frames(timeout=self._timeout_per_read)
             if block is None:
-                break
+                empty_reads += 1
+                if empty_reads >= MAX_EMPTY_READ_RETRIES:
+                    break
+                continue
+            empty_reads = 0
             # openwakeword expects flat int16 PCM ([-32768, 32767]). The
             # capturer delivers normalized float32 ([-1, 1]) shaped (frames, 1)
             # from sounddevice: the 2D shape makes the melspectrogram Conv fail
@@ -224,10 +230,15 @@ class SpeechStartWake:
     def wait(self, timeout: float) -> bool:
         """Block until speech onset (leading edge) or the timeout elapses."""
         deadline = self._clock() + timeout
+        empty_reads = 0
         while self._clock() < deadline:
             block = self.capturer.read_frames(timeout=self._timeout_per_read)
             if block is None:
-                break
+                empty_reads += 1
+                if empty_reads >= MAX_EMPTY_READ_RETRIES:
+                    break
+                continue
+            empty_reads = 0
             if isinstance(block, np.ndarray) and block.ndim > 1:
                 block = block.reshape(-1)
             self._push_preroll(block)
@@ -320,10 +331,15 @@ class XLSRWakeWord:
     def wait(self, timeout: float) -> bool:
         """Block until the classifier score reaches threshold or timeout."""
         deadline = self._clock() + timeout
+        empty_reads = 0
         while self._clock() < deadline:
             block = self.capturer.read_frames(timeout=self._timeout_per_read)
             if block is None:
-                break
+                empty_reads += 1
+                if empty_reads >= MAX_EMPTY_READ_RETRIES:
+                    break
+                continue
+            empty_reads = 0
 
             # Flatten to mono float32
             if isinstance(block, np.ndarray):

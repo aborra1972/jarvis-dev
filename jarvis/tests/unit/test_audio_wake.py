@@ -24,6 +24,7 @@ from jarvis.audio.wake import (
     DEFAULT_VAD_THRESHOLD,
     OpenWakeWord,
     SpeechStartWake,
+    XLSRWakeWord,
     _positive_class_probability,
     build_wake_detector,
     build_model_paths,
@@ -198,6 +199,32 @@ def test_wait_returns_false_when_capturer_dries_up() -> None:
     assert wake.wait(timeout=10.0) is False
 
 
+def test_wait_retries_transient_empty_read() -> None:
+    model = FakeModel([{"hey_jarvis": 0.9}])
+    wake = OpenWakeWord(
+        capturer=FakeCapturer([None, _frame()]),
+        model=model,
+        threshold=0.5,
+        clock=FakeClock(),
+    )
+
+    assert wake.wait(timeout=1.0) is True
+    assert model.predicts == 1
+
+
+def test_wait_bounds_empty_read_retries() -> None:
+    model = FakeModel([])
+    wake = OpenWakeWord(
+        capturer=FakeCapturer([None, None, None, None]),
+        model=model,
+        threshold=0.5,
+        clock=FakeClock(),
+    )
+
+    assert wake.wait(timeout=1.0) is False
+    assert len(wake.capturer._queue) == 1
+
+
 def test_wait_flattens_and_scales_float_blocks_before_predict() -> None:
     """Regression: sounddevice delivers (frames, 1) float32; openwakeword needs
     flat int16 PCM.
@@ -237,6 +264,16 @@ def test_default_threshold_is_exposed() -> None:
 
 
 # --- SpeechStartWake: name-gated wake (engine "name") -------------------------
+def test_retries_transient_empty_read() -> None:
+    wake = SpeechStartWake(
+        capturer=FakeCapturer([None, _frame()]),
+        vad=FakeVAD([True]),
+        clock=FakeClock(),
+    )
+
+    assert wake.wait(timeout=1.0) is True
+
+
 def test_fires_on_leading_edge_of_speech() -> None:
     speech = [False, False, True, True, False, True]
     capturer = FakeCapturer([_frame() for _ in speech])
@@ -279,6 +316,20 @@ def test_returns_false_when_capturer_dries_up() -> None:
         clock=FakeClock(),
     )
     assert wake.wait(timeout=10.0) is False
+
+
+def test_xlsr_retries_transient_empty_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    wake = XLSRWakeWord(
+        capturer=FakeCapturer([None, _frame()]),
+        classifier_path=Path("unused.onnx"),
+        window_s=BLOCK / SAMPLE_RATE,
+        hop_s=BLOCK / SAMPLE_RATE,
+        model=object(),
+        clock=FakeClock(),
+    )
+    monkeypatch.setattr(wake, "_classify", lambda window: 0.9)
+
+    assert wake.wait(timeout=1.0) is True
 
 
 def test_rewind_reinjects_preroll_in_order() -> None:

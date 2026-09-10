@@ -256,5 +256,17 @@ The Stage 1 acceptance task and all later Stage 2 implementation rows remain unc
 
 ## Structured status consumed/produced
 
+## Stage 1 task 1.3.3 — offline acceptance
+
+- **Status:** completed; only task 1.3.3 was authorized and marked `[x]` in `tasks.md`.
+- **Scope:** acceptance/evidence only. No production, source, test, config, dependency, credential, OAuth, or network changes. Only `tasks.md`, this file, and `verify-report.md` were updated.
+- **Required command:** `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q` (Spotify environment variables explicitly unset); result `1059 passed, 1 warning in 50.96s`. Warning is the existing unknown `e2e` mark at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
+- **Offline evidence:** deterministic tests use fake runners/adapters and fake lifecycle components; no Spotify credentials were present or used, and no play/pause command was invoked.
+- **Read-only Linux probe:** `playerctl --version` → `v2.4.1`; `playerctl -l` → `spotify`; status → `Paused`; metadata → `spotify|Airbag|Pensamientos`. User-bus MPRIS identities were `org.mpris.MediaPlayer2.playerctld` and `org.mpris.MediaPlayer2.spotify`; exactly one Spotify identity. No control action or Spotify launch occurred.
+- **Safeguard review:** evidence confirms unchanged allowlisted `open_app`, dedicated Spotify dispatch separate from generic `execute`, cancellation/off/stale suppression, readiness while speaking, TTS/microphone barriers, and history recording only after current-operation validation.
+- **TDD Cycle Evidence:** RED was the recorded pre-implementation offline/no-credentials baseline and prior focused failures; GREEN is the passing full offline suite; TRIANGULATE is the deterministic suite plus read-only playerctl/MPRIS probe and safeguard inspection; REFACTOR is review of the independently rollbackable Stage 1 slice with no source edits.
+- **Rollback boundary:** unregister `spotify_play`/`spotify_pause` intents and Spotify service/registry handlers; retain existing `open_app spotify`. Do not alter generic `execute`.
+- **Remaining:** Stage 2 implementation-owned tasks remain unchecked and are not part of this acceptance task.
+
 - **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context; parent-authorized work unit `spotify-stage1-safe-diagnostics-docs`.
 - **Produced:** apply progress for task 1.3.2; next recommended phase is `sdd-verify`; no unsafe action-context warnings. |

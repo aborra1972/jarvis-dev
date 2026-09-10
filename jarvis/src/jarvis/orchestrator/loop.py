@@ -600,7 +600,16 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(_spoken_toward(LONG_OPERATION_ACK))
-        if intent.intent == "general_qa" and config.LLM_PROVIDER not in ("gemini", "codex"):
+        if intent.intent == "general_qa" and config.LLM_PROVIDER == "codex":
+            # Codex already returned routing and the optional presentation
+            # answer in one envelope; never invoke it again here.
+            result = assistant_lifecycle.handle_general_qa(
+                intent,
+                pipeline.session,
+                answer=interpretation.answer,
+                combined=True,
+            )
+        elif intent.intent == "general_qa" and config.LLM_PROVIDER not in ("gemini", "codex"):
             # Stream sentence-by-sentence so Jarvis starts speaking before
             # Ollama finishes generating the full answer (see
             # assistant_lifecycle.stream_general_qa). Falls back to the

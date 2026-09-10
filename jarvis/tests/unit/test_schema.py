@@ -155,6 +155,14 @@ def test_system_prompt_lists_all_commands_and_domains() -> None:
 
 
 # --- T-SAFE-01/02: blocked flag, destructive guard, dangerous patterns --------
+def test_codex_qa_prompt_requires_answer_when_available() -> None:
+    prompt = build_system_prompt(include_general_qa_answer=True)
+    assert '"answer": ""' in prompt
+    assert "MUST contain a concise answer" in prompt
+    assert "genuinely unavailable" in prompt
+    assert "at most 2000 characters" in prompt
+
+
 def test_intent_blocked_defaults_false() -> None:
     assert Intent(intent="shutdown").blocked is False
     blocked = Intent(intent="format_disk", blocked=True)

@@ -439,7 +439,14 @@ class CodexProvider:
             raise RuntimeError(f"codex returned non-JSON output: {text[:200]}") from exc
 
 
+def resolve_payload(prompt: str, system: str, provider: IntentProvider) -> dict:
+    """Resolve a raw provider payload without discarding optional envelope fields."""
+    payload = provider.resolve(prompt, system)
+    if not isinstance(payload, dict):
+        raise schema.SchemaError("bad_payload", "provider returned a non-object payload")
+    return payload
+
+
 def resolve(prompt: str, system: str, provider: IntentProvider) -> schema.Intent:
     """Resolve and validate through the injected provider."""
-    payload = provider.resolve(prompt, system)
-    return schema.validate(payload)
+    return schema.validate(resolve_payload(prompt, system, provider))

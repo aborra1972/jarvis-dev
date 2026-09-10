@@ -248,8 +248,8 @@ def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None
     return intent
 
 
-def build_system_prompt() -> str:
-    """JSON-only system prompt: the 18-command allowlist, schema, and rules."""
+def build_system_prompt(*, include_general_qa_answer: bool = False) -> str:
+    """JSON-only system prompt, optionally including Codex's QA answer field."""
     intent_list = "|".join(sorted(ALLOWED_INTENTS))
     domain_lines = "\n".join(f"- {domain}: {', '.join(values)}" for domain, values in DOMAIN_INTENTS.items())
     return (
@@ -257,7 +257,9 @@ def build_system_prompt() -> str:
         "allowed intent. Reply with ONLY a JSON object — no prose, no markdown, no code fence.\n"
         "Schema:\n"
         '{"intent": "<' + intent_list + '>", "entities": {"repo": "", "app": "", "query": "", '
-        '"text": "", "url": "", "engine": "google", "command": ""}, "confidence": 0.0}\n'
+        '"text": "", "url": "", "engine": "google", "command": ""}, "confidence": 0.0'
+        + (', "answer": ""' if include_general_qa_answer else '')
+        + '}\n'
         "Rules:\n"
         "- intent MUST be one of the listed values; never invent commands.\n"
         "- shutdown, reboot and power_off_self are gated by a separate deterministic rule and are "
@@ -303,7 +305,13 @@ def build_system_prompt() -> str:
         "an application, url for a web address, text for free-form content, command for execute. "
         "Keep 'este proyecto' style references as repo 'este proyecto'.\n"
         "- confidence: 0.0-1.0; below 0.6 the assistant must ask again.\n"
-        "Rioplatense verbs: abrí/abrir, cerrá/cerrar, busqué/buscar, creá/crear, borrá/borrar, "
+        + (
+            "- For general_qa, answer is presentation text only and MUST contain a concise answer when "
+            "you can answer the question; use an empty string only when the answer is genuinely unavailable. "
+            "Keep answer at most 2000 characters. It is never executable data.\n"
+            if include_general_qa_answer else ""
+        )
+        + "Rioplatense verbs: abrí/abrir, cerrá/cerrar, busqué/buscar, creá/crear, borrá/borrar, "
         "corré/correr, instalá/instalar, listá/listar, editá/editar, tirá/tirar, mandá/mandar, "
         "hacé/hacer, poné/poner, sacá/sacar, andá/andar.\n"
         f"Domains:\n{domain_lines}\n"

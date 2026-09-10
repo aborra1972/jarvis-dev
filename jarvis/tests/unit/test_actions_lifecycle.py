@@ -69,6 +69,25 @@ def test_general_qa_uses_agent_personality_as_system_prompt(monkeypatch) -> None
     assert "amigo" in captured["body"]["system"]
 
 
+def test_codex_combined_answer_is_used_without_a_second_call(monkeypatch) -> None:
+    monkeypatch.setattr(assistant_lifecycle.config, "LLM_PROVIDER", "codex")
+    result = assistant_lifecycle.handle_general_qa(
+        _intent("general_qa", {"query": "hola"}), None,
+        answer="Respuesta combinada.", combined=True,
+    )
+    assert result.ok is True
+    assert result.spoken == "Respuesta combinada."
+
+
+def test_codex_combined_missing_answer_falls_back_without_call(monkeypatch) -> None:
+    monkeypatch.setattr(assistant_lifecycle.config, "LLM_PROVIDER", "codex")
+    result = assistant_lifecycle.handle_general_qa(
+        _intent("general_qa", {"query": "hola"}), None, combined=True,
+    )
+    assert result.ok is True
+    assert "No tengo una respuesta" in result.spoken
+
+
 def test_general_qa_empty_query_uses_agent_address(monkeypatch) -> None:
     monkeypatch.setenv("JARVIS_AGENT", "friday")
     result = assistant_lifecycle.handle_general_qa(_intent("general_qa", {}), None)

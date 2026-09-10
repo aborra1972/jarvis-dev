@@ -78,7 +78,13 @@ def handle_register_voice(intent: Intent, session: object) -> ActionResult:
         )
 
 
-def handle_general_qa(intent: Intent, session: object) -> ActionResult:
+def handle_general_qa(
+    intent: Intent,
+    session: object,
+    *,
+    answer: str | None = None,
+    combined: bool = False,
+) -> ActionResult:
     """Answer a general knowledge question using the LLM directly.
 
     Routes through Ollama/Gemini depending on config, returns the response
@@ -166,7 +172,17 @@ def handle_general_qa(intent: Intent, session: object) -> ActionResult:
             return ActionResult(ok=True, spoken=text)
 
         else:
-            # Codex/Gemini/Fallback - use direct text completion when available.
+            # Codex's interpreter already fetched the answer in its combined
+            # envelope. Never issue a second call for a missing/malformed answer.
+            if combined:
+                if not answer:
+                    return ActionResult(
+                        ok=True,
+                        spoken=f"No tengo una respuesta para eso, {config.agent_address()}.",
+                    )
+                logger.info("general_qa response: %s", answer[:100])
+                return ActionResult(ok=True, spoken=answer)
+            # Non-combined providers retain the existing direct-answer path.
             if hasattr(provider, "complete"):
                 text = provider.complete(query, system_prompt).strip()
                 logger.info("general_qa response: %s", text[:100])

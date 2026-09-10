@@ -11,6 +11,7 @@ import pytest
 
 from jarvis.interpreter.interpreter import resolve_intent
 from jarvis.interpreter.llm import FakeProvider
+import jarvis.interpreter.interpreter as interpreter_module
 
 ALLOWLIST = {"firefox"}
 
@@ -58,6 +59,48 @@ def test_llm_happy_path() -> None:
     assert result.intent.entities == {"query": "como funciona el middleware de auth"}
     assert result.intent.source == "llm"
     assert result.needs_reask is False
+
+
+def test_codex_combined_general_qa_keeps_answer_without_second_call(monkeypatch) -> None:
+    provider = FakeProvider([{
+        "intent": "general_qa",
+        "entities": {"query": "Charvis, qué hora es?"},
+        "confidence": 0.95,
+        "answer": "Son las diez.",
+    }])
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    result = resolve_intent("Charvis, qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
+    assert result.intent is not None
+    assert result.intent.intent == "general_qa"
+    assert result.answer == "Son las diez."
+    assert len(provider.calls) == 1
+
+
+def test_codex_combined_malformed_or_absent_answer_is_safe(monkeypatch) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    for payload in (
+        {"intent": "general_qa", "entities": {"query": "hola"}, "confidence": 0.9, "answer": 42},
+        {"intent": "general_qa", "entities": {"query": "hola"}, "confidence": 0.9},
+    ):
+        result = resolve_intent(
+            "hola", provider=FakeProvider([payload]), app_allowlist=ALLOWLIST, use_cache=False
+        )
+        assert result.intent is not None
+        assert result.answer is None
+
+
+def test_codex_response_is_ignored_for_non_qa_intent(monkeypatch) -> None:
+    provider = FakeProvider([{
+        "intent": "ask",
+        "entities": {"query": "cómo funciona"},
+        "confidence": 0.9,
+        "answer": "must not be spoken",
+    }])
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    result = resolve_intent("explicame el middleware", provider=provider, app_allowlist=ALLOWLIST)
+    assert result.intent is not None
+    assert result.intent.intent == "ask"
+    assert result.answer is None
 
 
 def test_llm_destructive_suggestion_rejected_by_golden() -> None:

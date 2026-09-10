@@ -192,6 +192,7 @@ class Interpretation:
     # Only ever set alongside needs_reask/unsupported — the orchestrator may
     # SPEAK this, never execute it. See interpreter/nlu.py's module docstring.
     suggestion: str | None = None
+    answer: str | None = None
     control: str | None = None
 
 
@@ -227,7 +228,7 @@ def resolve_intent(
         logger.debug("pronoun resolved to: %r", surface)
 
     # 0. Intent cache: skip LLM for repeat commands (5 min TTL)
-    if use_cache and provider is not None:
+    if use_cache and provider is not None and not _is_codex_provider(provider):
         cached = _intent_cache.get(surface)
         if cached is not None:
             logger.debug("cache hit for %r", surface)
@@ -264,7 +265,14 @@ def resolve_intent(
         surface = surface[:MAX_TRANSCRIPT_CHARS]
 
     try:
-        intent = llm.resolve(surface, schema.build_system_prompt(), provider)
+        combined_qa = _is_codex_provider(provider)
+        payload = llm.resolve_payload(
+            surface,
+            schema.build_system_prompt(include_general_qa_answer=combined_qa),
+            provider,
+        )
+        intent = schema.validate(payload)
+        answer = _qa_answer(payload) if intent.intent == "general_qa" else None
     except schema.SchemaError as exc:
         if exc.code == "unknown_intent":
             return Interpretation(
@@ -295,6 +303,7 @@ def resolve_intent(
         if is_code_editor_focused():
             logger.info("code editor focused — routing general_qa to ask (OpenCode)")
             intent = replace(intent, intent="ask")
+            answer = None
 
     # 4. Execute intent: confirmation policy driven by SAFETY_GATE (T-SAFE-02).
     #    - "strict" (default) → always confirm every execute command.
@@ -321,10 +330,13 @@ def resolve_intent(
     intent = _resolve_active_project(intent)
 
     # 5. Cache successful resolution for repeat commands
-    if use_cache and intent.confidence >= threshold:
+    if use_cache and intent.confidence >= threshold and intent.intent != "general_qa":
         _intent_cache.put(surface, intent)
 
-    return _validate_and_wrap(intent, allowlist, threshold)
+    result = _validate_and_wrap(intent, allowlist, threshold)
+    if result.intent is not None and intent.intent == "general_qa":
+        result.answer = answer
+    return result
 
 
 def _validate_and_wrap(
@@ -341,6 +353,18 @@ def _validate_and_wrap(
     # Push successful intent to recent context for pronoun resolution
     _recent_context.push(intent)
     return Interpretation(intent=intent)
+
+
+def _is_codex_provider(provider: object) -> bool:
+    return isinstance(provider, llm.CodexProvider)
+
+
+def _qa_answer(payload: dict) -> str | None:
+    answer = payload.get("answer")
+    if not isinstance(answer, str):
+        return None
+    answer = answer.strip()
+    return answer if answer and len(answer) <= 2000 else None
 
 
 def _resolve_active_project(intent: schema.Intent) -> schema.Intent:

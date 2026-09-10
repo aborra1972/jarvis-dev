@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import re
 import secrets
 import subprocess
@@ -139,6 +140,205 @@ class KeyringCredentialStore:
         except Exception:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         return CredentialResult(CredentialStatus.OK)
+
+
+class OAuthErrorCode(str, Enum):
+    OK = "ok"
+    DISABLED = "disabled"
+    NOT_AUTHORIZED = "not_authorized"
+    STORAGE_UNAVAILABLE = "storage_unavailable"
+    NETWORK_TIMEOUT = "network_timeout"
+    PROVIDER_ERROR = "provider_error"
+    INVALID_GRANT = "invalid_grant"
+    UNAUTHORIZED = "unauthorized"
+    INVALID_RESPONSE = "invalid_response"
+
+
+@dataclass(frozen=True, repr=False)
+class OAuthResult:
+    code: OAuthErrorCode
+    message: str
+    access_token: str | None = field(default=None, repr=False)
+    payload: object | None = field(default=None, repr=False)
+
+    @property
+    def ok(self) -> bool:
+        return self.code is OAuthErrorCode.OK
+
+
+class OAuthClient:
+    """Offline-testable Spotify token lifecycle with a bounded transport seam."""
+
+    TOKEN_URL = "https://accounts.spotify.com/api/token"
+    _EXPIRY_LEEWAY_S = 60.0
+
+    def __init__(self, *, enabled: bool, client_id: str | None, store: Any,
+                 transport: Callable[..., Any], clock: Callable[[], float] = time.time,
+                 timeout_s: float = 5.0) -> None:
+        if not 0.1 <= timeout_s <= 30.0:
+            raise ValueError("invalid OAuth timeout")
+        self._enabled = bool(enabled)
+        self._client_id = client_id
+        self._store = store
+        self._transport = transport
+        self._clock = clock
+        self._timeout = float(timeout_s)
+        self._refresh_lock = threading.Lock()
+
+    def exchange_code(self, transaction: PKCETransaction, code: str, *, session_id: str) -> OAuthResult:
+        if not self._enabled:
+            return self._result(OAuthErrorCode.DISABLED)
+        if not code or not transaction.consume(session_id, now=self._clock()):
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        response = self._send({
+            "grant_type": "authorization_code", "code": code,
+            "redirect_uri": "http://127.0.0.1/callback",
+            "client_id": self._client_id or "", "code_verifier": transaction.verifier,
+            "scope": " ".join(sorted(APPROVED_SPOTIFY_SCOPES)),
+        })
+        result = self._process_token_response(response)
+        if result.ok:
+            return self._save_token(result)
+        return result
+
+    def access_token(self) -> OAuthResult:
+        if not self._enabled:
+            return self._result(OAuthErrorCode.DISABLED)
+        loaded = self._load_token()
+        if not loaded.ok:
+            return loaded
+        record = loaded.payload
+        if self._valid_record(record) and record["expires_at"] - self._clock() > self._EXPIRY_LEEWAY_S:
+            return OAuthResult(OAuthErrorCode.OK, "", access_token=record["access_token"])
+        with self._refresh_lock:
+            # Another caller may have completed rotation while this caller waited.
+            loaded = self._load_token()
+            if not loaded.ok:
+                return loaded
+            record = loaded.payload
+            if self._valid_record(record) and record["expires_at"] - self._clock() > self._EXPIRY_LEEWAY_S:
+                return OAuthResult(OAuthErrorCode.OK, "", access_token=record["access_token"])
+            refresh_token = record.get("refresh_token") if isinstance(record, dict) else None
+            if not refresh_token:
+                return self._cleanup(OAuthErrorCode.NOT_AUTHORIZED)
+            result = self._process_token_response(self._send({
+                "grant_type": "refresh_token", "refresh_token": refresh_token,
+                "client_id": self._client_id or "",
+                "scope": " ".join(sorted(APPROVED_SPOTIFY_SCOPES)),
+            }), old_refresh_token=refresh_token)
+            return self._save_token(result) if result.ok else result
+
+    def request(self, method: str, url: str, data: dict[str, str] | None = None) -> OAuthResult:
+        token = self.access_token()
+        if not token.ok:
+            return token
+        try:
+            response = self._transport(method, url, data or {},
+                                       {"Authorization": f"Bearer {token.access_token}"}, self._timeout)
+        except (TimeoutError, OSError):
+            return self._result(OAuthErrorCode.NETWORK_TIMEOUT)
+        except Exception:
+            return self._result(OAuthErrorCode.PROVIDER_ERROR)
+        status = getattr(response, "status_code", None)
+        if status == 401:
+            return self._cleanup(OAuthErrorCode.UNAUTHORIZED)
+        if not isinstance(status, int) or status < 200 or status >= 300:
+            return self._result(OAuthErrorCode.PROVIDER_ERROR)
+        return OAuthResult(OAuthErrorCode.OK, "", payload=None)
+
+    def revoke(self) -> OAuthResult:
+        return self._cleanup(OAuthErrorCode.OK)
+
+    disable = revoke
+
+    def _send(self, data: dict[str, str]) -> Any:
+        try:
+            return self._transport("POST", self.TOKEN_URL, data,
+                                   {"Content-Type": "application/x-www-form-urlencoded"}, self._timeout)
+        except (TimeoutError, OSError):
+            return _OAuthTransportFailure(OAuthErrorCode.NETWORK_TIMEOUT)
+        except Exception:
+            return _OAuthTransportFailure(OAuthErrorCode.PROVIDER_ERROR)
+
+    def _process_token_response(self, response: Any, *, old_refresh_token: str | None = None) -> OAuthResult:
+        if isinstance(response, _OAuthTransportFailure):
+            return self._result(response.code)
+        status = getattr(response, "status_code", None)
+        try:
+            payload = response.json()
+        except Exception:
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        if status in {400, 401} and isinstance(payload, dict) and payload.get("error") == "invalid_grant":
+            return self._cleanup(OAuthErrorCode.INVALID_GRANT)
+        if status != 200 or not isinstance(payload, dict):
+            return self._result(OAuthErrorCode.PROVIDER_ERROR)
+        access = payload.get("access_token")
+        expires = payload.get("expires_in")
+        refresh = payload.get("refresh_token") or old_refresh_token
+        if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        try:
+            expires_at = self._clock() + float(expires)
+        except (TypeError, ValueError):
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        scopes = set(str(payload.get("scope", "")).split()) or set(APPROVED_SPOTIFY_SCOPES)
+        if scopes != APPROVED_SPOTIFY_SCOPES:
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        return OAuthResult(OAuthErrorCode.OK, "", access_token=access,
+                           payload={"access_token": access, "refresh_token": refresh,
+                                    "expires_at": expires_at, "scope": sorted(scopes)})
+
+    def _load_token(self) -> OAuthResult:
+        result = self._store.load()
+        if result.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        if result.status is CredentialStatus.MISSING or not result.value:
+            return self._result(OAuthErrorCode.NOT_AUTHORIZED)
+        try:
+            record = json.loads(result.value)
+        except (TypeError, ValueError):
+            return self._cleanup(OAuthErrorCode.INVALID_RESPONSE)
+        return OAuthResult(OAuthErrorCode.OK, "", payload=record) if self._valid_record(record) else self._cleanup(OAuthErrorCode.INVALID_RESPONSE)
+
+    @staticmethod
+    def _valid_record(record: Any) -> bool:
+        return (isinstance(record, dict) and isinstance(record.get("access_token"), str)
+                and isinstance(record.get("refresh_token"), str)
+                and isinstance(record.get("expires_at"), (int, float))
+                and set(record.get("scope", ())) == APPROVED_SPOTIFY_SCOPES)
+
+    def _save_token(self, result: OAuthResult) -> OAuthResult:
+        saved = self._store.save(json.dumps(result.payload, separators=(",", ":")))
+        if saved.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        return OAuthResult(OAuthErrorCode.OK, "", access_token=result.access_token)
+
+    def _cleanup(self, code: OAuthErrorCode) -> OAuthResult:
+        deleted = self._store.delete()
+        if deleted.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        return self._result(code)
+
+    @staticmethod
+    def _result(code: OAuthErrorCode) -> OAuthResult:
+        messages = {
+            OAuthErrorCode.DISABLED: "Spotify está deshabilitado.",
+            OAuthErrorCode.NOT_AUTHORIZED: "Spotify requiere autorización.",
+            OAuthErrorCode.STORAGE_UNAVAILABLE: "El almacenamiento seguro no está disponible.",
+            OAuthErrorCode.NETWORK_TIMEOUT: "Spotify tardó demasiado en responder.",
+            OAuthErrorCode.INVALID_GRANT: "La autorización de Spotify venció; debe autorizarse nuevamente.",
+            OAuthErrorCode.UNAUTHORIZED: "La autorización de Spotify ya no es válida.",
+        }
+        return OAuthResult(code, messages.get(code, "No pude completar la autorización de Spotify."))
+
+
+@dataclass(frozen=True)
+class _OAuthTransportFailure:
+    code: OAuthErrorCode
+
+
+# Descriptive alias for callers that prefer the provider-specific name.
+SpotifyOAuthClient = OAuthClient
 
 
 class LocalSpotifyAdapter:

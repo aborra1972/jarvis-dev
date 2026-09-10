@@ -296,3 +296,27 @@ The broad Stage 2 OAuth task and all other Stage 2 implementation rows remain un
 
 - **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context with allowed edit root `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; strict TDD active; user resolved high-risk delivery as bounded safe slice with a 350-line cap.
 - **Produced:** `next_recommended: sdd-verify` for this slice; apply remains incomplete for the overall change because broad Stage 2 tasks are unchecked. No action-context warnings.
+
+## Authorized work unit `spotify-stage2-injected-token-lifecycle`
+
+- **Status:** completed for the injected offline token-lifecycle slice. The broad Stage 2 OAuth task remains unchecked; the dedicated safe-slice row is checked in `tasks.md`.
+- **Scope:** added injected, bounded PKCE code exchange; fixed approved scopes; keyring-only token persistence; expiry-aware one-flight refresh with refresh-token rotation; local revoke/disable cleanup; invalid-grant and API 401 cleanup; and typed redacted errors. No browser, callback listener, live transport, catalog, playback, intents, documentation, or provider calls were added.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_oauth.py`, `openspec/changes/jarvis-spotify-control/tasks.md`, and this file.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added five focused lifecycle tests first; the suite initially failed at collection because `OAuthClient` and typed lifecycle results were absent. |
+| GREEN | Implemented the smallest injected transport client with PKCE exchange, expiry refresh, rotation, cleanup, and safe result mapping; focused tests passed: `23 passed`. |
+| TRIANGULATE | Focused OAuth/config tests passed: `23 passed`; the required full suite reached `1072 passed, 1 failed, 1 warning`, with the unrelated existing proactive usage-note assertion in `jarvis/tests/test_imports.py::test_cli_start_runs_real_pipeline` failing because live usage reported `firefox 124 veces`. No network, credentials, callback, or live transport was used. |
+| REFACTOR | Added a descriptive client alias, retained keyring-only storage, hid token material from result representations, and kept all behavior in the authorized Spotify service/test surfaces. |
+
+## Remaining tasks and workload boundary
+
+The broad OAuth row and all catalog, playback, lifecycle, diagnostics, documentation, and release rows remain unchecked and outside this work unit. The implementation slice is 350-line bounded and parent-authorized under `auto-chain`; no commit or push was performed by this executor.
+
+## Structured status consumed/produced
+
+- **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; `actionContext.mode: repo-local`; allowed edit root is that workspace; parent-authorized work unit `spotify-stage2-injected-token-lifecycle`; strict TDD active; delivery resolved as `auto-chain`; parent attempt authority `523bd3c7146b151b2886e28b1ca654bf9efa32d063a3c26fb2ab8a162f975061`.
+- **Produced:** apply progress for the checked dedicated slice; `next_recommended: sdd-verify`; no unsafe action-context warnings.

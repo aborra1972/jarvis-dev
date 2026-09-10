@@ -161,3 +161,74 @@ All other implementation-owned task rows remain unchecked and were not edited, i
 ### Remaining implementation tasks
 
 The remaining implementation-owned rows remain unchecked and out of scope, beginning with Stage 1 lifecycle integration. The completed task checkbox was re-read and confirmed as `[x]`.
+
+## Stage 1 task 1.3.1 — Spotify lifecycle integration
+
+- **Status:** completed; only lifecycle task 1.3.1 was authorized and marked `[x]` in `tasks.md`. Diagnostics, documentation, schema/configuration, adapter/registry, OAuth/network/credentials, and Stage 2 remain untouched.
+- **Files changed:** `jarvis/src/jarvis/orchestrator/contracts.py`, `jarvis/src/jarvis/orchestrator/loop.py`, `jarvis/tests/unit/test_loop.py`, and the selected checkbox in `tasks.md`.
+- **Behavior:** Added volatile `OperationContext`, replacement cancellation on verified wake, propagation of the loop token to the existing Spotify adapter seam, off/readiness precedence, and post-dispatch epoch/token/switch validation that suppresses late Spotify success before history or speech. Existing conversation, confirmation, TTS/microphone, and non-Spotify paths remain covered by the full suite.
+- **Workload:** 141 authored lines across the selected lifecycle source/test/task slice, below the requested 350-line limit. Pre-existing `.atl` working-tree changes were preserved.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added lifecycle tests first; focused execution reported two failures: Spotify dispatch had no operation propagation and a new wake did not replace the previous operation. The readiness test passed against the existing barrier. |
+| GREEN | Added `OperationContext`, wake epoch replacement, Spotify operation binding, and stale-result rejection; focused lifecycle tests passed: `3 passed`. |
+| TRIANGULATE | Required command passed offline: `1049 passed, 1 warning`; the fake adapter flips the switch before returning success, proving no late Spotify speech/history path, and tests cover epoch replacement plus capture refusal while speaking. The warning is the existing unknown `e2e` mark. |
+| REFACTOR | Kept the lifecycle logic in the two authorized orchestrator files, reused existing switch/readiness seams, and avoided changes to the Spotify service, registry, diagnostics, configuration, and unrelated executor behavior. |
+
+### Remaining implementation tasks
+
+The exact unchecked implementation rows remain persisted in `tasks.md`; lifecycle task 1.3.1 is `[x]`, while diagnostics and Stage 1 acceptance remain `[ ]` and were not performed. No Stage 2 task was started.
+
+## Correction work unit `spotify-stage1-interruptible-control-correction`
+
+- **Status:** implementation completed; only the provider-authorized Popen/poll/terminate correction was applied.
+- **Scope:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/src/jarvis/orchestrator/loop.py`, `jarvis/tests/unit/test_spotify_local.py`, `jarvis/tests/unit/test_loop.py`, and this apply-progress plus verify-report. No other source or test path was changed by this work unit.
+- **Behavior:** production playerctl calls now use `Popen` polling with `shell=False`, bounded timeout, prompt terminate/escalating kill, and cancellation-aware result handling. The external off signal cancels the active operation immediately, before the main loop's next tick. Stale Spotify results remain barred from control success, status success, speech, and transcript/history recording.
+- **Persisted tasks:** no checkbox changed; the parent lifecycle task remains `[x]`, and this correction addresses its verification blocker. All other task rows remain untouched.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added a Popen cancellation test proving the pre-correction implementation did not terminate a started child, and an external-off signal test proving no immediate token invalidation seam existed; focused tests failed 2 cases. |
+| GREEN | Added the cancellable Popen/poll/terminate/kill wait and immediate signal-side token cancellation; focused tests passed: `55 passed`. |
+| TRIANGULATE | Required full command passed offline: `1053 passed, 1 warning` (`jarvis/tests/e2e/test_e2e_smoke.py:30`, existing unknown `e2e` mark). Focused fake process evidence confirms cancellation terminates the child and returns `cancelled`; loop evidence confirms external off cancels immediately. No network, credentials, OAuth, hardware, or provider access was used. |
+| REFACTOR | Preserved injected callable runners for deterministic tests, retained fixed argv and redacted typed outcomes, and kept cancellation/history/speech gates in the existing lifecycle seams. |
+
+## Files changed by this work unit
+
+- `jarvis/src/jarvis/services/spotify.py`
+- `jarvis/src/jarvis/orchestrator/loop.py`
+- `jarvis/tests/unit/test_spotify_local.py`
+- `jarvis/tests/unit/test_loop.py`
+- `openspec/changes/jarvis-spotify-control/apply-progress.md`
+- `openspec/changes/jarvis-spotify-control/verify-report.md`
+
+## Remaining tasks and workload boundary
+
+No additional task was authorized. Existing diagnostics/acceptance and Stage 2 rows remain unchecked and outside this correction. Next phase is `sdd-verify`; verification must assess the prior critical blocker.
+
+## Structured status consumed/produced
+
+- **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; `actionContext.mode: repo-local`; runtime attempt HEAD `sha256:a0b5e131c9de21cac738004dc6aa45bb7cb3ea9fb2bfe1d28416e3818223b24d`.
+- **Produced:** apply completed for the authorized correction; `next_recommended: sdd-verify`; no unsafe action-context warnings.
+
+
+## Prior correction work unit `spotify-stage1-lifecycle-blocked-probe-cancellation-correction`
+
+- **Status:** completed as an authorized correction to the verified critical race; no task checkbox changed.
+- **Scope:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/src/jarvis/orchestrator/loop.py`, `jarvis/tests/unit/test_spotify_local.py`, and `jarvis/tests/unit/test_loop.py`, plus this apply-progress and the verify report only. Existing unrelated working-tree changes were preserved.
+- **Behavior:** Spotify waits execute in a daemon worker while the loop-owned token is polled, so cancellation returns before a blocked probe can advance to control. Spotify transcripts are recorded only after current-operation validation, preventing cancelled control from producing history or spoken success. Fixed argv, `shell=False`, timeout, exact identity, fail-closed errors, generic isolation, and `open_app` remain unchanged.
+- **Workload:** 101 correction-authored source/test lines; total relevant working-tree diff remains below the 350-line limit.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added deterministic blocked-probe and blocked-control race tests; the probe test initially remained blocked, and the loop test exposed pre-dispatch Spotify history recording. |
+| GREEN | Added interruptible token polling and deferred Spotify transcript recording until post-return validity; focused tests passed: `53 passed`. |
+| TRIANGULATE | Required command passed: `1051 passed, 1 warning` with no network, credentials, OAuth, hardware, or provider access. Fake traces prove cancellation produces no control side effect, speech, or history. |
+| REFACTOR | Kept the change limited to the existing Spotify wait seam and lifecycle recording boundary; preserved all safety contracts and unrelated behavior. |

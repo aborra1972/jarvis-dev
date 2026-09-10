@@ -41,7 +41,9 @@ from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.orchestrator.confirm import (
     CONFIRM_TIMEOUT_S, Authorization, Confirmation, confirm,
 )
-from jarvis.orchestrator.contracts import ActionResult, CaptureError, OperationToken
+from jarvis.orchestrator.contracts import (
+    ActionResult, CaptureError, OperationContext, OperationToken,
+)
 from jarvis.audio.contracts import CaptureMode
 from jarvis.orchestrator.logs import TranscriptLog, clean_logs
 from jarvis.orchestrator.name_gate import strip_agent_prefix
@@ -189,6 +191,8 @@ def _wake_gates_by_name(wake: object) -> bool:
 
 
 def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _Context]:
+    global _active_operation
+    _active_operation = context.operation
     _sync_wake_threshold(pipeline.wake)
     # Process any pending SIGUSR1/SIGUSR2 before checking state.
     # This runs in the main loop (not a signal handler) so I/O is safe.
@@ -350,9 +354,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # abrí firefox"). Do NOT stop the mic / beep / sleep — that clips the
         # command. Rewind the pre-roll so the name reaches the STT, then listen.
         if _wake_gates_by_name(pipeline.wake):
-            context.epoch_serial += 1
-            context.active_epoch = context.epoch_serial
-            logger.info("conversation.activated(epoch=%s)", context.active_epoch)
+            _activate_epoch(pipeline, context)
             rewind = getattr(pipeline.wake, "rewind", None)
             if callable(rewind):
                 rewind()
@@ -360,9 +362,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             _write_fsm_state("listening")
             return State.LISTENING, context
         context.wake_gated = False
-        context.epoch_serial += 1
-        context.active_epoch = context.epoch_serial
-        logger.info("conversation.activated(epoch=%s)", context.active_epoch)
+        _activate_epoch(pipeline, context)
         # Stop mic before beep to prevent capturing our own sound
         if hasattr(pipeline.wake, 'capturer'):
             pipeline.wake.capturer.stop()
@@ -510,7 +510,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             _close_goodbye(pipeline, context)
             return State.SPEAKING, context
         step = pipeline.session.next_step(interpretation)
-        if pipeline.transcript_log is not None:
+        if pipeline.transcript_log is not None and not (
+            interpretation.intent and interpretation.intent.intent in {"spotify_play", "spotify_pause"}
+        ):
             pipeline.transcript_log.record(
                 transcript,
                 intent=interpretation.intent.intent if interpretation.intent else None,
@@ -607,6 +609,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             context.outcome = "timed_out"
             return State.SPEAKING, context
         intent = context.interpretation.intent
+        if context.operation is None:
+            context.operation = OperationToken.next()
+        _bind_spotify_context(pipeline.executor, context)
+        operation_epoch = context.active_epoch
         if _needs_repo(intent.intent) and _resolve_repo(pipeline, context) is None:
             pipeline.speaker.speak(_spoken_toward(NO_ACTIVE_PROJECT))
             context.outcome = "rejected"
@@ -640,10 +646,17 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             )
         else:
             result = pipeline.executor.execute(intent, pipeline.session)
+        if not _operation_is_current(pipeline, context, operation_epoch):
+            context.outcome = "cancelled"
+            return State.OFF if _is_switched_off(pipeline) else State.IDLE, context
         streamed_response = result.data.get("response", "")
         history_response = result.spoken or (
             streamed_response if isinstance(streamed_response, str) else ""
         )
+        if pipeline.transcript_log is not None and intent.intent in {"spotify_play", "spotify_pause"}:
+            pipeline.transcript_log.record(
+                context.transcript, intent=intent.intent, outcome="execute", entities=intent.entities
+            )
         pipeline.session.record_turn(
             context.transcript,
             history_response,
@@ -679,6 +692,44 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         return State.OFF, context
 
     return State.STOPPED, context
+
+
+def _activate_epoch(pipeline: Pipeline, context: _Context) -> None:
+    """Replace volatile work identity only after a verified wake."""
+    if context.operation is not None:
+        context.operation.cancel("epoch_replaced")
+    context.epoch_serial += 1
+    context.active_epoch = context.epoch_serial
+    context.operation = OperationToken.next()
+    _active_operation = context.operation
+    _bind_spotify_context(pipeline.executor, context)
+    logger.info("conversation.activated(epoch=%s)", context.active_epoch)
+
+
+def _bind_spotify_context(executor: object, context: _Context) -> None:
+    """Propagate loop-owned cancellation to the existing Spotify dispatch."""
+    if context.operation is None or context.active_epoch is None:
+        return
+    operation_context = OperationContext(context.active_epoch, context.operation)
+    setter = getattr(executor, "set_operation_context", None)
+    if callable(setter):
+        setter(operation_context)
+    for intent in ("spotify_play", "spotify_pause"):
+        handler = getattr(executor, "_handlers", {}).get(intent)
+        service = getattr(handler, "__self__", None)
+        adapter = getattr(service, "_adapter", None)
+        if adapter is not None and hasattr(adapter, "_operation"):
+            adapter._operation = context.operation
+
+
+def _operation_is_current(pipeline: Pipeline, context: _Context, epoch: int | None) -> bool:
+    return (
+        epoch is not None
+        and context.active_epoch == epoch
+        and context.operation is not None
+        and not context.operation.cancelled()
+        and not _is_switched_off(pipeline)
+    )
 
 
 def _close_goodbye(pipeline: Pipeline, context: _Context) -> None:
@@ -1208,6 +1259,7 @@ def clean() -> int:
 # corrupted state.json from interrupted writes and avoids hardware races.
 
 _switch_pending: bool | None = None  # SIGUSR1→True (off), SIGUSR2→False (on)
+_active_operation: OperationToken | None = None
 
 
 def _register_switch_signals(session: Session, switch_state, speaker=None) -> None:
@@ -1218,7 +1270,11 @@ def _register_switch_signals(session: Session, switch_state, speaker=None) -> No
     """
 
     def _flip(off: bool) -> None:
-        global _switch_pending
+        global _switch_pending, _active_operation
+        # Cancellation must happen in the signal handler so a blocked child
+        # process observes off before the main loop reaches its next tick.
+        if off and _active_operation is not None:
+            _active_operation.cancel("switch_off")
         _switch_pending = off
 
     signal.signal(signal.SIGUSR1, lambda *_: _flip(True))

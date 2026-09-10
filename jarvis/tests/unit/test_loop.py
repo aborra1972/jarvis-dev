@@ -10,6 +10,7 @@ switch off/on (RF-11), and power_off_self → stopped.
 from __future__ import annotations
 
 import json
+import threading
 from collections import deque
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import pytest
 
 from jarvis.interpreter import Interpretation
 from jarvis.interpreter.schema import Intent
-from jarvis.orchestrator.contracts import ActionResult
+from jarvis.orchestrator.contracts import ActionResult, OperationToken
 from jarvis.orchestrator.loop import (
     LONG_OPERATION_ACK,
     REASK_1,
@@ -1051,6 +1052,83 @@ def test_goodbye_acknowledges_and_returns_to_wake_standby(tmp_path: Path) -> Non
     assert pipeline.executor.calls == []
 
 
+def test_spotify_result_is_suppressed_when_switch_off_invalidates_operation(tmp_path: Path) -> None:
+    from jarvis.services.spotify import SpotifyErrorCode, SpotifyResult
+
+    class Adapter:
+        def __init__(self) -> None:
+            self._operation = None
+            self.calls = 0
+            self.switch_off = False
+
+        def play(self):
+            self.calls += 1
+            assert self._operation is not None
+            self.switch_off = True
+            return SpotifyResult(True, SpotifyErrorCode.OK, "ok", "Playing")
+
+        def pause(self):
+            return self.play()
+
+    adapter = Adapter()
+    from jarvis.actions.base import build_registry
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=FakeWake([True]),
+        capture=FakeCapture(["reproducir spotify"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="spotify_play", entities={}))]),
+        speaker=FakeSpeaker(), executor=build_registry(spotify_adapter=adapter),
+        session=load_state(str(tmp_path / "state.json")), cwd=str(tmp_path),
+        git_runner=lambda cwd: None, switch_state=lambda: adapter.switch_off,
+    )
+    state, context = _tick(State.IDLE, pipeline, _Context())
+    assert state is State.LISTENING
+    state, context = _tick(state, pipeline, context)
+    assert state is State.EXECUTING
+    state, context = _tick(state, pipeline, context)
+
+    assert adapter._operation is context.operation
+    assert adapter.calls == 1
+    assert state is State.OFF
+    assert context.outcome == "cancelled"
+    assert pipeline.speaker.said == []
+
+
+def test_new_wake_replaces_previous_epoch_operation(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        wake=[True, True], transcripts=["abrí firefox", "abrí chromium"],
+        interpreter_script=[_interp(_intent()), _interp(_intent(entities={"app": "chromium"}))],
+        tmp_path=tmp_path,
+    )
+    context = _Context()
+    state, context = _tick(State.IDLE, pipeline, context)
+    first_epoch, first_operation = context.active_epoch, context.operation
+    context.active_epoch = None
+    state, context = _tick(State.IDLE, pipeline, context)
+    assert state is State.LISTENING
+    assert context.active_epoch != first_epoch
+    assert context.operation is not first_operation
+    assert first_operation is not None and first_operation.cancelled()
+    assert first_operation.reason == "epoch_replaced"
+
+
+def test_spotify_readiness_barrier_refuses_capture_while_speaking(tmp_path: Path) -> None:
+    class PlayingSpeaker(FakeSpeaker):
+        def is_playing(self) -> bool:
+            return True
+
+    pipeline = _pipeline(
+        wake=[True], transcripts=["reproducir spotify"],
+        interpreter_script=[_interp(_intent(intent="spotify_play", entities={}))],
+        tmp_path=tmp_path,
+    )
+    pipeline.speaker = PlayingSpeaker()
+    context = _Context(active_epoch=1, operation=OperationToken.next())
+    state, context = _tick(State.IDLE, pipeline, context)
+    assert state is State.IDLE
+    assert context.outcome != "execute"
+    assert pipeline.capture.transcripts[0] == "reproducir spotify"
+
+
 def test_goodbye_during_confirmation_invalidates_without_execution(tmp_path: Path) -> None:
     pipeline = _pipeline(
         wake=[True],
@@ -1062,3 +1140,63 @@ def test_goodbye_during_confirmation_invalidates_without_execution(tmp_path: Pat
     assert outcome == "goodbye"
     assert pipeline.executor.calls == []
     assert any("Hasta luego" in text for text in pipeline.speaker.said)
+
+
+def test_blocked_spotify_control_cancellation_has_no_side_effect_or_history(tmp_path: Path) -> None:
+    from jarvis.services.spotify import LocalSpotifyAdapter
+
+    entered = threading.Event()
+    release = threading.Event()
+    controls = []
+    adapter = None
+
+    def runner(argv, **kwargs):
+        if argv == ["playerctl", "-l"]:
+            return type("Result", (), {"returncode": 0, "stdout": "spotify\n"})()
+        entered.set()
+        adapter._operation.cancel("off")
+        release.wait(0.05)
+        if not adapter._operation.cancelled():
+            controls.append(argv)
+        return type("Result", (), {"returncode": 0, "stdout": "Playing\n"})()
+
+    adapter = LocalSpotifyAdapter(runner=runner, operation=OperationToken())
+
+    class SpotifyExecutor:
+        long_running_intents = frozenset()
+        def execute(self, intent, session):
+            result = adapter.play()
+            return ActionResult(ok=result.ok, spoken="success" if result.ok else "")
+
+    journal = FakeTranscriptLog()
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=FakeWake([True]), capture=FakeCapture(["reproducir spotify"]),
+        interpreter=FakeInterpreter([_interp(_intent(intent="spotify_play", entities={}))]),
+        speaker=FakeSpeaker(), executor=SpotifyExecutor(),
+        session=load_state(str(tmp_path / "state.json"), history_path=str(tmp_path / "history.json")),
+        cwd=str(tmp_path), git_runner=lambda cwd: None, transcript_log=journal,
+    )
+    state, context = _tick(State.IDLE, pipeline, _Context())
+    state, context = _tick(state, pipeline, context)
+    assert state is State.EXECUTING
+    assert context.operation is not None and not context.operation.cancelled()
+    adapter._operation = context.operation
+    state, context = _tick(state, pipeline, context)
+    assert context.outcome == "cancelled"
+    assert controls == []
+    assert pipeline.speaker.said == []
+    assert journal.records == []
+
+
+def test_external_off_signal_cancels_active_operation_immediately(monkeypatch, tmp_path: Path):
+    handlers = {}
+    monkeypatch.setattr(loop_module.signal, "signal", lambda signum, handler: handlers.setdefault(signum, handler))
+    token = OperationToken()
+    loop_module._active_operation = token
+
+    loop_module._register_switch_signals(Session(), None)
+    handlers[loop_module.signal.SIGUSR1]()
+
+    assert token.cancelled() is True
+    assert token.reason == "switch_off"
+    loop_module._active_operation = None

@@ -52,6 +52,17 @@ class OperationToken:
         return not self.cancelled() and self.generation == current.generation
 
 
+@dataclass(frozen=True)
+class OperationContext:
+    """Volatile lifecycle identity passed to bounded domain work."""
+
+    epoch: int
+    token: OperationToken
+
+    def is_current(self, epoch: int, token: OperationToken) -> bool:
+        return self.epoch == epoch and self.token.is_current(token)
+
+
 class CaptureError(Exception):
     """Capture/STT hardware failure — the loop replies with a spoken error (PR6).
 

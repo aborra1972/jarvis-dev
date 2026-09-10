@@ -9,6 +9,7 @@ protocol with fakes (no mic) and swaps in SoundDeviceCapturer for real use.
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass, field
 import wave
 from queue import Empty, Queue
 from typing import Callable, Protocol, runtime_checkable
@@ -23,6 +24,19 @@ SILENCE_MS = 800
 MAX_UTTERANCE_S = 10.0
 
 DEFAULT_THRESHOLD = 0.02
+
+
+@dataclass
+class AudioMetrics:
+    """In-memory counters and latest results for one audio runtime path."""
+
+    pcm_frames_received: int = 0
+    queue_frames_read: int = 0
+    front_frames_read: int = 0
+    empty_reads: int = 0
+    replayed_preroll_frames: int = 0
+    wake_wait_attempts: int = 0
+    wake_wait_results: list[bool] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -120,15 +134,16 @@ class SoundDeviceCapturer:
     downstream code never blocks on the audio hardware directly.
     """
 
-    def __init__(self, sample_rate: int = SAMPLE_RATE, block_ms: int = BLOCK_MS) -> None:
+    def __init__(self, sample_rate: int = SAMPLE_RATE, block_ms: int = BLOCK_MS, *, metrics: AudioMetrics | None = None) -> None:
         self.sample_rate = sample_rate
         self.block_ms = block_ms
-        self._blocks = SAMPLE_RATE * block_ms // 1000
+        self._blocks = sample_rate * block_ms // 1000
         self._queue: Queue[np.ndarray] = Queue()
         # Re-injected pre-roll (name-gated wake): read BEFORE live frames.
         self._front: deque[np.ndarray] = deque()
         self._replayed_preroll = False
         self._stream = None
+        self.metrics = metrics or AudioMetrics()
 
     def start(self) -> None:
         if self._stream is not None:
@@ -136,6 +151,7 @@ class SoundDeviceCapturer:
         import sounddevice as sd
 
         def _callback(indata: np.ndarray, frames: int, time, status) -> None:
+            self.metrics.pcm_frames_received += frames
             self._queue.put(indata.copy())
 
         self._stream = sd.InputStream(
@@ -156,10 +172,16 @@ class SoundDeviceCapturer:
 
     def read_frames(self, timeout: float = 1.0) -> np.ndarray | None:
         if self._front:
-            return self._front.popleft()
+            block = self._front.popleft()
+            self.metrics.front_frames_read += len(block)
+            self.metrics.replayed_preroll_frames += len(block)
+            return block
         try:
-            return self._queue.get(timeout=timeout)
+            block = self._queue.get(timeout=timeout)
+            self.metrics.queue_frames_read += len(block)
+            return block
         except Empty:
+            self.metrics.empty_reads += 1
             return None
 
     def enqueue_back(self, blocks) -> None:

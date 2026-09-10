@@ -32,6 +32,7 @@ from jarvis import config
 from jarvis.audio.capture import (
     BLOCK_MS,
     SAMPLE_RATE,
+    AudioMetrics,
     Capturer,
     SilenceVAD,
     build_vad,
@@ -114,6 +115,7 @@ class OpenWakeWord:
         capturer: Capturer,
         *,
         model_paths: list[Path] | None = None,
+        metrics: AudioMetrics | None = None,
         custom: Path | None = None,
         threshold: float = DEFAULT_THRESHOLD,
         vad_threshold: float = DEFAULT_VAD_THRESHOLD,
@@ -122,6 +124,7 @@ class OpenWakeWord:
         timeout_per_read: float = 1.0,
     ) -> None:
         self.capturer = capturer
+        self.metrics = metrics or getattr(capturer, "metrics", None) or AudioMetrics()
         self.threshold = threshold
         self.vad_threshold = vad_threshold
         self._timeout_per_read = timeout_per_read
@@ -146,6 +149,7 @@ class OpenWakeWord:
 
     def wait(self, timeout: float) -> bool:
         """Block until a model score reaches threshold or the timeout elapses."""
+        self.metrics.wake_wait_attempts += 1
         deadline = self._clock() + timeout
         empty_reads = 0
         while self._clock() < deadline:
@@ -168,7 +172,9 @@ class OpenWakeWord:
                 if np.issubdtype(block.dtype, np.floating):
                     block = (block * 32767).astype(np.int16)
             if triggered(self._model.predict(block), self.threshold):
+                self.metrics.wake_wait_results.append(True)
                 return True
+        self.metrics.wake_wait_results.append(False)
         return False
 
     def flush(self) -> None:
@@ -200,12 +206,14 @@ class SpeechStartWake:
         capturer: Capturer,
         *,
         threshold: float = DEFAULT_VAD_THRESHOLD,
+        metrics: AudioMetrics | None = None,
         preroll_s: float = config.WAKE_PREROLL_S,
         timeout_per_read: float = 1.0,
         vad=None,
         clock: Clock | None = None,
     ) -> None:
         self.capturer = capturer
+        self.metrics = metrics or getattr(capturer, "metrics", None) or AudioMetrics()
         self.threshold = threshold
         self._timeout_per_read = timeout_per_read
         self._clock = clock or _monotonic
@@ -229,6 +237,7 @@ class SpeechStartWake:
 
     def wait(self, timeout: float) -> bool:
         """Block until speech onset (leading edge) or the timeout elapses."""
+        self.metrics.wake_wait_attempts += 1
         deadline = self._clock() + timeout
         empty_reads = 0
         while self._clock() < deadline:
@@ -245,8 +254,10 @@ class SpeechStartWake:
             speech = self._vad.is_speech(block)
             if speech and not self._was_speech:
                 self._was_speech = True
+                self.metrics.wake_wait_results.append(True)
                 return True
             self._was_speech = speech
+        self.metrics.wake_wait_results.append(False)
         return False
 
     def rewind(self) -> bool:
@@ -293,6 +304,7 @@ class XLSRWakeWord:
         *,
         classifier_path: Path,
         threshold: float = DEFAULT_THRESHOLD,
+        metrics: AudioMetrics | None = None,
         window_s: float = XLSR_WINDOW_S,
         hop_s: float = XLSR_HOP_S,
         model_name: str = XLSR_MODEL_NAME,
@@ -301,6 +313,7 @@ class XLSRWakeWord:
         timeout_per_read: float = 0.5,
     ) -> None:
         self.capturer = capturer
+        self.metrics = metrics or getattr(capturer, "metrics", None) or AudioMetrics()
         self.threshold = threshold
         self._window_samples = int(window_s * SAMPLE_RATE)
         self._hop_samples = int(hop_s * SAMPLE_RATE)
@@ -330,6 +343,7 @@ class XLSRWakeWord:
 
     def wait(self, timeout: float) -> bool:
         """Block until the classifier score reaches threshold or timeout."""
+        self.metrics.wake_wait_attempts += 1
         deadline = self._clock() + timeout
         empty_reads = 0
         while self._clock() < deadline:
@@ -360,6 +374,7 @@ class XLSRWakeWord:
 
                 score = self._classify(window)
                 if score >= self.threshold:
+                    self.metrics.wake_wait_results.append(True)
                     return True
 
                 # Slide window by hop
@@ -375,6 +390,7 @@ class XLSRWakeWord:
                         self._buf_samples -= drop_samples
                         drop_samples = 0
 
+        self.metrics.wake_wait_results.append(False)
         return False
 
     def flush(self) -> None:

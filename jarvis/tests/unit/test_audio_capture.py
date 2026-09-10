@@ -18,6 +18,7 @@ import pytest
 from jarvis.audio.capture import (
     BLOCK_MS,
     SAMPLE_RATE,
+    AudioMetrics,
     Capturer,
     SilenceVAD,
     SoundDeviceCapturer,
@@ -246,6 +247,24 @@ def test_sounddevice_capturer_reads_queued_frames() -> None:
     capturer._queue.put(frame)
     assert capturer.read_frames(timeout=0.1) is frame
     assert capturer.read_frames(timeout=0.01) is None
+
+
+def test_sounddevice_capturer_records_frame_counters_and_empty_reads() -> None:
+    metrics = AudioMetrics()
+    capturer = SoundDeviceCapturer(metrics=metrics)
+    frame = _sine(frames=123)
+    capturer._queue.put(frame)
+
+    assert capturer.read_frames(timeout=0.1) is frame
+    assert capturer.read_frames(timeout=0.01) is None
+    assert metrics.queue_frames_read == 123
+    assert metrics.empty_reads == 1
+
+
+def test_sounddevice_capturer_block_count_uses_sample_rate() -> None:
+    capturer = SoundDeviceCapturer(sample_rate=8000, block_ms=100)
+
+    assert capturer._blocks == 800
 
 
 def test_sounddevice_capturer_flush_drains_stale_buffer() -> None:

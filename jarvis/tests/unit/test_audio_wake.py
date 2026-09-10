@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jarvis.audio.capture import SAMPLE_RATE, BLOCK_MS
+from jarvis.audio.capture import AudioMetrics, SAMPLE_RATE, BLOCK_MS
 from jarvis.audio.wake import (
     DEFAULT_THRESHOLD,
     DEFAULT_VAD_THRESHOLD,
@@ -161,6 +161,21 @@ def test_wait_triggers_when_score_exceeds_threshold() -> None:
     )
     assert wake.wait(timeout=1.0) is True
     assert model.predicts == 1
+
+
+def test_wait_records_attempt_and_result_metrics() -> None:
+    metrics = AudioMetrics()
+    wake = OpenWakeWord(
+        capturer=FakeCapturer([_frame()]),
+        model=FakeModel([{"hey_jarvis": 0.9}]),
+        threshold=0.5,
+        clock=FakeClock(),
+        metrics=metrics,
+    )
+
+    assert wake.wait(timeout=1.0) is True
+    assert metrics.wake_wait_attempts == 1
+    assert metrics.wake_wait_results == [True]
 
 
 def test_wait_returns_false_without_trigger_before_timeout() -> None:

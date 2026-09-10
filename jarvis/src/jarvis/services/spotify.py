@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
+import secrets
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
@@ -35,6 +38,107 @@ class SpotifyResult:
 
 
 _SAFE_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+
+
+APPROVED_SPOTIFY_SCOPES = frozenset({
+    "user-read-playback-state",
+    "user-modify-playback-state",
+})
+
+
+@dataclass
+class PKCETransaction:
+    """Volatile, session-bound authorization transaction; never persisted."""
+
+    verifier: str = field(repr=False)
+    state: str = field(repr=False)
+    code_challenge: str
+    session_id: str = field(repr=False)
+    expires_at: float
+    _consumed: bool = field(default=False, repr=False)
+
+    def valid_for(self, session_id: str, *, now: float) -> bool:
+        return not self._consumed and session_id == self.session_id and now < self.expires_at
+
+    def consume(self, session_id: str, *, now: float) -> bool:
+        if not self.valid_for(session_id, now=now):
+            return False
+        self._consumed = True
+        return True
+
+
+def create_pkce_transaction(
+    session_id: str,
+    *,
+    now: float,
+    ttl_s: float = 300.0,
+    token_factory: Callable[[], str] | None = None,
+) -> PKCETransaction:
+    """Create PKCE material with exact S256 and a short, bounded lifetime."""
+    if not session_id or not 1.0 <= ttl_s <= 600.0:
+        raise ValueError("invalid PKCE transaction")
+    make_token = token_factory or (lambda: secrets.token_urlsafe(32))
+    verifier = make_token()
+    state = make_token()
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return PKCETransaction(verifier, state, challenge, session_id, now + ttl_s)
+
+
+class CredentialStatus(str, Enum):
+    OK = "ok"
+    MISSING = "missing"
+    STORAGE_UNAVAILABLE = "storage_unavailable"
+
+
+@dataclass(frozen=True, repr=False)
+class CredentialResult:
+    status: CredentialStatus
+    value: str | None = field(default=None, repr=False)
+
+
+class KeyringCredentialStore:
+    """Keyring-only credential boundary; unavailable storage fails closed."""
+
+    def __init__(self, *, backend: Any | None = None, service: str = "jarvis.spotify", username: str = "oauth") -> None:
+        self._backend = backend if backend is not None else self._default_backend()
+        self._service = service
+        self._username = username
+
+    @staticmethod
+    def _default_backend() -> Any | None:
+        try:
+            import keyring
+            return keyring
+        except (ImportError, RuntimeError):
+            return None
+
+    def load(self) -> CredentialResult:
+        if self._backend is None:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        try:
+            value = self._backend.get_password(self._service, self._username)
+        except Exception:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        return CredentialResult(CredentialStatus.OK, value) if value is not None else CredentialResult(CredentialStatus.MISSING)
+
+    def save(self, value: str) -> CredentialResult:
+        if self._backend is None:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.set_password(self._service, self._username, value)
+        except Exception:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        return CredentialResult(CredentialStatus.OK)
+
+    def delete(self) -> CredentialResult:
+        if self._backend is None:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.delete_password(self._service, self._username)
+        except Exception:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        return CredentialResult(CredentialStatus.OK)
 
 
 class LocalSpotifyAdapter:

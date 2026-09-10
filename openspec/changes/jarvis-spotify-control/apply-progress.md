@@ -270,3 +270,29 @@ The Stage 1 acceptance task and all later Stage 2 implementation rows remain unc
 
 - **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context; parent-authorized work unit `spotify-stage1-safe-diagnostics-docs`.
 - **Produced:** apply progress for task 1.3.2; next recommended phase is `sdd-verify`; no unsafe action-context warnings. |
+
+## Authorized safe slice `spotify-stage2-pkce-keyring-boundary`
+
+- **Status:** completed for the bounded replan only. The broad Stage 2 OAuth task remains unchecked; a dedicated checked sub-row was added to `tasks.md`.
+- **Scope:** disabled-by-default configuration, fixed approved scopes, pure volatile PKCE transaction model, and keyring-only credential abstraction. No token exchange/refresh, browser/callback listener, API/network, catalog/playback, intents/registry/lifecycle/docs/diagnostics/dependencies, or client ID hardcode/logging.
+- **Files changed:** `jarvis/src/jarvis/config.py`, `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_config.py`, `jarvis/tests/unit/test_spotify_oauth.py`, `openspec/changes/jarvis-spotify-control/tasks.md`, and this file.
+- **Behavior:** OAuth config defaults disabled and requires explicit enablement plus a validated environment client ID; scopes are exactly `user-read-playback-state` and `user-modify-playback-state`. PKCE generates verifier/state, computes S256, binds transactions to a session, expires them within a bounded TTL, and permits one-time consumption. `KeyringCredentialStore` exposes load/save/delete and returns `storage_unavailable` on absent/broken keyring without file or plaintext fallback.
+- **Workload:** 283 authored added lines and 1 deletion including the new focused test file, below the user-specified 350-line limit. Existing unrelated working-tree changes were preserved.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added focused config/OAuth tests before implementation; collection failed because the new OAuth exports/config seam did not exist. |
+| GREEN | Added the minimal config, PKCE model, and keyring boundary; focused tests passed: `18 passed`. |
+| TRIANGULATE | Full required command reached `1067 passed, 1 failed, 1 warning`; the sole failure is unrelated existing proactive usage-note state in `jarvis/tests/test_imports.py::test_cli_start_runs_real_pipeline`, which observed `firefox 121 veces`. `git diff --check` and `py_compile` passed. No network, credentials, token exchange, callback, or API call was used. |
+| REFACTOR | Kept OAuth code isolated in existing Spotify/config seams, hid verifier/state/value from repr, bounded validation, and left the broad OAuth task and all excluded surfaces untouched. |
+
+## Remaining tasks
+
+The broad Stage 2 OAuth task and all other Stage 2 implementation rows remain unchecked. The exact broad OAuth row remains `[ ]`; the checked sub-row is intentionally not a completion of that broad task.
+
+## Structured status consumed/produced
+
+- **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context with allowed edit root `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; strict TDD active; user resolved high-risk delivery as bounded safe slice with a 350-line cap.
+- **Produced:** `next_recommended: sdd-verify` for this slice; apply remains incomplete for the overall change because broad Stage 2 tasks are unchecked. No action-context warnings.

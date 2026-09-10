@@ -45,3 +45,35 @@ def test_spotify_local_config_accepts_valid_explicit_values() -> None:
 def test_spotify_local_config_invalid_values_fail_closed(key_value: tuple[str, str]) -> None:
     values = config.load_spotify_local_config({"SPOTIFY_LOCAL_ENABLED": "true", key_value[0]: key_value[1]})
     assert values["enabled"] is False
+
+
+def test_spotify_oauth_config_is_disabled_by_default_with_fixed_policy() -> None:
+    values = config.load_spotify_oauth_config({})
+    assert values == {
+        "enabled": False,
+        "client_id": None,
+        "transaction_ttl_s": 300.0,
+        "scopes": frozenset({"user-read-playback-state", "user-modify-playback-state"}),
+    }
+
+
+def test_spotify_oauth_config_requires_explicit_enable_and_client_id() -> None:
+    assert config.load_spotify_oauth_config({"SPOTIFY_CLIENT_ID": "client"})["enabled"] is False
+    values = config.load_spotify_oauth_config({
+        "SPOTIFY_API_ENABLED": "true",
+        "SPOTIFY_CLIENT_ID": "client-id",
+        "SPOTIFY_OAUTH_TRANSACTION_TTL_S": "120",
+    })
+    assert values["enabled"] is True
+    assert values["client_id"] == "client-id"
+    assert values["transaction_ttl_s"] == 120.0
+
+
+def test_spotify_oauth_config_rejects_invalid_values_fail_closed() -> None:
+    values = config.load_spotify_oauth_config({
+        "SPOTIFY_API_ENABLED": "true",
+        "SPOTIFY_CLIENT_ID": "client id",
+        "SPOTIFY_OAUTH_TRANSACTION_TTL_S": "0",
+    })
+    assert values["enabled"] is False
+    assert values["client_id"] is None

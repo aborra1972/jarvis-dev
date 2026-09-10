@@ -182,6 +182,51 @@ SPOTIFY_LOCAL_ENABLED: bool = _SPOTIFY_LOCAL["enabled"]  # type: ignore[assignme
 SPOTIFY_PLAYERCTL_BIN: str = _SPOTIFY_LOCAL["playerctl_bin"]  # type: ignore[assignment]
 SPOTIFY_MPRIS_IDENTITY: str = _SPOTIFY_LOCAL["identity"]  # type: ignore[assignment]
 SPOTIFY_LOCAL_TIMEOUT_S: float = _SPOTIFY_LOCAL["timeout_s"]  # type: ignore[assignment]
+
+
+# Stage 2 is deliberately inert until a trusted local configuration opts in.
+_SPOTIFY_OAUTH_SCOPES = frozenset({
+    "user-read-playback-state",
+    "user-modify-playback-state",
+})
+
+
+def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Load the narrow, disabled-by-default PKCE configuration boundary."""
+    env = os.environ if environ is None else environ
+    defaults: dict[str, object] = {
+        "enabled": False,
+        "client_id": None,
+        "transaction_ttl_s": 300.0,
+        "scopes": _SPOTIFY_OAUTH_SCOPES,
+    }
+    enabled = env.get("SPOTIFY_API_ENABLED", "false").strip().lower()
+    client_id = env.get("SPOTIFY_CLIENT_ID", "").strip()
+    try:
+        ttl = float(env.get("SPOTIFY_OAUTH_TRANSACTION_TTL_S", "300"))
+    except (TypeError, ValueError):
+        return defaults
+    if enabled not in {"true", "false", "1", "0", "yes", "no"}:
+        return defaults
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_id):
+        return defaults
+    if not math.isfinite(ttl) or not 30.0 <= ttl <= 600.0:
+        return defaults
+    defaults.update(
+        enabled=enabled in {"true", "1", "yes"},
+        client_id=client_id,
+        transaction_ttl_s=ttl,
+    )
+    return defaults
+
+
+_SPOTIFY_OAUTH = load_spotify_oauth_config()
+SPOTIFY_API_ENABLED: bool = _SPOTIFY_OAUTH["enabled"]  # type: ignore[assignment]
+SPOTIFY_CLIENT_ID: str | None = _SPOTIFY_OAUTH["client_id"]  # type: ignore[assignment]
+SPOTIFY_OAUTH_TRANSACTION_TTL_S: float = _SPOTIFY_OAUTH["transaction_ttl_s"]  # type: ignore[assignment]
+SPOTIFY_OAUTH_SCOPES = _SPOTIFY_OAUTH_SCOPES
+
+
 # Barge-in: while Jarvis is speaking, keep the mic open and let a repeat of
 # the wake word interrupt TTS. Off by default — there is no AEC in this
 # project, so Jarvis's own voice can false-trigger at the normal threshold.

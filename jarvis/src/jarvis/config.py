@@ -378,3 +378,8 @@ GEMINI_MODEL: str = "gemini-3.6-flash"
 GEMINI_TIMEOUT_S: float = 5.0
 CODEX_MODEL: str = "gpt-5.6-luna"
 CODEX_TIMEOUT_S: float = 30.0
+# Weather fast path: Open-Meteo needs no key and never routes through an LLM.
+WEATHER_DEFAULT_LOCATION = "CABA, Argentina"
+WEATHER_TIMEOUT_S: float = 3.0
+WEATHER_CACHE_TTL_S: float = 300.0
+WEATHER_CACHE_MAX_ENTRIES = 32

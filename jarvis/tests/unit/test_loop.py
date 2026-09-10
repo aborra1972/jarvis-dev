@@ -647,6 +647,47 @@ def test_open_repo_with_explicit_repo_executes_without_active_project(
     assert manager.calls == [(32111, Path(str(tmp_path)))]
 
 
+def test_loop_dispatches_weather_without_codex_or_executor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis import config
+
+    monkeypatch.setattr(config, "LLM_PROVIDER", "codex")
+
+    class FakeWeatherService:
+        def current(self, location):
+            assert location == "CABA, Argentina"
+            return type("Reading", (), {
+                "location": "Buenos Aires, Argentina",
+                "temperature_c": 22.0,
+                "weather_code": 0,
+            })()
+
+    monkeypatch.setattr(loop_module.assistant_lifecycle, "_weather_service", FakeWeatherService())
+
+    class FailingExecutor(FakeExecutor):
+        def execute(self, intent, session):
+            raise AssertionError("weather must bypass the executor")
+
+    weather_intent = _intent(
+        intent="general_qa",
+        entities={"weather_location": "CABA, Argentina", "weather_ambiguous": "false"},
+    )
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["cómo está el clima"],
+        interpreter_script=[_interp(weather_intent)],
+        executor=FailingExecutor(),
+        tmp_path=tmp_path,
+    )
+
+    outcome = run(pipeline, iterations=4)
+
+    assert outcome == "executed"
+    assert pipeline.executor.calls == []
+    assert pipeline.speaker.said == ["En Buenos Aires, Argentina hay 22 grados y está despejado."]
+
+
 def test_loop_dispatches_open_app_through_real_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

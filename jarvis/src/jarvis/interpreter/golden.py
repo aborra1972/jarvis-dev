@@ -115,7 +115,20 @@ _REVIEW_PR = re.compile(rf"^{_verb_alt('revisar')} (?:el |la )?(?:pr|pull reques
 _FIX_WARNINGS = re.compile(r"^(?:arregla|corregi|corregir|fixea|fixear) (?:los |las )?(?:warnings|advertencias)(?: (.*))?$")
 _HELP = re.compile(rf"^(?:{_verb_alt('ayudar')}|que podes hacer|que sabes hacer|que puede hacer)$")
 _REMINDER = re.compile(r"^(?:recordame|recuerdame|recordar) (.+)$")
-
+# Deliberately narrow weather vocabulary: no broad question/command parsing.
+_WEATHER = re.compile(
+    r"^(?:como esta el clima|que clima hace|cual es el pronostico de hoy|"
+    r"cual es la temperatura|que temperatura hace|que temperatura hay)"
+    r"(?: en(?: ([a-z0-9][a-z0-9._-]*(?: [a-z0-9][a-z0-9._-]*){0,11}))?)?$"
+)
+# Keep locations flexible for normal locality/city/country names while
+# rejecting command-like or sentence-like trailing text.
+_WEATHER_LOCATION_REJECTS = frozenset({
+    "ahora", "ayer", "decime", "dame", "despues", "ejecuta", "ejecutar",
+    "hoy", "manana", "muestra", "mostrar", "por", "favor", "que", "y",
+    "abrir", "abri", "busca", "buscar", "cierra", "cerrar", "crea", "crear",
+    "elimina", "eliminar", "hace", "hay", "necesito", "podes", "puedes",
+})
 # Create-doc patterns: common verbs that map to create_doc intent.
 # These extract free-text content (the LLM generates the document, not a shell cmd).
 # The noun (documento/doc/archivo/nota/txt) must be present to avoid matching
@@ -192,6 +205,21 @@ def _make_build_extract(m: re.Match[str]) -> dict[str, str]:
     return {"command": "make build"}
 
 
+def _weather_location_allowed(location: str | None) -> bool:
+    if not location:
+        return True
+    return not _WEATHER_LOCATION_REJECTS.intersection(location.split())
+
+
+def _weather_extract(m: re.Match[str]) -> dict[str, str]:
+    location = (m.group(1) or "").strip()
+    return {
+        "query": m.group(0),
+        "weather_location": location,
+        "weather_ambiguous": "true" if m.group(0).endswith(" en") else "false",
+    }
+
+
 # (pattern, intent, entity extractor) — first match wins; repo patterns must
 # precede open_app so "abrir el repo X" never falls into the app fast path.
 FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], dict[str, str]]], ...] = (
@@ -211,6 +239,7 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_REVIEW_PR, "review_pr", _optional_text("actual")),
     (_FIX_WARNINGS, "fix_warnings", _optional_text("todos")),
     (_REMINDER, "set_reminder", _single_group("text")),
+    (_WEATHER, "general_qa", _weather_extract),
     (_HELP, "help", lambda m: {}),
 )
 
@@ -232,6 +261,8 @@ def gate(normalized: str) -> Intent | None:
     for pattern, intent, extract in FAST_PATH_PATTERNS:
         match = pattern.match(normalized)
         if match:
+            if pattern is _WEATHER and not _weather_location_allowed(match.group(1)):
+                continue
             return Intent(
                 intent=intent,
                 entities=extract(match),

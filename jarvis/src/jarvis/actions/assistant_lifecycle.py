@@ -17,13 +17,37 @@ from jarvis.actions import base
 from jarvis import config
 from jarvis.interpreter.schema import ALLOWED_INTENTS, Intent
 from jarvis.orchestrator.contracts import ActionResult
+from jarvis.services.weather import WeatherError, WeatherService, describe_weather
 
 logger = logging.getLogger("jarvis.actions")
+_weather_service = WeatherService(
+    timeout_s=config.WEATHER_TIMEOUT_S,
+    ttl_s=config.WEATHER_CACHE_TTL_S,
+    max_cache_size=config.WEATHER_CACHE_MAX_ENTRIES,
+)
 
 
 def power_off_self(intent: Intent, session: object) -> ActionResult:
     base.log("power_off_self")
     return ActionResult(ok=True, spoken=f"Muy bien, {config.agent_address()}. Me apago.")
+
+
+def handle_weather(
+    intent: Intent, session: object, *, service: WeatherService | None = None
+) -> ActionResult:
+    """Speak current weather without involving any language model."""
+    entities = intent.entities
+    if entities.get("weather_ambiguous") == "true":
+        return ActionResult(ok=True, spoken="¿En qué ciudad o localidad quiere consultar el clima?")
+    location = entities.get("weather_location") or config.WEATHER_DEFAULT_LOCATION
+    try:
+        reading = (service or _weather_service).current(location)
+    except WeatherError as exc:
+        if str(exc) == "not_found":
+            return ActionResult(ok=True, spoken="No encontré esa ubicación. ¿Podría indicar una ciudad más clara?")
+        logger.warning("weather unavailable: %s", exc)
+        return ActionResult(ok=True, spoken="El servicio meteorológico no está disponible ahora. Intente de nuevo más tarde.")
+    return ActionResult(ok=True, spoken=describe_weather(reading))
 
 
 def handle_help(intent: Intent, session: object) -> ActionResult:

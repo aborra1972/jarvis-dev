@@ -246,3 +246,51 @@ def test_non_destructive_borrar_phrases_never_match_destructive(raw: str) -> Non
     # Full-string anchoring must keep "borrar X" out of the destructive gate
     # unless the whole utterance is a destructive target.
     assert _g(raw) is None
+
+
+@pytest.mark.parametrize("raw", [
+    "cómo está el clima", "qué clima hace", "cuál es el pronóstico de hoy",
+    "cómo está el clima en Córdoba", "cuál es la temperatura",
+    "qué temperatura hace", "qué temperatura hay", "qué temperatura hay en Córdoba",
+    "qué temperatura hace en San Francisco Estados Unidos", "qué temperatura hay en una localidad",
+])
+def test_weather_is_a_narrow_golden_fast_path(raw: str) -> None:
+    intent = _g(raw)
+    assert intent is not None
+    assert intent.intent == "general_qa"
+    assert intent.entities["weather_location"] in (
+        "", "cordoba", "san francisco estados unidos", "una localidad"
+    )
+    assert intent.entities["weather_ambiguous"] == "false"
+    assert intent.source == "golden"
+
+
+def test_weather_missing_location_is_explicitly_ambiguous() -> None:
+    intent = _g("qué clima hace en")
+    assert intent is not None
+    assert intent.entities["weather_ambiguous"] == "true"
+
+
+def test_weather_accepts_explicit_multiword_locations() -> None:
+    for raw, location in (
+        ("qué temperatura hay en Córdoba", "cordoba"),
+        ("qué temperatura hace en San Francisco Estados Unidos", "san francisco estados unidos"),
+        ("qué temperatura hay en una localidad", "una localidad"),
+    ):
+        intent = _g(raw)
+        assert intent is not None
+        assert intent.entities["weather_location"] == location
+        assert intent.entities["weather_ambiguous"] == "false"
+
+
+def test_weather_rejects_command_like_or_trailing_text() -> None:
+    for raw in (
+        "qué temperatura hay en Córdoba y abrí firefox",
+        "qué temperatura hace en Córdoba por favor",
+        "qué temperatura hay en Córdoba ejecuta el comando",
+    ):
+        assert _g(raw) is None
+
+
+def test_unrecognized_weather_text_stays_unmatched() -> None:
+    assert _g("decime si mañana llueve") is None

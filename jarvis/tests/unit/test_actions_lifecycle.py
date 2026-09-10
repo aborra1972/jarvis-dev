@@ -69,6 +69,27 @@ def test_general_qa_uses_agent_personality_as_system_prompt(monkeypatch) -> None
     assert "amigo" in captured["body"]["system"]
 
 
+def test_handle_weather_returns_action_result_with_deterministic_service() -> None:
+    class FakeWeatherService:
+        def current(self, location):
+            assert location == "CABA, Argentina"
+            return type("Reading", (), {
+                "location": "Buenos Aires, Argentina",
+                "temperature_c": 22.0,
+                "weather_code": 0,
+            })()
+
+    result = assistant_lifecycle.handle_weather(
+        _intent("general_qa", {"weather_location": "CABA, Argentina", "weather_ambiguous": "false"}),
+        None,
+        service=FakeWeatherService(),
+    )
+
+    assert isinstance(result, assistant_lifecycle.ActionResult)
+    assert result.ok is True
+    assert result.spoken == "En Buenos Aires, Argentina hay 22 grados y está despejado."
+
+
 def test_codex_combined_answer_is_used_without_a_second_call(monkeypatch) -> None:
     monkeypatch.setattr(assistant_lifecycle.config, "LLM_PROVIDER", "codex")
     result = assistant_lifecycle.handle_general_qa(

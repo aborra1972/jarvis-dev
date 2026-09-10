@@ -35,6 +35,15 @@ def test_golden_fast_path_returns_direct_intent() -> None:
     assert result.intent.confirm_required is False
 
 
+def test_weather_fast_path_bypasses_codex_provider() -> None:
+    provider = FakeProvider([])
+    result = resolve_intent("cómo está el clima", provider=provider, app_allowlist=ALLOWLIST)
+    assert result.intent is not None
+    assert result.intent.intent == "general_qa"
+    assert result.intent.entities["weather_location"] == ""
+    assert provider.calls == []
+
+
 def test_golden_fast_path_rejects_disallowed_app() -> None:
     result = resolve_intent("abrí chrome", provider=None, app_allowlist=ALLOWLIST)
     assert result.intent is None

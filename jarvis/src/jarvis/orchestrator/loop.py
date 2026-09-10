@@ -614,7 +614,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(_spoken_toward(LONG_OPERATION_ACK))
-        if intent.intent == "general_qa" and config.LLM_PROVIDER == "codex":
+        if intent.intent == "general_qa" and intent.entities.get("weather_location") is not None:
+            # Deterministic weather golden hits bypass every LLM provider, including Codex.
+            result = assistant_lifecycle.handle_weather(intent, pipeline.session)
+        elif intent.intent == "general_qa" and config.LLM_PROVIDER == "codex":
             # Codex already returned routing and the optional presentation
             # answer in one envelope; never invoke it again here.
             result = assistant_lifecycle.handle_general_qa(

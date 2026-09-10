@@ -7,10 +7,12 @@ over any LLM destructive suggestion (spec "Golden rule gate", ADR-2).
 
 from __future__ import annotations
 
+from datetime import datetime
 import pytest
 
 from jarvis.interpreter.interpreter import resolve_intent
-from jarvis.interpreter.llm import FakeProvider
+from jarvis.interpreter.llm import CodexProvider, FakeProvider
+from jarvis.interpreter import llm, schema
 import jarvis.interpreter.interpreter as interpreter_module
 
 ALLOWLIST = {"firefox"}
@@ -44,6 +46,39 @@ def test_weather_fast_path_bypasses_codex_provider() -> None:
     assert provider.calls == []
 
 
+def test_local_datetime_fast_path_answers_with_injected_now() -> None:
+    now = datetime(2025, 3, 15, 9, 7)
+    provider = FakeProvider([])
+
+    result = resolve_intent(
+        "qué día es hoy", provider=provider, app_allowlist=ALLOWLIST,
+        now=lambda: now,
+    )
+
+    assert result.intent is not None
+    assert result.intent.intent == "general_qa"
+    assert result.answer == "Hoy es sábado."
+    assert provider.calls == []
+
+
+def test_local_time_fast_path_answers_without_provider() -> None:
+    result = resolve_intent(
+        "decime la hora", provider=None, app_allowlist=ALLOWLIST,
+        now=lambda: datetime(2025, 3, 15, 9, 7),
+    )
+    assert result.intent is not None
+    assert result.answer == "Son las 09:07."
+
+
+def test_extended_local_time_falls_through_to_llm() -> None:
+    provider = FakeProvider([{
+        "intent": "general_qa", "entities": {"query": "qué hora es ahora"}, "confidence": 0.9,
+    }])
+    result = resolve_intent("qué hora es ahora", provider=provider, app_allowlist=ALLOWLIST)
+    assert result.intent is not None
+    assert len(provider.calls) == 1
+
+
 def test_golden_fast_path_rejects_disallowed_app() -> None:
     result = resolve_intent("abrí chrome", provider=None, app_allowlist=ALLOWLIST)
     assert result.intent is None
@@ -70,6 +105,34 @@ def test_llm_happy_path() -> None:
     assert result.needs_reask is False
 
 
+def test_only_codex_uses_compact_system_prompt(monkeypatch) -> None:
+    selected: list[str] = []
+
+    def compact() -> str:
+        selected.append("codex")
+        return "compact"
+
+    def legacy(*, include_general_qa_answer: bool = False) -> str:
+        selected.append("legacy")
+        return "legacy"
+
+    monkeypatch.setattr(schema, "build_codex_system_prompt", compact)
+    monkeypatch.setattr(schema, "build_system_prompt", legacy)
+    monkeypatch.setattr(
+        llm,
+        "resolve_payload",
+        lambda _prompt, system, _provider: {
+            "intent": "ask", "entities": {"query": "x"}, "confidence": 0.9
+        },
+    )
+
+    resolve_intent("explicame x", provider=CodexProvider(), app_allowlist=ALLOWLIST, use_cache=False)
+    assert selected == ["codex"]
+
+    resolve_intent("explicame x", provider=FakeProvider([{"intent": "ask", "entities": {"query": "x"}, "confidence": 0.9}]), app_allowlist=ALLOWLIST, use_cache=False)
+    assert selected == ["codex", "legacy"]
+
+
 def test_codex_combined_general_qa_keeps_answer_without_second_call(monkeypatch) -> None:
     provider = FakeProvider([{
         "intent": "general_qa",
@@ -78,7 +141,7 @@ def test_codex_combined_general_qa_keeps_answer_without_second_call(monkeypatch)
         "answer": "Son las diez.",
     }])
     monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
-    result = resolve_intent("Charvis, qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
+    result = resolve_intent("Charvis, qué hora fue?", provider=provider, app_allowlist=ALLOWLIST)
     assert result.intent is not None
     assert result.intent.intent == "general_qa"
     assert result.answer == "Son las diez."
@@ -225,8 +288,8 @@ def test_cache_hit_skips_llm() -> None:
         {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
         # If cache misses, this would be consumed; if cache hits, it won't be
     ])
-    r1 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
-    r2 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST)
+    r1 = resolve_intent("¿qué hora es ahora?", provider=provider, app_allowlist=ALLOWLIST)
+    r2 = resolve_intent("¿qué hora es ahora?", provider=provider, app_allowlist=ALLOWLIST)
     assert r1.intent is not None
     assert r2.intent is not None
     assert r1.intent.intent == r2.intent.intent
@@ -240,8 +303,8 @@ def test_cache_disabled_bypasses() -> None:
         {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
         {"intent": "ask", "entities": {"query": "hora"}, "confidence": 0.9},
     ])
-    r1 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
-    r2 = resolve_intent("¿qué hora es?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
+    r1 = resolve_intent("¿qué hora es ahora?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
+    r2 = resolve_intent("¿qué hora es ahora?", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
     assert r1.intent is not None
     assert r2.intent is not None
     # Both calls hit the LLM

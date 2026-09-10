@@ -292,5 +292,25 @@ def test_weather_rejects_command_like_or_trailing_text() -> None:
         assert _g(raw) is None
 
 
+@pytest.mark.parametrize("raw", [
+    "qué hora es", "decime la hora", "qué fecha es", "qué fecha es hoy",
+    "qué día es hoy", "qué día de la semana es",
+])
+def test_local_datetime_questions_are_exact_golden_fast_paths(raw: str) -> None:
+    intent = _g(raw)
+    assert intent is not None
+    assert intent.intent == "general_qa"
+    assert intent.source == "golden"
+    assert intent.entities["local_answer"] in {"time", "date", "weekday"}
+
+
+@pytest.mark.parametrize("raw", [
+    "qué hora es ahora", "decime la hora por favor", "qué fecha fue ayer",
+    "qué día será mañana", "qué día de la semana es hoy",
+])
+def test_extended_local_datetime_questions_fall_through(raw: str) -> None:
+    assert _g(raw) is None
+
+
 def test_unrecognized_weather_text_stays_unmatched() -> None:
     assert _g("decime si mañana llueve") is None

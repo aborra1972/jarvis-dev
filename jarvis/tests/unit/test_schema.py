@@ -16,6 +16,7 @@ from jarvis.interpreter.schema import (
     DOMAIN_INTENTS,
     INTENT_DOMAIN,
     SchemaError,
+    build_codex_system_prompt,
     build_system_prompt,
     dangerous_pattern_count,
     is_dangerous_command,
@@ -155,6 +156,22 @@ def test_system_prompt_lists_all_commands_and_domains() -> None:
 
 
 # --- T-SAFE-01/02: blocked flag, destructive guard, dangerous patterns --------
+def test_codex_prompt_is_compact_and_safe() -> None:
+    prompt = build_codex_system_prompt()
+    assert 1300 <= len(prompt) <= 1600
+    assert 'Output ONLY one JSON object' in prompt
+    assert 'answer must always be concise Spanish text' in prompt
+    assert 'Never empty or executable' in prompt
+    assert 'at most 2000 characters' in prompt
+    assert 'Never emit destructive intents' in prompt
+    for intent in DESTRUCTIVE_INTENTS:
+        assert intent in prompt
+    for intent in ALLOWED_INTENTS:
+        assert intent in prompt
+    assert 'rm -rf' not in prompt
+    assert 'sudo' not in prompt
+
+
 def test_codex_qa_prompt_requires_answer_when_available() -> None:
     prompt = build_system_prompt(include_general_qa_answer=True)
     assert '"answer": ""' in prompt

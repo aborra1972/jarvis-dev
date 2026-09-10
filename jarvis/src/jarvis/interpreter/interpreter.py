@@ -10,11 +10,13 @@ and runs with confirmation (Option A) or auto (Option B).
 from __future__ import annotations
 
 import collections
+from datetime import datetime
 import hashlib
 import logging
 import re
 import threading
 import time
+from typing import Callable
 from dataclasses import dataclass, replace
 
 from jarvis import config as _config
@@ -202,6 +204,7 @@ def resolve_intent(
     app_allowlist: set[str] | None = None,
     threshold: float = schema.CONFIDENCE_THRESHOLD,
     use_cache: bool = True,
+    now: Callable[[], datetime] | None = None,
 ) -> Interpretation:
     """Resolve a raw transcript to an Interpretation (never emits unvalidated intents)."""
     allowlist = _config.ALLOWED_APPS if app_allowlist is None else app_allowlist
@@ -245,6 +248,10 @@ def resolve_intent(
     if hit is not None:
         if hit.confirm_required:
             return Interpretation(intent=hit)  # destructive: LLM never consulted
+        local_kind = hit.entities.get("local_answer")
+        if hit.intent == "general_qa" and local_kind:
+            answer = _local_datetime_answer(local_kind, now=now)
+            return Interpretation(intent=hit, answer=answer)
         hit = _resolve_active_project(hit)
         # Fuzzy-correct app names before validation
         hit = schema.fuzzy_correct_entities(hit, allowlist)
@@ -266,11 +273,12 @@ def resolve_intent(
 
     try:
         combined_qa = _is_codex_provider(provider)
-        payload = llm.resolve_payload(
-            surface,
-            schema.build_system_prompt(include_general_qa_answer=combined_qa),
-            provider,
+        system_prompt = (
+            schema.build_codex_system_prompt()
+            if combined_qa
+            else schema.build_system_prompt(include_general_qa_answer=False)
         )
+        payload = llm.resolve_payload(surface, system_prompt, provider)
         intent = schema.validate(payload)
         answer = _qa_answer(payload) if intent.intent == "general_qa" else None
     except schema.SchemaError as exc:
@@ -357,6 +365,21 @@ def _validate_and_wrap(
 
 def _is_codex_provider(provider: object) -> bool:
     return isinstance(provider, llm.CodexProvider)
+
+
+def _local_datetime_answer(kind: str, *, now: Callable[[], datetime] | None = None) -> str:
+    """Format the host-local date/time for exact golden local-QA forms."""
+    current = (now or (lambda: datetime.now().astimezone()))()
+    weekdays = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+    months = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    if kind == "time":
+        return f"Son las {current.hour:02d}:{current.minute:02d}."
+    if kind == "weekday":
+        return f"Hoy es {weekdays[current.weekday()]}."
+    return f"Hoy es {current.day} de {months[current.month - 1]} de {current.year}."
 
 
 def _qa_answer(payload: dict) -> str | None:

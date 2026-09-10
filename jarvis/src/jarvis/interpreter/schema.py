@@ -248,6 +248,32 @@ def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None
     return intent
 
 
+def build_codex_system_prompt() -> str:
+    """Compact Codex-only classifier prompt with no executable examples."""
+    intent_list = "|".join(sorted(ALLOWED_INTENTS))
+    required = "; ".join(
+        f"{intent}: {', '.join(entities)}" for intent, entities in sorted(REQUIRED_ENTITIES.items())
+    )
+    destructive = ", ".join(sorted(DESTRUCTIVE_INTENTS))
+    return (
+        "Classify the normalized voice command. Output ONLY one JSON object; no prose or markdown.\n"
+        '{"intent":"<allowed>","entities":{"repo":"","app":"","query":"",'
+        '"text":"","url":"","engine":"google","command":""},'
+        '"confidence":0.0,"answer":""}\n'
+        f"Allowed intents (use exactly one): {intent_list}.\n"
+        "Required entities: " + required + ". open_repo may use empty repo for the active project.\n"
+        f"Never emit destructive intents ({destructive}) from LLM classification; "
+        "they are deterministic-only and must be rejected when suggested.\n"
+        "general_qa: non-command, non-search questions; full question in query. answer must always "
+        "be concise Spanish text; if data is unavailable, explain or ask. Never empty or executable; "
+        "at most 2000 characters.\n"
+        "execute is only for routine, non-destructive shell requests; put its command in command. "
+        "open_app requires a known application; open_url requires http/https with a host. Fill "
+        "only applicable entities.\n"
+        "Confidence is 0.0-1.0; below 0.6 requires a re-ask. Never invent fields."
+    )
+
+
 def build_system_prompt(*, include_general_qa_answer: bool = False) -> str:
     """JSON-only system prompt, optionally including Codex's QA answer field."""
     intent_list = "|".join(sorted(ALLOWED_INTENTS))

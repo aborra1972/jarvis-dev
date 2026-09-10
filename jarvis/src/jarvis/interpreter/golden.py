@@ -115,6 +115,14 @@ _REVIEW_PR = re.compile(rf"^{_verb_alt('revisar')} (?:el |la )?(?:pr|pull reques
 _FIX_WARNINGS = re.compile(r"^(?:arregla|corregi|corregir|fixea|fixear) (?:los |las )?(?:warnings|advertencias)(?: (.*))?$")
 _HELP = re.compile(rf"^(?:{_verb_alt('ayudar')}|que podes hacer|que sabes hacer|que puede hacer)$")
 _REMINDER = re.compile(r"^(?:recordame|recuerdame|recordar) (.+)$")
+# Deliberately narrow local date/time vocabulary: exact normalized forms only.
+_LOCAL_TIME = re.compile(r"^(que hora es|decime la hora)$")
+_LOCAL_DATE = re.compile(r"^(que fecha es|que fecha es hoy)$")
+_LOCAL_WEEKDAY = re.compile(r"^(que dia es hoy|que dia de la semana es)$")
+
+def _local_answer_kind(kind: str) -> Callable[[re.Match[str]], dict[str, str]]:
+    return lambda m: {"query": m.group(0), "local_answer": kind}
+
 # Deliberately narrow weather vocabulary: no broad question/command parsing.
 _WEATHER = re.compile(
     r"^(?:como esta el clima|que clima hace|cual es el pronostico de hoy|"
@@ -239,6 +247,9 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_REVIEW_PR, "review_pr", _optional_text("actual")),
     (_FIX_WARNINGS, "fix_warnings", _optional_text("todos")),
     (_REMINDER, "set_reminder", _single_group("text")),
+    (_LOCAL_TIME, "general_qa", _local_answer_kind("time")),
+    (_LOCAL_DATE, "general_qa", _local_answer_kind("date")),
+    (_LOCAL_WEEKDAY, "general_qa", _local_answer_kind("weekday")),
     (_WEATHER, "general_qa", _weather_extract),
     (_HELP, "help", lambda m: {}),
 )

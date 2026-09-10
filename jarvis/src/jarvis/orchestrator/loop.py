@@ -41,7 +41,7 @@ from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.orchestrator.confirm import (
     CONFIRM_TIMEOUT_S, Authorization, Confirmation, confirm,
 )
-from jarvis.orchestrator.contracts import CaptureError, OperationToken
+from jarvis.orchestrator.contracts import ActionResult, CaptureError, OperationToken
 from jarvis.audio.contracts import CaptureMode
 from jarvis.orchestrator.logs import TranscriptLog, clean_logs
 from jarvis.orchestrator.name_gate import strip_agent_prefix
@@ -614,7 +614,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         if _is_long_running(pipeline.executor, intent.intent):
             pipeline.speaker.speak(_spoken_toward(LONG_OPERATION_ACK))
-        if intent.intent == "general_qa" and intent.entities.get("weather_location") is not None:
+        if intent.intent == "general_qa" and intent.entities.get("local_answer"):
+            # Exact local date/time golden hits bypass every provider and the executor.
+            result = ActionResult(ok=True, spoken=context.interpretation.answer or "")
+        elif intent.intent == "general_qa" and intent.entities.get("weather_location") is not None:
             # Deterministic weather golden hits bypass every LLM provider, including Codex.
             result = assistant_lifecycle.handle_weather(intent, pipeline.session)
         elif intent.intent == "general_qa" and config.LLM_PROVIDER == "codex":

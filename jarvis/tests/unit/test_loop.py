@@ -647,6 +647,36 @@ def test_open_repo_with_explicit_repo_executes_without_active_project(
     assert manager.calls == [(32111, Path(str(tmp_path)))]
 
 
+def test_loop_dispatches_local_datetime_without_provider_or_executor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis import config
+
+    monkeypatch.setattr(config, "LLM_PROVIDER", "codex")
+
+    class FailingExecutor(FakeExecutor):
+        def execute(self, intent, session):
+            raise AssertionError("local date/time must bypass the executor")
+
+    local_intent = _intent(
+        intent="general_qa",
+        entities={"query": "que hora es", "local_answer": "time"},
+    )
+    pipeline = _pipeline(
+        wake=[True],
+        transcripts=["qué hora es"],
+        interpreter_script=[_interp(local_intent, answer="Son las 09:07.")],
+        executor=FailingExecutor(),
+        tmp_path=tmp_path,
+    )
+
+    outcome = run(pipeline, iterations=4)
+
+    assert outcome == "executed"
+    assert pipeline.executor.calls == []
+    assert pipeline.speaker.said == ["Son las 09:07."]
+
+
 def test_loop_dispatches_weather_without_codex_or_executor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

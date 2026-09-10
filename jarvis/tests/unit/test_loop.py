@@ -28,12 +28,35 @@ from jarvis.orchestrator.loop import (
     Pipeline,
     _Context,
     _read_wake_threshold,
+    _start_audio_metrics_publisher,
     _sync_wake_threshold,
     _tick,
     run,
 )
 from jarvis.orchestrator.session import Session, load_state
 from jarvis.orchestrator.state import State
+
+
+def test_audio_metrics_publisher_is_started_from_runtime_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis import config
+    from jarvis.audio.capture import AudioMetrics
+
+    class WakeWithMetrics:
+        def __init__(self) -> None:
+            self.capturer = type("Capturer", (), {"metrics": AudioMetrics()})()
+
+    monkeypatch.setattr(config, "AUDIO_METRICS_FILE", tmp_path / "audio_metrics.json")
+    pipeline = type("Pipeline", (), {"wake": WakeWithMetrics()})()
+
+    publisher = _start_audio_metrics_publisher(pipeline)
+    assert publisher is not None
+    try:
+        assert (tmp_path / "audio_metrics.json").exists()
+        assert publisher._thread is not None and publisher._thread.daemon
+    finally:
+        publisher.stop()
 
 
 def test_read_wake_threshold_from_gui_state(tmp_path: Path, monkeypatch) -> None:

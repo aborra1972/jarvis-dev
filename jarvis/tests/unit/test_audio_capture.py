@@ -9,8 +9,10 @@ orchestrator loop runs on fakes without hardware.
 from __future__ import annotations
 
 from collections import deque
+import json
 from pathlib import Path
 from queue import Queue
+import time
 
 import numpy as np
 import pytest
@@ -19,6 +21,7 @@ from jarvis.audio.capture import (
     BLOCK_MS,
     SAMPLE_RATE,
     AudioMetrics,
+    AudioMetricsPublisher,
     Capturer,
     SilenceVAD,
     SoundDeviceCapturer,
@@ -241,6 +244,44 @@ def test_write_wav_single_block(tmp_path: Path) -> None:
 
 
 # --- SoundDeviceCapturer (no hardware: queued frames only) --------------------
+def test_audio_metrics_publisher_writes_json_snapshot_atomically(tmp_path: Path) -> None:
+    metrics = AudioMetrics(pcm_frames_received=123, empty_reads=2, wake_wait_results=[True])
+    path = tmp_path / "audio_metrics.json"
+    publisher = AudioMetricsPublisher(metrics, path, interval_s=0.01)
+
+    publisher.publish_once()
+
+    assert json.loads(path.read_text()) == {
+        "pcm_frames_received": 123,
+        "queue_frames_read": 0,
+        "front_frames_read": 0,
+        "empty_reads": 2,
+        "replayed_preroll_frames": 0,
+        "wake_wait_attempts": 0,
+        "wake_wait_results": [True],
+    }
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_audio_metrics_publisher_refreshes_and_stops(tmp_path: Path) -> None:
+    metrics = AudioMetrics()
+    path = tmp_path / "audio_metrics.json"
+    publisher = AudioMetricsPublisher(metrics, path, interval_s=0.01)
+    publisher.start()
+    try:
+        metrics.empty_reads = 7
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if path.exists() and json.loads(path.read_text())["empty_reads"] == 7:
+                break
+            time.sleep(0.01)
+        assert json.loads(path.read_text())["empty_reads"] == 7
+        assert publisher._thread is not None and publisher._thread.daemon
+    finally:
+        publisher.stop()
+    assert publisher._thread is None
+
+
 def test_sounddevice_capturer_reads_queued_frames() -> None:
     capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
     frame = _sine()

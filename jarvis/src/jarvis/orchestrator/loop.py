@@ -25,7 +25,10 @@ from jarvis import config
 from jarvis.actions import assistant_lifecycle
 from jarvis.orchestrator import usage_patterns
 from jarvis.actions.base import build_registry
-from jarvis.audio.capture import SilenceVAD, SileroVAD, SoundDeviceCapturer, calibrate_noise_floor
+from jarvis.audio.capture import (
+    AudioMetricsPublisher, SilenceVAD, SileroVAD, SoundDeviceCapturer,
+    calibrate_noise_floor,
+)
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
 from jarvis.audio.playback import Playback
 from jarvis.audio.stt import WhisperSTT
@@ -1017,6 +1020,21 @@ def _start_ollama_keepalive(pipeline: Pipeline) -> None:
     thread.start()
 
 
+def _start_audio_metrics_publisher(pipeline: Pipeline) -> AudioMetricsPublisher | None:
+    """Start diagnostics only after the runtime has opened its capture path."""
+    capturer = getattr(pipeline.wake, "capturer", None)
+    metrics = getattr(capturer, "metrics", None)
+    if metrics is None:
+        return None
+    publisher = AudioMetricsPublisher(metrics, config.AUDIO_METRICS_FILE)
+    try:
+        publisher.start()
+    except OSError:
+        logger.warning("audio metrics publisher unavailable", exc_info=True)
+        return None
+    return publisher
+
+
 def start() -> int:
     """``jarvis start``: run the orchestrator loop with the REAL voice pipeline.
 
@@ -1047,6 +1065,7 @@ def start() -> int:
     # session and flushes speaker; the outer try/finally removes PID file.
     signal.signal(signal.SIGTERM, lambda *_: (_remove_pid(), sys.exit(0)))
     _write_pid()
+    metrics_publisher = None
     try:
         try:
             # Close mic during announcement to prevent feedback
@@ -1103,8 +1122,11 @@ def start() -> int:
         # Provider-agnostic: gemini/Silero boots print nothing else.
         _write_fsm_state("idle")
         print("[jarvis] listo — esperando activación", flush=True)
+        metrics_publisher = _start_audio_metrics_publisher(pipeline)
         run(pipeline)
     finally:
+        if metrics_publisher is not None:
+            metrics_publisher.stop()
         _remove_pid()
     return 0
 

@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+import json
+import os
+import tempfile
+import threading
 import wave
 from queue import Empty, Queue
 from typing import Callable, Protocol, runtime_checkable
@@ -37,6 +41,75 @@ class AudioMetrics:
     replayed_preroll_frames: int = 0
     wake_wait_attempts: int = 0
     wake_wait_results: list[bool] = field(default_factory=list)
+
+    def snapshot(self) -> dict[str, int | list[bool]]:
+        """Return a detached, JSON-serializable copy for diagnostics."""
+        return {
+            "pcm_frames_received": self.pcm_frames_received,
+            "queue_frames_read": self.queue_frames_read,
+            "front_frames_read": self.front_frames_read,
+            "empty_reads": self.empty_reads,
+            "replayed_preroll_frames": self.replayed_preroll_frames,
+            "wake_wait_attempts": self.wake_wait_attempts,
+            "wake_wait_results": list(self.wake_wait_results),
+        }
+
+
+class AudioMetricsPublisher:
+    """Publish live audio metrics without involving the capture path or signals."""
+
+    def __init__(self, metrics: AudioMetrics, path, *, interval_s: float = 1.0) -> None:
+        self.metrics = metrics
+        self.path = path
+        self.interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def publish_once(self) -> None:
+        path = self.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = handle.name
+                json.dump(self.metrics.snapshot(), handle, separators=(",", ":"))
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            temporary = None
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self.publish_once()
+
+        def _run() -> None:
+            while not self._stop.wait(self.interval_s):
+                try:
+                    self.publish_once()
+                except OSError:
+                    pass
+
+        self._thread = threading.Thread(target=_run, name="jarvis-audio-metrics", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=max(self.interval_s, 0.1) + 0.5)
+        self._thread = None
 
 
 @runtime_checkable

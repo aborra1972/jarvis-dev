@@ -334,6 +334,7 @@ USAGE_SUGGESTIONS_FILE = RUN_DIR / "usage_suggestions.json"
 USAGE_PATTERN_MIN_COUNT = 5
 PID_FILE = RUN_DIR / "jarvis.pid"         # RF-11 non-vocal signal target
 FSM_STATE_FILE = RUN_DIR / "fsm_state"    # real-time FSM state for GUI
+AUDIO_METRICS_FILE = RUN_DIR / "audio_metrics.json"  # live capture diagnostics
 
 # --- Allowlists (executors validate against these; PR4 finalizes) ------------
 ALLOWED_APPS: set[str] = {

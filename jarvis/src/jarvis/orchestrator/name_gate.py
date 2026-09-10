@@ -15,7 +15,7 @@ _WORD_PUNCTUATION = " \t,.;:!?¡¿"
 # activation because arbitrary near-matches would turn ambient speech into
 # commands.
 _NAME_ALIASES = {
-    "jarvis": frozenset({"yarvis", "charvis"}),
+    "jarvis": frozenset({"yarvis", "charvis", "jaarvis"}),
 }
 
 

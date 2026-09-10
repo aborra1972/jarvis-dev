@@ -606,7 +606,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             result = assistant_lifecycle.handle_general_qa(
                 intent,
                 pipeline.session,
-                answer=interpretation.answer,
+                answer=context.interpretation.answer,
                 combined=True,
             )
         elif intent.intent == "general_qa" and config.LLM_PROVIDER not in ("gemini", "codex"):

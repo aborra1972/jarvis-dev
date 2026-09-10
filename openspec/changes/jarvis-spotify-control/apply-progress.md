@@ -102,3 +102,42 @@ Exact unchecked implementation rows remain persisted in `tasks.md`, beginning wi
 - [ ] Complete all later Stage 2 OAuth, catalog, playback, documentation, and release-verification rows only under separately authorized work units. <!-- sdd-owner: implementation -->
 
 **Structured status consumed:** `applyState: ready`, `actionContext.mode: repo-local`, workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`, allowed edit roots include the workspace, and the parent explicitly resolved the high-risk forecast by authorizing this bounded Stage 1 work unit. **Next phase:** `sdd-verify`.
+
+## Stage 1 task 1.2.1 — Spotify-only local MPRIS adapter
+
+- **Status:** completed; only the adapter task was authorized and marked `[x]` in `tasks.md`. Registry/dispatch, lifecycle, diagnostics, documentation, OAuth, and Stage 2 remain untouched.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_local.py`, and the selected checkbox in `tasks.md`.
+- **Behavior:** `LocalSpotifyAdapter` uses fixed list/status/play/pause argv with `shell=False` and bounded timeout; it requires exactly one exact configured Spotify identity, checks `OperationToken` cancellation before probe/control/return, verifies post-action state, and returns typed safe categories without stderr or command detail. It accepts no user command arguments and performs no network/OAuth.
+- **Workload:** 245 authored changed lines across the source/test/task slice, below the requested 350-line limit; unrelated working-tree changes were preserved.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added `jarvis/tests/unit/test_spotify_local.py` first; collection failed because `jarvis.services.spotify` did not exist. The tests cover exact argv and subprocess flags, bounded timeout, missing binary, timeout, nonzero control, zero/one/multiple identity, cancellation, redaction, and unknown post-state. |
+| GREEN | Implemented the smallest fixed-command adapter; focused tests passed: `7 passed`. |
+| TRIANGULATE | Required offline command passed: `1039 passed, 1 warning` using `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`; the warning is the existing unknown `e2e` mark. Fake-runner traces confirm no control command occurs without unique Spotify identity and no success is returned for unknown state or cancellation. No host probe, network, credentials, or OAuth was used. |
+| REFACTOR | Added cancellation checks after each subprocess boundary, kept fixed argv construction inside the adapter, isolated safe result categories/messages, and left registry/loop/diagnostic surfaces unchanged. |
+
+### Remaining implementation tasks
+
+All other implementation-owned task rows remain unchecked and were not edited, including the Stage 1 service dispatch/registry, lifecycle, diagnostics, acceptance, and all Stage 2 rows.
+
+## Correction work unit `spotify-mpris-probe-failclosed-correction`
+
+- **Scope:** Corrected only the verifier blocker in the completed Stage 1 local adapter slice. A nonzero `playerctl -l` probe now returns `MPRIS_UNAVAILABLE` before stdout identity parsing, so control is never invoked regardless of probe output.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_local.py`, and this progress evidence only. No task checkbox was changed because the parent adapter task was already checked; all unrelated working-tree changes were preserved.
+- **Safety preserved:** Fixed argv, `shell=False`, bounded timeout, identity filtering, and all existing behavior remain unchanged.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added `test_nonzero_probe_with_spotify_output_fails_closed_without_control`; focused test failed because stdout was trusted and returned `IDENTITY_MISSING` rather than failing at the probe boundary. |
+| GREEN | Added the minimal nonzero-probe guard returning `MPRIS_UNAVAILABLE`; focused adapter tests passed: `8 passed`. |
+| TRIANGULATE | Required command passed: `1040 passed, 1 warning`; the warning is the existing unknown `e2e` mark. The fake trace contains only `playerctl -l` and no play/pause invocation. |
+| REFACTOR | Reviewed the correction as a three-line guard at the existing probe seam; no broader refactor or behavior change was warranted. |
+
+**Required command:** `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`
+
+**Remaining scope:** No additional task was authorized by this correction work unit. The existing later implementation-owned rows remain unchecked and out of scope.

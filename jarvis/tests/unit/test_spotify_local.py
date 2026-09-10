@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 
 import pytest
 
@@ -110,3 +111,81 @@ def test_status_nonzero_is_unknown_and_stderr_is_not_exposed():
     result = adapter(FakeRunner([completed("spotify\n"), completed(returncode=0), completed(returncode=2)])).play()
     assert result.code is SpotifyErrorCode.STATE_UNKNOWN
     assert "secret stderr" not in result.message
+
+
+def test_blocked_probe_cancellation_interrupts_wait_before_control():
+    entered = threading.Event()
+    release = threading.Event()
+    token = OperationToken()
+    calls = []
+
+    def blocked_runner(argv, **kwargs):
+        calls.append(argv)
+        entered.set()
+        release.wait(2)
+        return completed("spotify\\n")
+
+    result_box = []
+    worker = threading.Thread(target=lambda: result_box.append(adapter(blocked_runner, token).play()))
+    worker.start()
+    assert entered.wait(1)
+    token.cancel("off")
+    worker.join(1)
+    assert not worker.is_alive()
+    release.set()
+    worker.join(1)
+
+    assert result_box[0].code is SpotifyErrorCode.CANCELLED
+    assert calls == [["playerctl", "-l"]]
+
+
+def test_blocked_control_terminates_process_on_external_cancellation(monkeypatch):
+    class Process:
+        instances = []
+
+        def __init__(self, argv, **kwargs):
+            self.argv = argv
+            self.returncode = 0 if len(self.__class__.instances) == 0 else None
+            self.terminated = False
+            self.killed = False
+            self.communicated = False
+            self.__class__.instances.append(self)
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            self.communicated = True
+            stdout = "spotify\n" if self.argv == ["playerctl", "-l"] else ""
+            return stdout, "secret stderr"
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    token = OperationToken()
+    adapter_instance = adapter(None, token)
+    result_box = []
+
+    worker = threading.Thread(target=lambda: result_box.append(adapter_instance.play()))
+    worker.start()
+    while len(Process.instances) < 2:
+        pass
+    token.cancel("switch_off")
+    worker.join(1)
+
+    assert not worker.is_alive()
+    assert result_box[0].code is SpotifyErrorCode.CANCELLED
+    assert Process.instances[1].terminated is True
+    assert Process.instances[1].communicated is True
+    assert [process.argv for process in Process.instances] == [
+        ["playerctl", "-l"], ["playerctl", "--player=spotify", "play"],
+    ]

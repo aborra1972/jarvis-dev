@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
@@ -51,7 +53,7 @@ class LocalSpotifyAdapter:
             raise ValueError("invalid Spotify identity")
         if not isinstance(timeout_s, (int, float)) or not 0 < timeout_s <= 30:
             raise ValueError("invalid Spotify timeout")
-        self._runner = runner or subprocess.run
+        self._runner = runner
         self._bin = playerctl_bin
         self._identity = identity
         self._timeout = float(timeout_s)
@@ -107,8 +109,27 @@ class LocalSpotifyAdapter:
         return SpotifyResult(True, SpotifyErrorCode.OK, "Spotify actualizado.", state)
 
     def _run(self, argv: list[str]) -> Any | SpotifyResult:
+        """Wait interruptibly so cancellation cannot advance a sync probe."""
+        if self._operation is None:
+            return self._invoke_runner(argv)
+        done = threading.Event()
+        result: list[Any] = []
+
+        def invoke() -> None:
+            result.append(self._invoke_runner(argv))
+            done.set()
+
+        threading.Thread(target=invoke, daemon=True).start()
+        while not done.wait(0.01):
+            if self._cancelled():
+                return self._cancelled_result()
+        return result[0]
+
+    def _invoke_runner(self, argv: list[str]) -> Any | SpotifyResult:
+        if self._runner is None:
+            return self._invoke_popen(argv)
         try:
-            result = self._runner(
+            return self._runner(
                 argv, shell=False, capture_output=True, text=True,
                 timeout=self._timeout, check=False,
             )
@@ -118,7 +139,51 @@ class LocalSpotifyAdapter:
             return SpotifyResult(False, SpotifyErrorCode.TIMEOUT, "El control local de Spotify tardó demasiado.")
         except OSError:
             return SpotifyResult(False, SpotifyErrorCode.MPRIS_UNAVAILABLE, "El control local de Spotify no está disponible.")
-        return result
+
+    def _invoke_popen(self, argv: list[str]) -> Any | SpotifyResult:
+        """Run playerctl with a cancellable, bounded child-process wait."""
+        try:
+            process = subprocess.Popen(
+                argv, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, start_new_session=True,
+            )
+        except FileNotFoundError:
+            return SpotifyResult(False, SpotifyErrorCode.BINARY_MISSING, "El control local de Spotify no está instalado.")
+        except OSError:
+            return SpotifyResult(False, SpotifyErrorCode.MPRIS_UNAVAILABLE, "El control local de Spotify no está disponible.")
+
+        deadline = time.monotonic() + self._timeout
+        cancelled = False
+        while process.poll() is None:
+            if self._cancelled():
+                cancelled = True
+                self._stop_process(process)
+                break
+            if time.monotonic() >= deadline:
+                self._stop_process(process)
+                return SpotifyResult(False, SpotifyErrorCode.TIMEOUT, "El control local de Spotify tardó demasiado.")
+            time.sleep(0.01)
+        try:
+            stdout, stderr = process.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            self._stop_process(process, force=True)
+            stdout, stderr = process.communicate(timeout=0.25)
+        if cancelled or self._cancelled():
+            return self._cancelled_result()
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+    @staticmethod
+    def _stop_process(process: Any, *, force: bool = False) -> None:
+        """Terminate promptly, escalating to kill within a bounded grace period."""
+        try:
+            (process.kill if force else process.terminate)()
+            process.wait(timeout=0.2)
+        except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                process.kill()
+                process.wait(timeout=0.2)
+            except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+                pass
 
     def _cancelled(self) -> bool:
         return bool(self._operation is not None and self._operation.cancelled())

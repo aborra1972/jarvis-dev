@@ -38,6 +38,10 @@ ALLOWED_INTENTS: frozenset[str] = frozenset({
 })
 
 # Destructive intents: only the golden hard gate may emit these.
+# Dedicated Stage 1 actions are schema-allowlisted but intentionally remain
+# outside the existing executor registry until their service work unit lands.
+SPOTIFY_INTENTS: frozenset[str] = frozenset({"spotify_play", "spotify_pause"})
+
 DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({
     "shutdown", "reboot", "power_off_self",
     "format_disk", "wipe_system", "delete_all", "kill_process",
@@ -126,7 +130,7 @@ def validate(payload: Any) -> Intent:
         raise SchemaError("bad_payload", f"expected JSON object, got {type(payload).__name__}")
 
     intent_name = payload.get("intent")
-    if intent_name not in ALLOWED_INTENTS:
+    if intent_name not in ALLOWED_INTENTS | SPOTIFY_INTENTS:
         raise SchemaError("unknown_intent", f"intent {intent_name!r} not in allowlist")
 
     confidence = payload.get("confidence", 0.9)
@@ -139,6 +143,8 @@ def validate(payload: Any) -> Intent:
     raw_entities = payload.get("entities", {})
     if not isinstance(raw_entities, dict):
         raise SchemaError("bad_entities", f"entities must be an object, got {type(raw_entities).__name__}")
+    if intent_name in {"spotify_play", "spotify_pause"} and raw_entities:
+        raise SchemaError("unexpected_entities", f"{intent_name} does not accept entities")
     entities: dict[str, str] = {}
     for key, value in raw_entities.items():
         if value is None:
@@ -267,7 +273,7 @@ def build_codex_system_prompt() -> str:
         "general_qa: non-command, non-search questions; full question in query. answer must always "
         "be concise Spanish text; if data is unavailable, explain or ask. Never empty or executable; "
         "at most 2000 characters.\n"
-        "execute is only for routine, non-destructive shell requests; put its command in command. "
+    "execute is only for routine, non-destructive shell requests; put its command in command. "
         "open_app requires a known application; open_url requires http/https with a host. Fill "
         "only applicable entities.\n"
         "Confidence is 0.0-1.0; below 0.6 requires a re-ask. Never invent fields."
@@ -292,6 +298,8 @@ def build_system_prompt(*, include_general_qa_answer: bool = False) -> str:
         "only emitted when the user clearly asks to power down the machine or the assistant itself.\n"
         "- open_app: ONLY for known applications (firefox, terminal, spotify, libreoffice, etc). "
         "Use entities.app with the app name.\n"
+        "- spotify_play/spotify_pause: exact Spotify Desktop controls, with no entities; reject "
+        "URIs, tracks, playlists, player names, and non-Spotify players.\n"
         "- execute: for ANY command that is NOT an open_app, NOT create_doc, NOT web_search. "
         "Generate the exact shell command.\n"
         "  Examples:\n"

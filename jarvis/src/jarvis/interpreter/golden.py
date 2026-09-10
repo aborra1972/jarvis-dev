@@ -167,6 +167,10 @@ _MAKE_BUILD = re.compile(
     rf"^{_verb_alt('compilar')}(?: (?:el proyecto|todo))?$"
 )
 
+# Exact Spotify-only controls; content, players, and command suffixes do not match.
+_SPOTIFY_PLAY = re.compile(r"^(?:reproducir|reproduci) spotify$")
+_SPOTIFY_PAUSE = re.compile(r"^(?:pausar|pausa) spotify$")
+
 
 def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
     # Empty repo means "the active project" (delegated to orchestrator, PR3).
@@ -241,6 +245,8 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_GIT_PUSH, "execute", _git_push_extract),
     (_MAKE_CLEAN, "execute", _make_clean_extract),
     (_MAKE_BUILD, "execute", _make_build_extract),
+    (_SPOTIFY_PLAY, "spotify_play", lambda m: {}),
+    (_SPOTIFY_PAUSE, "spotify_pause", lambda m: {}),
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),

@@ -322,3 +322,16 @@ SAFE_COMMANDS: list[str] = [
 @pytest.mark.parametrize("command", SAFE_COMMANDS)
 def test_is_dangerous_command_ignores_safe(command: str) -> None:
     assert not is_dangerous_command(command), f"{command!r} must NOT be flagged"
+
+
+@pytest.mark.parametrize("intent_name", ["spotify_play", "spotify_pause"])
+def test_spotify_intents_have_no_entities(intent_name: str) -> None:
+    assert validate({"intent": intent_name, "entities": {}}).entities == {}
+    for entities in ({"command": "playerctl play"}, {"uri": "spotify:track:x"}, {"player": "vlc"}):
+        with pytest.raises(SchemaError):
+            validate({"intent": intent_name, "entities": entities})
+
+
+def test_spotify_intents_are_not_generic_or_existing_app_intents() -> None:
+    assert "spotify_play" not in {"execute", "open_app"}
+    assert "spotify_pause" not in {"execute", "open_app"}

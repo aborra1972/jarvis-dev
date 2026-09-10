@@ -314,3 +314,27 @@ def test_extended_local_datetime_questions_fall_through(raw: str) -> None:
 
 def test_unrecognized_weather_text_stays_unmatched() -> None:
     assert _g("decime si mañana llueve") is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("reproducí spotify", "spotify_play"),
+    ("reproducir spotify", "spotify_play"),
+    ("pausá spotify", "spotify_pause"),
+    ("pausar spotify", "spotify_pause"),
+])
+def test_spotify_golden_patterns_are_exact_and_entity_free(raw: str, expected: str) -> None:
+    intent = _g(raw)
+    assert intent is not None
+    assert intent.intent == expected
+    assert intent.entities == {}
+    assert intent.source == "golden"
+
+
+@pytest.mark.parametrize("raw", [
+    "reproducir", "pausar", "reproducir spotify:track:abc", "pausar vlc",
+    "reproducir spotify playlist", "reproducir spotify bohemian rhapsody",
+    "reproducí spotify y abrí firefox", "poné a reproducir spotify",
+])
+def test_spotify_golden_rejects_arbitrary_targets_and_content(raw: str) -> None:
+    intent = _g(raw)
+    assert intent is None or intent.intent not in {"spotify_play", "spotify_pause"}

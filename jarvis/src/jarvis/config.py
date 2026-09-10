@@ -9,8 +9,11 @@ executors/allowlists (PR4), voice pipeline (PR5).
 
 from __future__ import annotations
 
+import math
 import os
+import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -138,6 +141,47 @@ VAD_SILERO_THRESHOLD = AUDIO_SILERO_THRESHOLD
 # successfully-executed command, keep listening for this many seconds without
 # needing the wake word again. 0 = disabled (always require the wake word).
 CONVERSATION_WINDOW_S = 8.0
+
+
+# Stage 1 local Spotify settings are additive and fail closed as a unit. Values
+# are trusted configuration only; no voice/entity data is accepted here.
+def load_spotify_local_config(environ: Mapping[str, str] | None = None) -> dict[str, object]:
+    env = os.environ if environ is None else environ
+    defaults: dict[str, object] = {
+        "enabled": False,
+        "playerctl_bin": "playerctl",
+        "identity": "spotify",
+        "timeout_s": 2.0,
+    }
+    enabled_raw = env.get("SPOTIFY_LOCAL_ENABLED", "false").strip().lower()
+    if enabled_raw not in {"true", "false", "1", "0", "yes", "no"}:
+        return defaults
+    playerctl_bin = env.get("SPOTIFY_PLAYERCTL_BIN", "playerctl").strip()
+    identity = env.get("SPOTIFY_MPRIS_IDENTITY", "spotify").strip()
+    try:
+        timeout_s = float(env.get("SPOTIFY_LOCAL_TIMEOUT_S", "2.0"))
+    except (TypeError, ValueError):
+        return defaults
+    if (not playerctl_bin or re.search(r"[\s;|&$<>`'\\]", playerctl_bin)
+            or not (re.fullmatch(r"[A-Za-z0-9_.-]+", playerctl_bin)
+                    or playerctl_bin.startswith("/"))):
+        return defaults
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", identity) or not math.isfinite(timeout_s) or not 0.1 <= timeout_s <= 30.0:
+        return defaults
+    defaults.update(
+        enabled=enabled_raw in {"true", "1", "yes"},
+        playerctl_bin=playerctl_bin,
+        identity=identity,
+        timeout_s=timeout_s,
+    )
+    return defaults
+
+
+_SPOTIFY_LOCAL = load_spotify_local_config()
+SPOTIFY_LOCAL_ENABLED: bool = _SPOTIFY_LOCAL["enabled"]  # type: ignore[assignment]
+SPOTIFY_PLAYERCTL_BIN: str = _SPOTIFY_LOCAL["playerctl_bin"]  # type: ignore[assignment]
+SPOTIFY_MPRIS_IDENTITY: str = _SPOTIFY_LOCAL["identity"]  # type: ignore[assignment]
+SPOTIFY_LOCAL_TIMEOUT_S: float = _SPOTIFY_LOCAL["timeout_s"]  # type: ignore[assignment]
 # Barge-in: while Jarvis is speaking, keep the mic open and let a repeat of
 # the wake word interrupt TTS. Off by default — there is no AEC in this
 # project, so Jarvis's own voice can false-trigger at the normal threshold.

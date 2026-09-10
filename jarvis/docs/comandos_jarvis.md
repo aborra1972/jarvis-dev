@@ -31,6 +31,31 @@
 - "creá un commit con mensaje [texto]"
 - "mostrá los últimos commits"
 
+### Spotify local (Stage 1)
+- "reproducir spotify" / "reproducí spotify"
+- "pausar spotify" / "pausá spotify"
+
+El control local usa únicamente el reproductor MPRIS de Spotify Desktop ya abierto,
+no requiere OAuth, credenciales ni red, y falla cerrado si `playerctl` falta,
+Spotify no aparece o hay más de un reproductor coincidente. Abrir Spotify sigue
+usando el comando existente `open_app`.
+
+Para revisar la capacidad local sin exponer salida del proceso, ejecutá el
+diagnóstico con sondeo de host explícito desde el checkout:
+
+```bash
+cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev
+SPOTIFY_LOCAL_ENABLED=true jarvis/.venv/bin/python -c \
+  'from jarvis.diagnose import check_spotify_local; print(check_spotify_local(probe=True))'
+```
+
+El diagnóstico solo informa estados normalizados: `disabled`, `missing`,
+`ambiguous` o `available`. El sondeo no se ejecuta por defecto; no muestra
+stdout/stderr, argumentos, rutas configuradas ni secretos. Un estado `missing`
+o `ambiguous` bloquea cualquier control y no selecciona otro reproductor.
+Stage 2 (búsqueda, reproducción por API y OAuth) permanece fuera de este
+límite y requiere autorización explícita posterior.
+
 ### Asistente
 - "¿Qué podés hacer?"
 - "¿Cuál es tu nombre?"

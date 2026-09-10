@@ -1,85 +1,86 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:9906c248fb0749fb5ee29534deb37bfd0b751e9552d377c98614df90
+evidence_revision: sha256:7babfd304959bd3976857f2bb5d6d1d4830efb0797a3d92f0043c6e0ee1e3492
 verdict: fail
-blockers: 2
-critical_findings: 2
-requirements: 1/8
-scenarios: 2/19
-test_command: cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_loop.py jarvis/tests/unit/test_spotify_service.py jarvis/tests/unit/test_spotify_local.py
+blockers: 1
+critical_findings: 0
+requirements: 2/8
+scenarios: 4/19
+test_command: cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/test_diagnose.py jarvis/tests/unit/test_actions_system.py
 test_exit_code: 0
-test_output_hash: sha256:de83fa60872950d29ce8ec6b348f415bf96a2fc6cbef7a2e1aaad0f59f5db4c8
+test_output_hash: sha256:861a5e4144c59d06c4b16bd95676bf38ebf991e9ddbcdc1eb9dae189852be72f
 build_command: ""
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
-# SDD Verification — Uncommitted Stage 1 Spotify lifecycle candidate
+# SDD Verification — Uncommitted Stage 1 task 1.3.2
 
 ## Verdict
 
-**FAIL for archive/readiness; lifecycle cancellation corrections independently pass.** No source or test files were edited. Only this OpenSpec report is updated.
+**PASS for task 1.3.2.** The uncommitted diagnostic/documentation slice satisfies the requested scope. No source or test files were edited by verification; this report is the only artifact updated.
 
-## Scope and coverage
+## Scope and status
 
-Verified the uncommitted candidate in `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`, including the prior blocked-probe correction and the Popen/external-off correction. The directly verified requirement is `Spotify operations MUST preserve existing safety and lifecycle gates` (1/8 requirements; 2/19 scenarios). Stage 2, diagnostics, and unimplemented release acceptance are not claimed.
+- Workspace: `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`
+- Active change: `jarvis-spotify-control`
+- Task verified: Stage 1 task 1.3.2, now checked in `openspec/changes/jarvis-spotify-control/tasks.md`.
+- Action context: repo-local; allowed edit root is the canonical workspace.
+- Review workload: 112 authored lines for this slice, below the declared 350-line work-unit limit; no size exception or scope creep observed.
 
-## Deterministic evidence
+## Requirement and scenario coverage
 
-- **Popen cancellation after spawn: PASS.** An isolated fake executable recorded `playerctl -l` and `--player=spotify play`; cancellation after the control child PID appeared returned `cancelled` in 0.002s, recorded no `SIDE_EFFECT`, and issued no status command.
-- **Bounded escalation: PASS.** An isolated process double that ignored `terminate()` was escalated to `kill()` within the bounded wait path.
-- **External off while blocked: PASS.** A real `SIGUSR1` delivered while the control child was blocked cancelled the active operation with reason `switch_off`; the adapter returned `cancelled`, with no side-effect marker and no status invocation.
-- **Lifecycle suppression: PASS.** The loop checks freshness before Spotify transcript/history recording, session turn recording, and speech; stale/off results are suppressed.
-- **Safety/regressions: PASS.** Fixed argv, `shell=False`, bounded timeout, exact single Spotify identity, off precedence, epoch replacement, readiness barrier, confirmation, `power_off_self`, `open_app`, generic executor isolation, and non-Spotify paths are covered by the focused/full green suites.
+Within this task scope, diagnostics preserve the existing diagnostic/open-app boundary and document credential-free, local-only Stage 1 behavior. The relevant retrieved spec requirements/scenarios are covered by the focused tests and documentation; unrelated Stage 1 adapter/lifecycle and Stage 2 requirements are not claimed here.
 
-## Test and validation commands
+- Normalized statuses: `disabled`, `not_probed`, `missing`, `ambiguous`, and `available` are produced as expected.
+- Host probing is opt-in; disabled and non-probe paths do not invoke `_run`.
+- Nonzero probe results and zero/multiple identity matches fail closed.
+- Diagnostic rendering excludes raw stdout, stderr, configured argv/path details, and secret-like values.
+- Documentation explicitly states no OAuth, credentials, or network for local control, and documents fail-closed behavior and unchanged `open_app` use.
+- Existing diagnostic checks and `open_app` behavior remain unchanged by the diff; regression tests pass.
 
-Focused:
+## Task completion
+
+No unchecked implementation task remains for 1.3.2. The separate Stage 1 acceptance task and Stage 2 tasks remain unchecked and are outside this requested verification scope; therefore the whole change is not archive-ready.
+
+## Tests and validation
+
+Focused command:
 
 ```text
-cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_loop.py jarvis/tests/unit/test_spotify_service.py jarvis/tests/unit/test_spotify_local.py
+cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/test_diagnose.py jarvis/tests/unit/test_actions_system.py
 ```
 
-Result: exit 0; `60 passed in 19.45s`; output hash `sha256:de83fa60872950d29ce8ec6b348f415bf96a2fc6cbef7a2e1aaad0f59f5db4c8`.
+Result: exit 0, `29 passed in 0.09s`.
 
-Full:
+Full command:
 
 ```text
 cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q
 ```
 
-Result: exit 0; `1053 passed, 1 warning in 49.83s`; output hash `sha256:9d01c757eefb065e9bab9aee0dd3b70a96168fe9b50e18e3e65df21d9bc7ed5b`. The warning is the existing unknown `e2e` mark at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
+Result: exit 0, `1059 passed, 1 warning in 54.59s`; existing `PytestUnknownMarkWarning` for the `e2e` mark at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
 
-Build: no build command configured.
+No build command is configured. No network, credentials, OAuth, or host probe was used during verification.
 
-## Task completion and blockers
+## Strict TDD
 
-The lifecycle task 1.3.1 is checked. The following unchecked implementation tasks are CRITICAL completeness/archive blockers:
-
-- [ ] Extend `jarvis/src/jarvis/diagnose.py` with safe local Spotify capability diagnostics and document Stage 1 commands/boundaries in `jarvis/docs/comandos_jarvis.md` (or the repository's selected command guide); add tests in `jarvis/tests/unit/test_diagnose.py` asserting no raw output or arguments leak. RED → GREEN → TRIANGULATE → REFACTOR evidence: RED asserts missing/ambiguous capability and redaction failures; GREEN emits normalized actionable status; TRIANGULATE checks fake diagnostics plus an opt-in host probe; REFACTOR keeps existing diagnostics and `open_app` semantics unchanged. <!-- sdd-owner: implementation -->
-- [ ] Run a Stage 1 acceptance pass with no network and no Spotify credentials, including deterministic unit tests and optional Linux-marked playerctl/MPRIS tests; record the exact command `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`, the capability-spike result, and rollback boundary (unregister Spotify intents/service while retaining `open_app`). RED → GREEN → TRIANGULATE → REFACTOR evidence: RED is the offline/no-credentials acceptance baseline before implementation; GREEN is the passing Stage 1 suite; TRIANGULATE is host probe plus regression suite; REFACTOR is the reviewed independent Stage 1 release slice. <!-- sdd-owner: implementation -->
-
-All Stage 2 implementation rows are also unchecked and remain outside this Stage 1 candidate; therefore the change is not archive-ready.
-
-## Strict TDD and workload
-
-`apply-progress.md` contains RED → GREEN → TRIANGULATE → REFACTOR evidence for the correction. The focused tests are present and green, and the full suite is green. The candidate source/test slice remains within the declared Stage 1 review boundary; no chained-PR boundary was broadened and no size exception was inferred.
+`apply-progress.md` contains the required RED → GREEN → TRIANGULATE → REFACTOR evidence and a `TDD Cycle Evidence` table for task 1.3.2. Reported test file `jarvis/tests/test_diagnose.py` exists and was rerun successfully. Assertions cover normalized status, probe suppression, identity cardinality, and redaction rather than only smoke or implementation-detail behavior.
 
 ## Exact blockers
 
-1. **CRITICAL:** Two Stage 1 implementation-owned tasks remain unchecked: diagnostics/documentation and the formal acceptance pass.
-2. **CRITICAL:** Stage 2 implementation-owned tasks remain unchecked, so whole-change archive readiness cannot be granted; they are outside this requested candidate scope.
+1. **ARCHIVE BLOCKER (out of task scope):** The Stage 1 acceptance task and Stage 2 implementation tasks remain unchecked, so the full change cannot receive a clean archive-ready verification verdict. Task 1.3.2 itself has no implementation blocker.
 
 ## Standard phase envelope
 
 status: blocked
-executive_summary: Popen child termination, bounded escalation, external-off invalidation, side-effect/history/speech suppression, and focused/full pytest all pass; unchecked implementation tasks block archive/readiness.
+executive_summary: Task 1.3.2 passes independently; the change-level report is blocked because the requested slice does not complete the remaining change requirements.
 artifacts: openspec/changes/jarvis-spotify-control/verify-report.md
 next_recommended: sdd-apply
-risks: Diagnostics and formal Stage 1 acceptance remain undone; Stage 2 remains intentionally unimplemented; full change cannot be archived.
+risks: Task 1.3.2 is independently verified, but whole-change archive is not ready because later acceptance and Stage 2 tasks remain unchecked; full suite retains one existing unknown e2e-mark warning.
 skill_resolution: fallback-path
 
 ## Key Learnings
 
-1. Real child-process evidence is needed to prove cancellation prevents a started control side effect.
-2. Signal-side token cancellation lets external off invalidate blocked work before the next loop tick.
+1. Opt-in probing keeps normal diagnostics side-effect-free while still exposing actionable capability states.
+2. Normalized diagnostic results can preserve fail-closed behavior without exposing subprocess details.

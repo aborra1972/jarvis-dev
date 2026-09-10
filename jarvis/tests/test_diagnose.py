@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from jarvis import diagnose
 
 
@@ -132,6 +134,62 @@ class TestCheckAudioOutput:
         mock_which.return_value = None
         r = diagnose.check_audio_output()
         assert r.ok is False
+
+
+class TestSpotifyDiagnostics:
+    """Spotify capability diagnostics stay normalized and opt-in."""
+
+    @patch("jarvis.diagnose._run")
+    @patch("jarvis.diagnose.config")
+    def test_disabled_does_not_probe(self, mock_config, mock_run):
+        mock_config.SPOTIFY_LOCAL_ENABLED = False
+        result = diagnose.check_spotify_local(probe=True)
+        assert result.status == "disabled"
+        assert result.ok is False
+        mock_run.assert_not_called()
+
+    @patch("jarvis.diagnose._run")
+    @patch("jarvis.diagnose.config")
+    def test_missing_binary_is_normalized_without_details(self, mock_config, mock_run):
+        mock_config.SPOTIFY_LOCAL_ENABLED = True
+        mock_config.SPOTIFY_MPRIS_IDENTITY = "spotify"
+        mock_config.SPOTIFY_PLAYERCTL_BIN = "/secret/playerctl --token=secret"
+        mock_run.return_value = (-1, "RAW_STDOUT", "RAW_STDERR")
+        result = diagnose.check_spotify_local(probe=True)
+        assert result.status == "missing"
+        assert result.ok is False
+        assert "RAW_" not in str(result)
+        assert "secret" not in str(result)
+
+    @pytest.mark.parametrize(
+        ("stdout", "expected_status", "expected_ok"),
+        [
+            ("", "missing", False),
+            ("spotify\nspotify", "ambiguous", False),
+            ("spotify\n", "available", True),
+        ],
+    )
+    @patch("jarvis.diagnose._run")
+    @patch("jarvis.diagnose.config")
+    def test_probe_normalizes_identity_cardinality(
+        self, mock_config, mock_run, stdout, expected_status, expected_ok
+    ):
+        mock_config.SPOTIFY_LOCAL_ENABLED = True
+        mock_config.SPOTIFY_MPRIS_IDENTITY = "spotify"
+        mock_config.SPOTIFY_PLAYERCTL_BIN = "playerctl"
+        mock_run.return_value = (0, stdout, "ignored stderr")
+        result = diagnose.check_spotify_local(probe=True)
+        assert result.status == expected_status
+        assert result.ok is expected_ok
+        assert "ignored stderr" not in str(result)
+
+    @patch("jarvis.diagnose._run")
+    @patch("jarvis.diagnose.config")
+    def test_probe_is_opt_in(self, mock_config, mock_run):
+        mock_config.SPOTIFY_LOCAL_ENABLED = True
+        result = diagnose.check_spotify_local()
+        assert result.status == "not_probed"
+        mock_run.assert_not_called()
 
 
 class TestRunAll:

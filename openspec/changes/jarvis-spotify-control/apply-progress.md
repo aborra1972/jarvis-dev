@@ -231,4 +231,30 @@ No additional task was authorized. Existing diagnostics/acceptance and Stage 2 r
 | RED | Added deterministic blocked-probe and blocked-control race tests; the probe test initially remained blocked, and the loop test exposed pre-dispatch Spotify history recording. |
 | GREEN | Added interruptible token polling and deferred Spotify transcript recording until post-return validity; focused tests passed: `53 passed`. |
 | TRIANGULATE | Required command passed: `1051 passed, 1 warning` with no network, credentials, OAuth, hardware, or provider access. Fake traces prove cancellation produces no control side effect, speech, or history. |
-| REFACTOR | Kept the change limited to the existing Spotify wait seam and lifecycle recording boundary; preserved all safety contracts and unrelated behavior. |
+| REFACTOR | Kept the change limited to the existing Spotify wait seam and lifecycle recording boundary; preserved all safety contracts and unrelated behavior.
+
+## Stage 1 task 1.3.2 — safe Spotify diagnostics and documentation
+
+- **Status:** completed; only task 1.3.2 was authorized and marked `[x]` in `tasks.md`.
+- **Scope:** Added normalized, fail-closed local capability diagnostics with opt-in host probing, deterministic fake coverage, and credential-free Stage 1 command/boundary documentation. No adapter, service, lifecycle, configuration, OAuth, or provider surface was changed.
+- **Files changed:** `jarvis/src/jarvis/diagnose.py`, `jarvis/tests/test_diagnose.py`, `jarvis/docs/comandos_jarvis.md`, and the selected checkbox in `tasks.md`.
+- **Behavior:** Diagnostics report only `disabled`, `not_probed`, `missing`, `ambiguous`, or `available`; raw stdout/stderr, executable paths, argv, and secrets are never rendered. Missing or ambiguous identity fails closed. Existing `run_all` and `open_app` behavior remain unchanged.
+- **Workload:** 112 authored changed lines across the selected diagnostic, test, documentation, and task surfaces; below the 350-line work-unit limit.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added deterministic tests for disabled, missing, ambiguous, available, redaction, and opt-in behavior; focused tests failed with six missing-function errors. |
+| GREEN | Implemented the smallest normalized diagnostic seam; focused tests passed: `23 passed`. |
+| TRIANGULATE | Required offline command passed: `1059 passed, 1 warning`; no network, credentials, OAuth, or host probe was used. The warning is the existing unknown `e2e` mark. |
+| REFACTOR | Kept probing explicit, fixed the list operation, exposed only safe status/message fields, and preserved existing diagnostic checks and `open_app` semantics. |
+
+## Remaining tasks
+
+The Stage 1 acceptance task and all later Stage 2 implementation rows remain unchecked and outside this authorized work unit.
+
+## Structured status consumed/produced
+
+- **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context; parent-authorized work unit `spotify-stage1-safe-diagnostics-docs`.
+- **Produced:** apply progress for task 1.3.2; next recommended phase is `sdd-verify`; no unsafe action-context warnings. |

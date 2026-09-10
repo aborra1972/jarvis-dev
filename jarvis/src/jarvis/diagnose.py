@@ -18,15 +18,19 @@ from jarvis import config
 class DiagResult:
     """Single diagnostic check result."""
 
-    def __init__(self, name: str, ok: bool, message: str, hint: str = ""):
+    def __init__(
+        self, name: str, ok: bool, message: str, hint: str = "", status: str | None = None
+    ):
         self.name = name
         self.ok = ok
         self.message = message
         self.hint = hint
+        self.status = status
 
     def __str__(self) -> str:
         icon = "\u2705" if self.ok else "\u274c"
-        text = f"{icon} {self.name}: {self.message}"
+        state = f" [{self.status}]" if self.status else ""
+        text = f"{icon} {self.name}{state}: {self.message}"
         if not self.ok and self.hint:
             text += f"\n   -> {self.hint}"
         return text
@@ -169,6 +173,65 @@ def check_ollama() -> DiagResult:
         False,
         f"servidor corre pero modelo '{model}' no esta instalado",
         f"Descarga el modelo: ollama pull {model}",
+    )
+
+
+def check_spotify_local(*, probe: bool = False) -> DiagResult:
+    """Report safe local Spotify capability state.
+
+    Host probing is deliberately opt-in. Only normalized identity cardinality
+    crosses this boundary; process output, errors, paths, and arguments never
+    appear in the result.
+    """
+    if not getattr(config, "SPOTIFY_LOCAL_ENABLED", False):
+        return DiagResult(
+            "Spotify local",
+            False,
+            "control local deshabilitado",
+            "Habilitalo solo con configuración local explícita.",
+            status="disabled",
+        )
+    if not probe:
+        return DiagResult(
+            "Spotify local",
+            False,
+            "sonda local no ejecutada",
+            "Usá un diagnóstico con sondeo de host explícito.",
+            status="not_probed",
+        )
+
+    rc, output, _ = _run([getattr(config, "SPOTIFY_PLAYERCTL_BIN", "playerctl"), "-l"])
+    if rc != 0:
+        return DiagResult(
+            "Spotify local",
+            False,
+            "capacidad local no disponible",
+            "Verificá playerctl y la sesión MPRIS.",
+            status="missing",
+        )
+    identity = getattr(config, "SPOTIFY_MPRIS_IDENTITY", "spotify")
+    matches = [line.strip() for line in output.splitlines() if line.strip() == identity]
+    if not matches:
+        return DiagResult(
+            "Spotify local",
+            False,
+            "no se encontró un reproductor Spotify único",
+            "Abrí Spotify Desktop y verificá la sesión MPRIS.",
+            status="missing",
+        )
+    if len(matches) != 1:
+        return DiagResult(
+            "Spotify local",
+            False,
+            "hay múltiples reproductores Spotify; control bloqueado",
+            "Cerrá las instancias duplicadas y volvé a sondear.",
+            status="ambiguous",
+        )
+    return DiagResult(
+        "Spotify local",
+        True,
+        "reproductor Spotify local identificado de forma única",
+        status="available",
     )
 
 

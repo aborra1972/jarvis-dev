@@ -312,6 +312,64 @@ def test_cache_disabled_bypasses() -> None:
 
 
 # --- recent context (pronoun resolution) --------------------------------------
+# --- Codex exact static general_qa cache --------------------------------------
+def test_codex_general_qa_cache_hit_skips_provider(monkeypatch) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    interpreter_module._general_qa_cache.clear()
+    provider = FakeProvider([{"intent": "general_qa", "entities": {"query": "que es python"}, "confidence": 0.95, "answer": "Python es un lenguaje de programación."}])
+    first = resolve_intent("¿Qué es Python?", provider=provider, app_allowlist=ALLOWLIST)
+    second = resolve_intent("que es python", provider=provider, app_allowlist=ALLOWLIST)
+    assert first.answer == second.answer
+    assert second.intent is not None and second.intent.intent == "general_qa"
+    assert len(provider.calls) == 1
+
+
+def test_codex_general_qa_cache_expires(monkeypatch) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    interpreter_module._general_qa_cache.clear()
+    clock = iter((100.0, 100.0, 401.0, 401.0, 401.0, 401.0))
+    monkeypatch.setattr(interpreter_module.time, "monotonic", lambda: next(clock))
+    payload = {"intent": "general_qa", "entities": {"query": "que es rust"}, "confidence": 0.95, "answer": "Rust es un lenguaje."}
+    provider = FakeProvider([payload, payload, payload])
+    resolve_intent("que es rust", provider=provider, app_allowlist=ALLOWLIST)
+    resolve_intent("que es rust", provider=provider, app_allowlist=ALLOWLIST)
+    resolve_intent("que es rust", provider=provider, app_allowlist=ALLOWLIST)
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.parametrize("question", ["que es hoy", "que significa clima", "definime noticia", "que es buscar en internet", "que significa borrar archivos"])
+def test_codex_general_qa_cache_excludes_dynamic_and_unsafe_forms(monkeypatch, question: str) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    interpreter_module._general_qa_cache.clear()
+    payload = {"intent": "general_qa", "entities": {"query": question}, "confidence": 0.95, "answer": "Respuesta estática."}
+    provider = FakeProvider([payload, payload])
+    resolve_intent(question, provider=provider, app_allowlist=ALLOWLIST)
+    resolve_intent(question, provider=provider, app_allowlist=ALLOWLIST)
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.parametrize("question", ["que es", "que es python por favor", "definime python ahora"])
+def test_codex_general_qa_cache_requires_exact_stable_form(monkeypatch, question: str) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    interpreter_module._general_qa_cache.clear()
+    payload = {"intent": "general_qa", "entities": {"query": question}, "confidence": 0.95, "answer": "Respuesta estática."}
+    provider = FakeProvider([payload, payload])
+    resolve_intent(question, provider=provider, app_allowlist=ALLOWLIST)
+    resolve_intent(question, provider=provider, app_allowlist=ALLOWLIST)
+    assert len(provider.calls) == 2
+
+
+def test_codex_general_qa_cache_does_not_store_empty_or_oversized_answers(monkeypatch) -> None:
+    monkeypatch.setattr(interpreter_module, "_is_codex_provider", lambda _: True)
+    for answer in ("", "x" * 2001):
+        interpreter_module._general_qa_cache.clear()
+        payload = {"intent": "general_qa", "entities": {"query": "que es go"}, "confidence": 0.95, "answer": answer}
+        provider = FakeProvider([payload, payload])
+        resolve_intent("que es go", provider=provider, app_allowlist=ALLOWLIST, use_cache=False)
+        resolve_intent("que es go", provider=provider, app_allowlist=ALLOWLIST)
+        assert len(provider.calls) == 2
+
+
 def test_pronoun_resolution_cerrarlo() -> None:
     """User says 'abrí firefox' then 'cerralo' → resolves to 'cerrar firefox'."""
     # First command: open firefox

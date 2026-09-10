@@ -95,6 +95,61 @@ class _IntentCache:
 _intent_cache = _IntentCache()
 
 
+class _GeneralQaCache:
+    """Thread-safe bounded cache for validated, static Codex answers only."""
+
+    def __init__(self, ttl_s: float = 300.0, max_size: int = 128) -> None:
+        self._ttl = ttl_s
+        self._max_size = max_size
+        self._lock = threading.Lock()
+        self._cache: dict[str, tuple[float, schema.Intent, str]] = {}
+
+    def get(self, key: str) -> tuple[schema.Intent, str] | None:
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            timestamp, intent, answer = entry
+            if time.monotonic() - timestamp > self._ttl:
+                del self._cache[key]
+                return None
+            return intent, answer
+
+    def put(self, key: str, intent: schema.Intent, answer: str) -> None:
+        with self._lock:
+            if len(self._cache) >= self._max_size and key not in self._cache:
+                oldest = min(self._cache, key=lambda item: self._cache[item][0])
+                del self._cache[oldest]
+            self._cache[key] = (time.monotonic(), intent, answer)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+
+_general_qa_cache = _GeneralQaCache()
+
+_GENERAL_QA_PREFIXES = ("que es ", "que significa ", "definime ")
+_GENERAL_QA_EXCLUSIONS = frozenset({
+    "hora", "fecha", "dia", "clima", "temperatura", "pronostico", "hoy",
+    "ayer", "manana", "ahora", "actual", "noticia", "buscar", "busca",
+    "internet", "web", "abrir", "abre", "cerrar", "cierra", "apagar", "apaga",
+    "reiniciar", "reinicia", "borrar", "borra", "eliminar", "elimina",
+    "ejecutar", "ejecuta", "comando", "terminal", "por", "favor",
+})
+
+
+def _static_general_qa_key(surface: str) -> str | None:
+    """Return an exact key only for explicitly stable, safe question forms."""
+    if not any(surface.startswith(prefix) for prefix in _GENERAL_QA_PREFIXES):
+        return None
+    words = surface.split()
+    if len(words) < 3 or any(word in _GENERAL_QA_EXCLUSIONS for word in words):
+        return None
+    # The normalized surface itself is the key: no fuzzy or prefix matching.
+    return surface
+
+
 class _RecentContext:
     """Thread-safe deque of recent intents for pronoun resolution.
 
@@ -260,6 +315,19 @@ def resolve_intent(
             return Interpretation(needs_reask=True, reason=f"invalid_entity:{','.join(invalid)}")
         return Interpretation(intent=hit)
 
+    # Exact static-QA cache is deliberately after the golden gate so local
+    # fast paths and all command/safety routes remain authoritative.
+    static_qa_key = _static_general_qa_key(surface) if use_cache and _is_codex_provider(provider) else None
+    if static_qa_key is not None:
+        cached_qa = _general_qa_cache.get(static_qa_key)
+        if cached_qa is not None:
+            cached_intent, cached_answer = cached_qa
+            cached_intent = replace(cached_intent, source="cache")
+            result = _validate_and_wrap(cached_intent, allowlist, threshold)
+            if result.intent is not None:
+                result.answer = cached_answer
+            return result
+
     # 2. LLM fallback for everything else (non-destructive).
     if provider is None:
         return Interpretation(needs_reask=True, reason="no_provider")
@@ -337,13 +405,14 @@ def resolve_intent(
 
     intent = _resolve_active_project(intent)
 
-    # 5. Cache successful resolution for repeat commands
-    if use_cache and intent.confidence >= threshold and intent.intent != "general_qa":
-        _intent_cache.put(surface, intent)
-
     result = _validate_and_wrap(intent, allowlist, threshold)
     if result.intent is not None and intent.intent == "general_qa":
         result.answer = answer
+        # Cache only after all schema/entity/confidence validation succeeds.
+        if static_qa_key is not None and answer is not None and len(answer) <= 2000:
+            _general_qa_cache.put(static_qa_key, intent, answer)
+    elif use_cache and intent.confidence >= threshold:
+        _intent_cache.put(surface, intent)
     return result
 
 

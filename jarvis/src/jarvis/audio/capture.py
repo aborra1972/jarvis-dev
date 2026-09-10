@@ -14,7 +14,10 @@ import json
 import os
 import tempfile
 import threading
+import time
+import uuid
 import wave
+from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Callable, Protocol, runtime_checkable
 
@@ -53,6 +56,104 @@ class AudioMetrics:
             "wake_wait_attempts": self.wake_wait_attempts,
             "wake_wait_results": list(self.wake_wait_results),
         }
+
+
+@dataclass
+class VoiceTurnMetrics:
+    """Timing state for one successful voice turn; content is deliberately absent."""
+
+    turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    capture_completed_at: str | None = None
+    _capture_completed_ns: int | None = None
+    _whisper_start_ns: int | None = None
+    _whisper_end_ns: int | None = None
+    intent_duration_s: float | None = None
+    intent_provider: str | None = None
+    _tts_start_ns: int | None = None
+    _tts_end_ns: int | None = None
+    _playback_start_ns: int | None = None
+    _playback_end_ns: int | None = None
+
+    def capture_completed(self, *, now_ns: int | None = None) -> None:
+        self._capture_completed_ns = time.monotonic_ns() if now_ns is None else now_ns
+        self.capture_completed_at = datetime.now(timezone.utc).isoformat()
+
+    def whisper_started(self) -> None:
+        self._whisper_start_ns = time.monotonic_ns()
+
+    def whisper_finished(self) -> None:
+        self._whisper_end_ns = time.monotonic_ns()
+
+    def set_intent_duration(self, duration_s: float, provider: str) -> None:
+        self.intent_duration_s = duration_s
+        self.intent_provider = provider
+
+    def tts_started(self) -> None:
+        self._tts_start_ns = time.monotonic_ns()
+
+    def tts_finished(self) -> None:
+        self._tts_end_ns = time.monotonic_ns()
+
+    def playback_started(self) -> None:
+        self._playback_start_ns = time.monotonic_ns()
+
+    def playback_finished(self) -> None:
+        self._playback_end_ns = time.monotonic_ns()
+
+    def snapshot(self) -> dict[str, object] | None:
+        required = (
+            self.capture_completed_at, self._whisper_start_ns, self._whisper_end_ns,
+            self.intent_duration_s, self.intent_provider, self._tts_start_ns,
+            self._tts_end_ns, self._playback_start_ns, self._playback_end_ns,
+        )
+        if any(value is None for value in required):
+            return None
+        return {
+            "schema_version": 1,
+            "status": "complete",
+            "published_wall_time": datetime.now(timezone.utc).isoformat(),
+            "turn_id": self.turn_id,
+            "capture_completion_timestamp": self.capture_completed_at,
+            "whisper_duration_s": (self._whisper_end_ns - self._whisper_start_ns) / 1_000_000_000,
+            "intent_duration_s": self.intent_duration_s,
+            "intent_provider": self.intent_provider,
+            "tts_synthesis_duration_s": (self._tts_end_ns - self._tts_start_ns) / 1_000_000_000,
+            "playback_duration_s": (self._playback_end_ns - self._playback_start_ns) / 1_000_000_000,
+        }
+
+
+class VoiceTurnMetricsPublisher:
+    """Atomically publish one completed voice-turn snapshot."""
+
+    def __init__(self, path) -> None:
+        self.path = path
+
+    def publish(self, metrics: VoiceTurnMetrics) -> bool:
+        snapshot = metrics.snapshot()
+        if snapshot is None:
+            return False
+        path = self.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = handle.name
+                json.dump(snapshot, handle, separators=(",", ":"))
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            temporary = None
+            return True
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
 
 class AudioMetricsPublisher:

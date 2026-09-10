@@ -31,6 +31,8 @@ from jarvis.audio.capture import (
     CaptureMode,
     CaptureStatus,
     gather_utterance_result,
+        VoiceTurnMetrics,
+        VoiceTurnMetricsPublisher,
 )
 import jarvis.config as config
 
@@ -244,6 +246,32 @@ def test_write_wav_single_block(tmp_path: Path) -> None:
 
 
 # --- SoundDeviceCapturer (no hardware: queued frames only) --------------------
+def test_voice_turn_metrics_publishes_complete_snapshot_without_content(tmp_path: Path) -> None:
+    metrics = VoiceTurnMetrics(turn_id="turn-1")
+    metrics.capture_completed(now_ns=1)
+    metrics._whisper_start_ns = 2
+    metrics._whisper_end_ns = 4
+    metrics.set_intent_duration(0.5, "local")
+    metrics._tts_start_ns = 5
+    metrics._tts_end_ns = 8
+    metrics._playback_start_ns = 9
+    metrics._playback_end_ns = 12
+    path = tmp_path / "voice_turn_metrics.json"
+
+    assert VoiceTurnMetricsPublisher(path).publish(metrics) is True
+    snapshot = json.loads(path.read_text())
+    assert snapshot["status"] == "complete"
+    assert snapshot["turn_id"] == "turn-1"
+    assert snapshot["intent_provider"] == "local"
+    assert "transcript" not in snapshot and "answer" not in snapshot
+    assert snapshot["whisper_duration_s"] == pytest.approx(2e-9)
+
+def test_voice_turn_metrics_does_not_publish_incomplete_turn(tmp_path: Path) -> None:
+    path = tmp_path / "voice_turn_metrics.json"
+    metrics = VoiceTurnMetrics()
+    assert VoiceTurnMetricsPublisher(path).publish(metrics) is False
+    assert not path.exists()
+
 def test_audio_metrics_publisher_writes_json_snapshot_atomically(tmp_path: Path) -> None:
     metrics = AudioMetrics(pcm_frames_received=123, empty_reads=2, wake_wait_results=[True])
     path = tmp_path / "audio_metrics.json"

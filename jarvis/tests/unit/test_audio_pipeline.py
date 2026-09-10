@@ -217,6 +217,46 @@ def test_utterance_capture_returns_transcript(tmp_path: Path) -> None:
     assert duration == pytest.approx(0.4)
 
 
+def test_utterance_capture_records_completion_and_whisper_boundaries(
+    tmp_path: Path,
+) -> None:
+    timestamps = iter([10, 20, 30])
+    events: list[tuple[str, int] | str] = []
+
+    class Metrics:
+        def _record(self, event: str) -> None:
+            events.append((event, next(timestamps)))
+
+        def capture_completed(self) -> None:
+            self._record("capture_completed")
+
+        def whisper_started(self) -> None:
+            self._record("whisper_started")
+
+        def whisper_finished(self) -> None:
+            self._record("whisper_finished")
+
+    class RecordingSTT(FakeSTT):
+        def transcribe(self, wav_path: Path, duration_s: float) -> str:
+            events.append("transcribe")
+            return super().transcribe(wav_path, duration_s)
+
+    capture = UtteranceCapture(
+        FakeCapturer([_speech(), _silence()]),
+        RecordingSTT("hola"),
+        _vad(),
+        wav_dir=tmp_path,
+    )
+
+    assert capture.capture(metrics=Metrics()) == "hola"
+    assert events == [
+        ("capture_completed", 10),
+        ("whisper_started", 20),
+        "transcribe",
+        ("whisper_finished", 30),
+    ]
+
+
 def test_replayed_preroll_skips_consuming_calibration_before_stt(tmp_path: Path) -> None:
     """Name-wake replay must reach capture before calibration reads live audio."""
     from jarvis.audio.capture import SoundDeviceCapturer
@@ -384,6 +424,63 @@ def test_piper_speaker_speaks_through_tts_and_playback(tmp_path: Path) -> None:
 
     assert tts.texts == ["hecho."]
     assert playback.played == tts.outs
+
+
+@pytest.mark.parametrize("playback_error", [False, True])
+def test_piper_speaker_records_metrics_and_publishes_only_after_playback(
+    tmp_path: Path, playback_error: bool
+) -> None:
+    timestamps = iter([10, 20, 30, 40])
+    events: list[tuple[str, int] | str] = []
+
+    class Metrics:
+        def _record(self, event: str) -> None:
+            events.append((event, next(timestamps)))
+
+        def tts_started(self) -> None:
+            self._record("tts_started")
+
+        def tts_finished(self) -> None:
+            self._record("tts_finished")
+
+        def playback_started(self) -> None:
+            self._record("playback_started")
+
+        def playback_finished(self) -> None:
+            self._record("playback_finished")
+
+    class Publisher:
+        def __init__(self) -> None:
+            self.published: list[Metrics] = []
+
+        def publish(self, metrics: Metrics) -> None:
+            events.append("publish")
+            self.published.append(metrics)
+
+    metrics = Metrics()
+    publisher = Publisher()
+    speaker = PiperSpeaker(
+        FakeTTS(), FakePlayback(error=playback_error),
+        out_dir=tmp_path,
+        metrics_publisher=publisher,
+    )
+
+    speaker.speak_with_metrics("hecho", metrics)
+    speaker.flush()
+
+    if playback_error:
+        assert events == [
+            ("tts_started", 10), ("tts_finished", 20),
+            ("playback_started", 30),
+        ]
+        assert publisher.published == []
+    else:
+        assert events == [
+            ("tts_started", 10), ("tts_finished", 20),
+            ("playback_started", 30), ("playback_finished", 40),
+            "publish",
+        ]
+        assert publisher.published == [metrics]
 
 
 def test_piper_speaker_cleans_media_after_playback(tmp_path: Path) -> None:

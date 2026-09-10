@@ -114,6 +114,7 @@ class UtteranceCapture:
         deadline: float | None = None,
         operation: object | None = None,
         clock: Callable[[], float] | None = None,
+        metrics: object | None = None,
     ) -> str | None:
         reset = getattr(self.vad, "reset", None)
         if callable(reset):
@@ -146,10 +147,21 @@ class UtteranceCapture:
         # Store audio for speaker verification (before STT deletes the file)
         audio = np.concatenate(blocks) if len(blocks) > 1 else blocks[0]
         self._last_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if metrics is not None:
+            completed = getattr(metrics, "capture_completed", None)
+            if callable(completed):
+                completed()
         wav_path = self._next_wav()
         write_wav(wav_path, blocks, sample_rate=self.sample_rate)
         try:
-            return self.stt.transcribe(wav_path, duration_s)
+            whisper_started = getattr(metrics, "whisper_started", None)
+            if callable(whisper_started):
+                whisper_started()
+            result = self.stt.transcribe(wav_path, duration_s)
+            whisper_finished = getattr(metrics, "whisper_finished", None)
+            if callable(whisper_finished):
+                whisper_finished()
+            return result
         except STTError as exc:
             raise CaptureError(str(exc)) from exc
         finally:
@@ -182,11 +194,13 @@ class PiperSpeaker:
         playback: object,
         *,
         out_dir: Path | None = None,
+        metrics_publisher: object | None = None,
     ) -> None:
         self.tts = tts
         self.playback = playback
         self.out_dir = Path(out_dir) if out_dir else Path(tempfile.gettempdir())
-        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, object | None] | None] = queue.Queue()
+        self._metrics_publisher = metrics_publisher
         self._closed = False
         self._playing = False
         self._consecutive_tts_failures: int = 0
@@ -200,24 +214,39 @@ class PiperSpeaker:
 
     def _worker(self) -> None:
         while True:
-            text = self._queue.get()
-            if text is None:  # stop sentinel
+            item = self._queue.get()
+            if item is None:  # stop sentinel
                 return
+            text, metrics = item
             self._playing = True
             try:
-                self._play(text)
+                self._play(text, metrics)
             finally:
                 self._playing = False
                 self._queue.task_done()
 
-    def _play(self, text: str) -> None:
+    def _play(self, text: str, metrics: object | None = None) -> None:
         self._last_playback_ok = False
         media_path = self._next_media()
         try:
+            tts_started = getattr(metrics, "tts_started", None)
+            if callable(tts_started):
+                tts_started()
             media_path = self.tts.synthesize(normalize_for_tts(text), media_path)
+            tts_finished = getattr(metrics, "tts_finished", None)
+            if callable(tts_finished):
+                tts_finished()
+            playback_started = getattr(metrics, "playback_started", None)
+            if callable(playback_started):
+                playback_started()
             self.playback.play(media_path)
+            playback_finished = getattr(metrics, "playback_finished", None)
+            if callable(playback_finished):
+                playback_finished()
             self._last_playback_ok = True
             self._consecutive_tts_failures = 0  # reset on success
+            if metrics is not None and self._metrics_publisher is not None:
+                self._metrics_publisher.publish(metrics)
         except (TTSError, PlaybackError) as exc:
             self._consecutive_tts_failures += 1
             logger.warning(
@@ -241,7 +270,12 @@ class PiperSpeaker:
     def speak(self, text: str) -> None:
         if self._closed:
             return
-        self._queue.put(text)
+        self._queue.put((text, None))
+
+    def speak_with_metrics(self, text: str, metrics: object) -> None:
+        if self._closed:
+            return
+        self._queue.put((text, metrics))
 
     def speak_and_wait(self, text: str):
         """Speak one prompt and return explicit completion evidence."""

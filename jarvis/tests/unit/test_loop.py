@@ -34,6 +34,7 @@ from jarvis.orchestrator.loop import (
     run,
 )
 from jarvis.orchestrator.session import Session, load_state
+import jarvis.orchestrator.loop as loop_module
 from jarvis.orchestrator.state import State
 
 
@@ -268,6 +269,62 @@ def test_executes_open_app_cycle(tmp_path: Path) -> None:
     assert outcome == "executed"
     assert [c.intent for c in pipeline.executor.calls] == ["open_app"]
     assert isinstance(pipeline.speaker.said[-1], str)
+
+
+def test_loop_records_turn_metrics_and_uses_metric_speaker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis import config
+
+    monkeypatch.setattr(config, "LLM_PROVIDER", "fake-provider")
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: None)
+    timestamps = iter([1_000_000_000, 1_250_000_000])
+    monkeypatch.setattr(loop_module.time, "monotonic_ns", lambda: next(timestamps))
+
+    class Capture:
+        def __init__(self) -> None:
+            self.metrics = None
+
+        def capture(self, **kwargs):
+            self.metrics = kwargs["metrics"]
+            return "abrí firefox"
+
+    class MetricsSpeaker(FakeSpeaker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.metric_calls: list[tuple[str, object]] = []
+
+        def speak_with_metrics(self, text: str, metrics: object) -> None:
+            self.metric_calls.append((text, metrics))
+            self.speak(text)
+
+    capture = Capture()
+    speaker = MetricsSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=FakeWake([True]),
+        capture=capture,
+        interpreter=FakeInterpreter([_interp(_intent())]),
+        speaker=speaker,
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context()
+
+    state, context = _tick(State.IDLE, pipeline, context)
+    assert state is State.LISTENING
+    state, context = _tick(state, pipeline, context)
+    assert state is State.EXECUTING
+    state, context = _tick(state, pipeline, context)
+
+    assert state is State.SPEAKING
+    assert capture.metrics is context.voice_metrics
+    assert context.voice_metrics is not None
+    assert context.voice_metrics.intent_duration_s == pytest.approx(0.25)
+    assert context.voice_metrics.intent_provider == "fake-provider"
+    assert speaker.metric_calls == [("ok", context.voice_metrics)]
 
 
 def test_confirm_yes_executes_shutdown(tmp_path: Path) -> None:

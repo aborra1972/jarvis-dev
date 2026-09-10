@@ -26,7 +26,8 @@ from jarvis.actions import assistant_lifecycle
 from jarvis.orchestrator import usage_patterns
 from jarvis.actions.base import build_registry
 from jarvis.audio.capture import (
-    AudioMetricsPublisher, SilenceVAD, SileroVAD, SoundDeviceCapturer,
+    AudioMetricsPublisher, VoiceTurnMetrics, VoiceTurnMetricsPublisher,
+    SilenceVAD, SileroVAD, SoundDeviceCapturer,
     calibrate_noise_floor,
 )
 from jarvis.audio.pipeline import MicSwitch, PiperSpeaker, UtteranceCapture
@@ -138,6 +139,7 @@ class _Context:
     wake_gated: bool = False
     operation: OperationToken | None = None
     authorization: Authorization | None = None
+    voice_metrics: VoiceTurnMetrics | None = None
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -389,7 +391,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             context.outcome = "cancelled"
             return State.OFF if _is_switched_off(pipeline) else State.IDLE, context
         try:
-            transcript = _capture(pipeline.capture, context.operation, clock=pipeline.clock.now)
+            context.voice_metrics = VoiceTurnMetrics()
+            transcript = _capture(
+                pipeline.capture, context.operation, clock=pipeline.clock.now,
+                metrics=context.voice_metrics,
+            )
         except CaptureError:
             pipeline.speaker.speak(_spoken_toward(STT_ERROR_SPOKEN))
             context.outcome = "stt_error"
@@ -475,7 +481,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         # the 60ms audio delay + speaker hardware latency.
         # To re-enable, uncomment: pipeline.speaker.playback.play_ack_beep()
         _write_fsm_state("thinking", transcript[:50])
+        intent_started = time.monotonic_ns()
         interpretation = pipeline.interpreter(transcript)
+        context.voice_metrics.set_intent_duration(
+            (time.monotonic_ns() - intent_started) / 1_000_000_000,
+            config.LLM_PROVIDER,
+        )
 
         # --- FALLBACK NOTIFICATION ---
         # Check if LLM provider fell back (e.g. Gemini quota → Ollama)
@@ -634,7 +645,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             ok=result.ok,
         )
         if result.spoken:
-            pipeline.speaker.speak(result.spoken)
+            _speak_for_turn(pipeline.speaker, result.spoken, context.voice_metrics if result.ok else None)
         if intent.intent == "power_off_self":
             context.active_epoch = None
             context.outcome = "powered_off"
@@ -738,13 +749,22 @@ def _resolve_repo(pipeline: Pipeline, context: _Context) -> str | None:
     return repo
 
 
-def _capture(capture: object, operation: OperationToken, *, mode=CaptureMode.ORDINARY, deadline=None, clock=None):
+def _speak_for_turn(speaker: object, text: str, metrics: VoiceTurnMetrics | None) -> None:
+    """Attach telemetry without changing compatibility with injected speakers."""
+    speak_with_metrics = getattr(speaker, "speak_with_metrics", None)
+    if metrics is not None and callable(speak_with_metrics):
+        speak_with_metrics(text, metrics)
+    else:
+        speaker.speak(text)
+
+
+def _capture(capture: object, operation: OperationToken, *, mode=CaptureMode.ORDINARY, deadline=None, clock=None, metrics=None):
     """Call modern capture adapters while retaining source-compatible fakes."""
     if operation.cancelled():
         return None
     method = getattr(capture, "capture", capture)
     try:
-        result = method(mode=mode, deadline=deadline, operation=operation, clock=clock)
+        result = method(mode=mode, deadline=deadline, operation=operation, clock=clock, metrics=metrics)
     except TypeError as exc:
         if "unexpected keyword" not in str(exc):
             raise
@@ -882,7 +902,10 @@ def build_pipeline(
                 timeout_s=config.TTS_TIMEOUT_S,
             )
         playback = Playback(player=config.PLAYER_BIN, timeout_s=config.PLAY_TIMEOUT_S)
-        speaker = PiperSpeaker(tts, playback, out_dir=config.LOGS_REPLY_DIR)
+        speaker = PiperSpeaker(
+            tts, playback, out_dir=config.LOGS_REPLY_DIR,
+            metrics_publisher=VoiceTurnMetricsPublisher(config.VOICE_TURN_METRICS_FILE),
+        )
     if executor is None:
         executor = build_registry(speaker=speaker)
 

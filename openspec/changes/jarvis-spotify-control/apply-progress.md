@@ -141,3 +141,23 @@ All other implementation-owned task rows remain unchecked and were not edited, i
 **Required command:** `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`
 
 **Remaining scope:** No additional task was authorized by this correction work unit. The existing later implementation-owned rows remain unchecked and out of scope.
+
+## Stage 1 task 1.2.2 — dedicated Spotify service dispatch
+
+- **Status:** completed; only task 1.2.2 was authorized and marked `[x]` in `tasks.md`. Lifecycle, diagnostics, documentation, OAuth, network, credentials, dependencies, schema, configuration, loop, and contracts remain untouched.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py` (minimal additive service boundary), `jarvis/src/jarvis/actions/base.py`, `jarvis/tests/unit/test_spotify_service.py`, `jarvis/tests/unit/test_actions_base.py`, and the selected checkbox in `tasks.md`.
+- **Behavior:** `SpotifyService` accepts only entity-free `spotify_play` and `spotify_pause`, routes directly to `LocalSpotifyAdapter`, maps typed failures to safe recoverable speech, and refuses success for unknown or malformed outcomes. Registry handlers are dedicated and do not route through `system.execute`; existing `open_app` and generic `execute` registrations are unchanged.
+- **Workload:** 159 authored changed/added lines across the selected implementation, test, and OpenSpec surfaces, below the requested 350-line limit. Pre-existing `.atl` changes were preserved.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added `jarvis/tests/unit/test_spotify_service.py` and registry isolation assertions first; collection failed because `SpotifyService` was absent, then the focused registry expectation failed because the new schema-allowlisted intents were not yet registered. |
+| GREEN | Added the minimal service and two dedicated registry registrations, then updated the stale coverage expectation; focused tests passed: `17 passed`. |
+| TRIANGULATE | Required command passed offline: `1046 passed, 1 warning`; fake adapter traces prove only validated Spotify intents call the adapter, failure details are not spoken, unknown state cannot succeed, and existing registry tests pass. The warning is the existing unknown `e2e` mark. |
+| REFACTOR | Kept the service in the existing `services/spotify.py` boundary, used fixed intent names/entity rejection, centralized safe error speech, and left generic execution, `open_app`, lifecycle, diagnostics, and configuration behavior unchanged. |
+
+### Remaining implementation tasks
+
+The remaining implementation-owned rows remain unchecked and out of scope, beginning with Stage 1 lifecycle integration. The completed task checkbox was re-read and confirmed as `[x]`.

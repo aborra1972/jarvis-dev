@@ -1,58 +1,81 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:6c0db51cc007ff141bc63532f464846e93c1e187e76c64e69f621814fb6471ea
+evidence_revision: sha256:6189ddf874142b812b899d4f38cab197734d3325e58cdacdb78a670031de0b6b
 verdict: fail
-blockers: 1
-critical_findings: 1
-requirements: 0/8
-scenarios: 0/19
+blockers: 11
+critical_findings: 11
+requirements: 3/8
+scenarios: 7/19
 test_command: cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q
 test_exit_code: 0
-test_output_hash: sha256:8abb40d3a08c320b5588899dba3bd6feec5e435c7b2beb42510e3bc70478c45b
+test_output_hash: sha256:2bcd358f379b9a990f846e9e220b3e18b0f0376dae3a477c8e5fb6eb7f243458
 build_command: ""
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
-# SDD Verification — corrected Stage 1 task 1.2.1
+# SDD Verification — Stage 1 task 1.2.2 dedicated Spotify dispatch
 
-## Status
+## Verdict
 
-**FAIL for whole-change/archive readiness; PASS for the corrected task 1.2.1 adapter slice.** The prior fail-closed defect is corrected: a nonzero `playerctl -l` result is rejected before stdout identity parsing and cannot lead to play/pause control.
+**PASS for the requested uncommitted task 1.2.2 slice. FAIL for whole-change/archive readiness.** No blocker was found in the dedicated dispatch implementation. The overall change remains incomplete because later implementation tasks are unchecked.
 
-## Scope and artifacts reviewed
+## Scope and files reviewed
 
+Reviewed the requested checkout and only the uncommitted Stage 1 dispatch slice:
+
+- `jarvis/src/jarvis/services/spotify.py`
+- `jarvis/src/jarvis/actions/base.py`
+- `jarvis/tests/unit/test_spotify_service.py`
+- `jarvis/tests/unit/test_actions_base.py`
 - `openspec/changes/jarvis-spotify-control/specs/spotify-control/spec.md`
-- `openspec/changes/jarvis-spotify-control/design.md`
 - `openspec/changes/jarvis-spotify-control/tasks.md`
 - `openspec/changes/jarvis-spotify-control/apply-progress.md`
-- `jarvis/src/jarvis/services/spotify.py`
-- `jarvis/tests/unit/test_spotify_local.py`
 - `openspec/config.yaml`
 
-No source or test files were edited by verification. Only this existing OpenSpec verify report is updated.
+No source or test files were edited. The existing OpenSpec report is the only file updated.
 
-## Corrected task 1.2.1 findings
+## Task 1.2.2 findings
 
-- **Nonzero probe fail-closed: PASS.** `probe.returncode != 0` returns `SpotifyErrorCode.MPRIS_UNAVAILABLE` before parsing `probe.stdout`; the focused regression test supplies Spotify-looking output and asserts exactly one probe call, with no control invocation and no success.
-- **Fixed argv: PASS.** Calls are exactly `playerctl -l`, `playerctl --player=spotify play|pause`, and `playerctl --player=spotify status`.
-- **Spotify-only identity: PASS.** Exact configured identity matching requires exactly one match; zero, duplicate, or non-Spotify listings fail closed without control.
-- **Timeout and cancellation: PASS.** Every subprocess call uses `shell=False`, captured text, `check=False`, and the configured bounded timeout. Cancellation is checked before probe, before control, after subprocess boundaries, and before return; cancellation prevents late success.
-- **Post-state fail-closed: PASS.** Nonzero or mismatching status returns `STATE_UNKNOWN`; successful control is not claimed without the requested state.
-- **Safe errors: PASS.** Typed categories are returned without raw stderr or command details.
+- **Validated Spotify-only handlers: PASS.** `SpotifyService.dispatch()` accepts only `spotify_play` and `spotify_pause`, rejects non-empty entities, and calls only the corresponding adapter method. The schema separately allowlists these entity-free intents.
+- **Existing `LocalSpotifyAdapter`: PASS.** Registry construction uses the existing `LocalSpotifyAdapter` by default and supports injected adapters/services for deterministic testing. No replacement transport or second player path was introduced.
+- **No generic expansion: PASS.** `spotify_play` and `spotify_pause` are separately registered with the dedicated service; `open_app` and generic `execute` registrations are unchanged. No shell, browser, URI, player-name, or caller-supplied command route was added.
+- **Unavailable/unknown safety: PASS.** Typed adapter failures, including missing binary, timeout, unavailable/absent/ambiguous identity, control failure, cancellation, and `STATE_UNKNOWN`, all return `ok=False` with fixed safe speech. Adapter details/raw messages are not propagated, and malformed/unknown outcomes cannot claim success.
+- **Regression risk: LOW for this slice.** Focused registry tests retain existing handler coverage and explicitly check separation from `execute`; the full suite remains green. Lifecycle propagation, stale-result handling, and diagnostics are intentionally not part of task 1.2.2 and remain future work.
 
-The adapter remains credential-free, network-free, and separate from generic `execute`; registry, lifecycle, diagnostics, and Stage 2 surfaces remain outside this task slice.
+## Tests and validation
 
-## Spec coverage
-
-The adapter directly exercises the local-control portions of the Stage 1 specification and design, including unique Spotify identity, fixed command boundaries, bounded execution, cancellation, and post-state verification. Full requirement/scenario coverage is not claimed because service dispatch, lifecycle integration, diagnostics, and all later Stage 2 work remain incomplete.
-
-## Task completion and workload
-
-Task 1.2.1 is checked `[x]` and its correction evidence is present in `apply-progress.md`. The exact corrected regression test is present and substantive. Twelve implementation tasks remain unchecked, so the change is not ready for archive and the full SDD verdict remains `fail`:
+Focused command:
 
 ```text
-- [ ] Add the Stage 1 service dispatch and registry wiring in `jarvis/src/jarvis/actions/base.py` plus focused tests in `jarvis/tests/unit/test_spotify_service.py` and `jarvis/tests/unit/test_actions_base.py`; ensure only validated Spotify intents reach the adapter, no generic `execute` route is used, and spoken results are accurate/recoverable for disabled, missing, ambiguous, failed, cancelled, stale, and unknown-state outcomes. RED → GREEN → TRIANGULATE → REFACTOR evidence: RED verifies handler isolation and every safe error mapping; GREEN wires the dedicated handler; TRIANGULATE checks registry dispatch with fake sessions and unchanged handlers for `open_app`/`execute`; REFACTOR keeps policy in the domain boundary rather than the generic executor. <!-- sdd-owner: implementation -->
+cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_spotify_service.py jarvis/tests/unit/test_actions_base.py jarvis/tests/unit/test_spotify_local.py
+```
+
+Result: exit 0, `25 passed in 0.21s`; output hash `sha256:a336e1d3665eb59fea127ced62b384af34c139ad76b7d9825e83e6ca456c7615`.
+
+Required full command:
+
+```text
+cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q
+```
+
+Result: exit 0, `1046 passed, 1 warning in 65.25s`; output hash `sha256:2bcd358f379b9a990f846e9e220b3e18b0f0376dae3a477c8e5fb6eb7f243458`. The warning is the existing unknown `e2e` mark at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
+
+No build command is configured. No host control action, network call, credential access, or destructive operation was performed.
+
+## Strict TDD compliance
+
+Strict TDD is active. `apply-progress.md` records RED → GREEN → TRIANGULATE → REFACTOR evidence for task 1.2.2. The focused tests exercise handler isolation, disabled behavior, every typed failure category, unknown/malformed outcomes, entity rejection, and dedicated registry wiring. The required full suite is still GREEN.
+
+## Workload and action context
+
+The apply artifact reports 159 authored changed/added lines for this task slice, below the stated 350-line slice limit. The broader forecast recommends chained PRs, but this review covers only the assigned task boundary. Action context is repo-local at `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; no edit-root violation was found.
+
+## Remaining unchecked implementation tasks — archive blockers
+
+These are outside the requested task 1.2.2 slice but prevent whole-change archive and a clean overall PASS:
+
+```text
 - [ ] Integrate Stage 1 lifecycle handling with `jarvis/src/jarvis/orchestrator/loop.py` and `jarvis/src/jarvis/orchestrator/contracts.py`; add tests in `jarvis/tests/unit/test_loop.py` (or a focused lifecycle test module) for off precedence, epoch replacement, cancellation during a blocked probe/control, readiness barriers, late-result suppression, conversation behavior, TTS/microphone safety, and existing confirmation semantics. RED → GREEN → TRIANGULATE → REFACTOR evidence: RED reproduces side effects or spoken success after invalidation; GREEN adds operation-context propagation and stale-result rejection; TRIANGULATE runs fake blocked adapters through the FSM and the full required pytest command; REFACTOR preserves existing loop behavior and minimizes lifecycle-specific branching. <!-- sdd-owner: implementation -->
 - [ ] Extend `jarvis/src/jarvis/diagnose.py` with safe local Spotify capability diagnostics and document Stage 1 commands/boundaries in `jarvis/docs/comandos_jarvis.md` (or the repository's selected command guide); add tests in `jarvis/tests/unit/test_diagnose.py` asserting no raw output or arguments leak. RED → GREEN → TRIANGULATE → REFACTOR evidence: RED asserts missing/ambiguous capability and redaction failures; GREEN emits normalized actionable status; TRIANGULATE checks fake diagnostics plus an opt-in host probe; REFACTOR keeps existing diagnostics and `open_app` semantics unchanged. <!-- sdd-owner: implementation -->
 - [ ] Run a Stage 1 acceptance pass with no network and no Spotify credentials, including deterministic unit tests and optional Linux-marked playerctl/MPRIS tests; record the exact command `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`, the capability-spike result, and rollback boundary (unregister Spotify intents/service while retaining `open_app`). RED → GREEN → TRIANGULATE → REFACTOR evidence: RED is the offline/no-credentials acceptance baseline before implementation; GREEN is the passing Stage 1 suite; TRIANGULATE is host probe plus regression suite; REFACTOR is the reviewed independent Stage 1 release slice. <!-- sdd-owner: implementation -->
@@ -66,41 +89,12 @@ Task 1.2.1 is checked `[x]` and its correction evidence is present in `apply-pro
 - [ ] Run the complete required pytest command and an explicitly authorized, bounded integration smoke test only if credentials, keyring, network, Premium account, Spotify Desktop, and the configured target are all available; record results, known limitations, and the Stage 2 rollback (disable/revoke and delete keyring material without changing Stage 1). RED → GREEN → TRIANGULATE → REFACTOR evidence: RED is the pre-release failure matrix; GREEN is deterministic suite plus authorized smoke success/failure classification; TRIANGULATE compares provider responses with policy fakes and verifies no fallback device; REFACTOR closes test isolation and release-readiness defects without adding scope. <!-- sdd-owner: implementation -->
 ```
 
-The remaining eight Stage 2 task lines (authorization, OAuth, catalog/intents, playback, integration, documentation, and release verification) are also unchecked at lines 57–73 of `tasks.md` and remain out of scope. Review workload remains bounded for this slice (245 authored changed lines reported in apply-progress, below the 350-line slice limit); the forecasted overall feature still recommends chained PRs.
+## Exact blockers
 
-## Tests and validation
-
-Focused command:
-
-```text
-cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_spotify_local.py
-```
-
-Result: exit 0, `8 passed in 0.07s`; output hash `sha256:3247c50c34e782db19f552455bce1f096e033aae5010deec64401bb0f5ec19c`.
-
-Required full command:
-
-```text
-cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q
-```
-
-Result: exit 0, `1040 passed, 1 warning in 53.29s`; output hash `sha256:8abb40d3a08c320b5588899dba3bd6feec5e435c7b2beb42510e3bc70478c45b`. The warning is the existing unknown `e2e` mark at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
-
-No build command is configured. No host control action, network call, credential access, or destructive operation was performed.
-
-## Strict TDD compliance
-
-Strict TDD is active. `apply-progress.md` records the correction's RED test, GREEN guard, TRIANGULATE focused/full evidence, and REFACTOR review. The actual regression test exists and asserts the critical safety property: Spotify-looking stdout on a nonzero probe produces no control call and no success. Existing fixed-argv, Spotify-only, timeout/cancellation, and post-state tests remain green.
-
-## Structured status and action context
-
-Artifact store is OpenSpec with repository `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; action context is repo-local and the authorized edit root is that repository. Required spec, design, tasks, and apply-progress artifacts are present. The active task slice is complete, while twelve later implementation rows remain unchecked. No ownership or edit-root warning was found.
-
-## Exact blocker
-
-1. Twelve implementation-owned task rows remain unchecked; this is a CRITICAL completeness/archive blocker for the overall change, although it does not invalidate corrected task 1.2.1.
+1. The requested task 1.2.2 slice is verified cleanly, but the 11 unchecked implementation rows above are CRITICAL completeness/archive blockers for the overall change.
+2. Stage 1 lifecycle, diagnostics, and acceptance work remains unverified; Stage 2 rows remain intentionally out of scope.
 
 ## Key Learnings
 
-1. A capability probe must reject nonzero exit status before trusting identity output.
-2. Fixed argv and exact identity matching still require post-action state verification.
+1. Dedicated registry handlers can preserve generic executor boundaries while still accepting deterministic adapter injection.
+2. Typed unavailable and unknown-state outcomes must remain failures even when adapter payloads contain misleading success details.

@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
 
+from jarvis.interpreter.schema import Intent
+from jarvis.orchestrator.contracts import ActionResult
+
 
 class SpotifyErrorCode(str, Enum):
     OK = "ok"
@@ -123,3 +126,38 @@ class LocalSpotifyAdapter:
     @staticmethod
     def _cancelled_result() -> SpotifyResult:
         return SpotifyResult(False, SpotifyErrorCode.CANCELLED, "")
+
+
+class SpotifyService:
+    """Dedicated dispatch boundary for the validated local Spotify intents."""
+
+    _ERROR_SPEECH = {
+        SpotifyErrorCode.BINARY_MISSING: "El control local de Spotify no está instalado, señor.",
+        SpotifyErrorCode.TIMEOUT: "El control local de Spotify tardó demasiado, señor.",
+        SpotifyErrorCode.MPRIS_UNAVAILABLE: "Spotify no está disponible localmente, señor.",
+        SpotifyErrorCode.IDENTITY_MISSING: "Spotify no está disponible, señor.",
+        SpotifyErrorCode.IDENTITY_AMBIGUOUS: "Spotify no está disponible de forma única, señor.",
+        SpotifyErrorCode.CONTROL_FAILED: "No pude controlar Spotify, señor.",
+        SpotifyErrorCode.STATE_UNKNOWN: "No pude confirmar el estado de Spotify, señor.",
+        SpotifyErrorCode.CANCELLED: "",
+    }
+
+    def __init__(self, *, adapter: LocalSpotifyAdapter, enabled: bool = True) -> None:
+        self._adapter = adapter
+        self._enabled = enabled
+
+    def dispatch(self, intent: Intent, session: object | None = None) -> ActionResult:
+        if intent.intent not in {"spotify_play", "spotify_pause"} or intent.entities:
+            return ActionResult(ok=False, spoken="Aún no sé hacer eso, señor.")
+        if not self._enabled:
+            return ActionResult(ok=False, spoken="El control local de Spotify está deshabilitado, señor.")
+
+        try:
+            outcome = self._adapter.play() if intent.intent == "spotify_play" else self._adapter.pause()
+        except Exception:
+            return ActionResult(ok=False, spoken="No pude controlar Spotify, señor.")
+        if not isinstance(outcome, SpotifyResult) or not outcome.ok or outcome.code is not SpotifyErrorCode.OK:
+            code = outcome.code if isinstance(outcome, SpotifyResult) else SpotifyErrorCode.CONTROL_FAILED
+            return ActionResult(ok=False, spoken=self._ERROR_SPEECH.get(code, "No pude controlar Spotify, señor."))
+        verb = "Reproduciendo" if intent.intent == "spotify_play" else "Pausando"
+        return ActionResult(ok=True, spoken=f"{verb} Spotify, señor.")

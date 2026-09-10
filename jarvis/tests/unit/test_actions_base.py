@@ -61,7 +61,7 @@ def test_registry_unknown_intent_answers_unsupported() -> None:
 
 def test_build_registry_covers_every_allowed_intent() -> None:
     registry = base.build_registry()
-    assert set(registry.handlers()) == ALLOWED_INTENTS - {"unknown"}
+    assert set(registry.handlers()) == (ALLOWED_INTENTS | {"spotify_play", "spotify_pause"}) - {"unknown"}
 
 
 def test_build_registry_marks_opencode_work_intents_long_running() -> None:
@@ -74,6 +74,12 @@ def test_build_registry_marks_opencode_work_intents_long_running() -> None:
         "review_pr",
         "fix_warnings",
     }
+
+
+def test_spotify_handlers_are_registered_separately_from_generic_execute():
+    registry = base.build_registry()
+    assert registry.handlers()["spotify_play"] is not registry.handlers()["execute"]
+    assert registry.handlers()["spotify_pause"] is not registry.handlers()["execute"]
 
 
 # --- Shared helpers --------------------------------------------------------

@@ -99,11 +99,21 @@ def blocked_destructive(intent: Intent, session: object) -> ActionResult:
     )
 
 
-def build_registry(*, speaker: object | None = None) -> Registry:
+def build_registry(
+    *,
+    speaker: object | None = None,
+    spotify_service: object | None = None,
+    spotify_adapter: object | None = None,
+) -> Registry:
     """Wire every executor handler into one registry."""
     from jarvis.actions import assistant_lifecycle, files, opencode, reminders, system, web
+    from jarvis.services.spotify import LocalSpotifyAdapter, SpotifyService
 
     registry = Registry()
+    if spotify_service is None:
+        spotify_service = SpotifyService(adapter=spotify_adapter or LocalSpotifyAdapter())
+    registry.register("spotify_play", spotify_service.dispatch)
+    registry.register("spotify_pause", spotify_service.dispatch)
     oc = opencode.OpenCodeExecutor()
     registry.long_running_intents = opencode.LONG_RUNNING_INTENTS
     for intent in opencode.OPCODE_INTENTS:

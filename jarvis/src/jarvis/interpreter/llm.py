@@ -18,6 +18,7 @@ import urllib.error
 from pathlib import Path
 from typing import Protocol
 
+from jarvis import config
 from jarvis.interpreter import schema
 
 logger = logging.getLogger("jarvis.llm")
@@ -392,6 +393,25 @@ class DirectProvider:
             raise RuntimeError(f"opencode returned non-JSON output: {text[:200]}") from exc
 
 
+def build_codex_command(
+    model: str,
+    reasoning_effort: str,
+    workdir: str | Path | None = None,
+    prompt: str = "",
+) -> list[str]:
+    """Build the read-only Codex CLI command with its documented effort override."""
+    reasoning_effort = config._resolve_codex_reasoning_effort(reasoning_effort)
+    command = [
+        "codex", "exec", "-m", model,
+        "-c", f'model_reasoning_effort="{reasoning_effort}"',
+        "--ephemeral", "--json", "--sandbox", "read-only",
+    ]
+    if workdir is not None:
+        command += ["-C", str(workdir)]
+    command.append(prompt)
+    return command
+
+
 class CodexProvider:
     """Codex CLI transport using the user's existing OAuth session."""
 
@@ -400,21 +420,22 @@ class CodexProvider:
         workdir: str | Path | None = None,
         timeout: float = 30.0,
         model: str = "gpt-5.6-luna",
+        reasoning_effort: str | None = None,
         runner: object | None = None,
     ) -> None:
         self.workdir = Path(workdir) if workdir else None
         self.timeout = timeout
         self.model = model
+        self.reasoning_effort = reasoning_effort or config.CODEX_REASONING_EFFORT
         self.runner = runner or subprocess.run
 
     def complete(self, prompt: str, system: str) -> str:
-        command = [
-            "codex", "exec", "-m", self.model, "--ephemeral", "--json",
-            "--sandbox", "read-only",
-        ]
-        if self.workdir is not None:
-            command += ["-C", str(self.workdir)]
-        command.append(f"{system}\n\n{prompt}")
+        command = build_codex_command(
+            self.model,
+            self.reasoning_effort,
+            self.workdir,
+            f"{system}\n\n{prompt}",
+        )
         result = self.runner(command, capture_output=True, text=True, timeout=self.timeout)
         if result.returncode != 0:
             raise RuntimeError(f"codex exec exited {result.returncode}: {result.stderr[:200]}")

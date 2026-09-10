@@ -378,6 +378,17 @@ GEMINI_MODEL: str = "gemini-3.6-flash"
 GEMINI_TIMEOUT_S: float = 5.0
 CODEX_MODEL: str = "gpt-5.6-luna"
 CODEX_TIMEOUT_S: float = 30.0
+CODEX_REASONING_EFFORTS = frozenset({"low", "medium", "high"})
+
+
+def _resolve_codex_reasoning_effort(value: str | None) -> str:
+    """Return a supported Codex effort, failing closed to the benchmark default."""
+    return value if value in CODEX_REASONING_EFFORTS else "low"
+
+
+CODEX_REASONING_EFFORT: str = _resolve_codex_reasoning_effort(
+    os.environ.get("JARVIS_CODEX_REASONING_EFFORT", "low")
+)
 # Weather fast path: Open-Meteo needs no key and never routes through an LLM.
 WEATHER_DEFAULT_LOCATION = "CABA, Argentina"
 WEATHER_TIMEOUT_S: float = 3.0

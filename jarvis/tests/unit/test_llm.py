@@ -15,6 +15,7 @@ from jarvis.interpreter.llm import (
     FallbackProvider,
     CodexProvider,
     OpenCodeProvider,
+    build_codex_command,
     build_opencode_command,
     parse_assistant_text,
     parse_session_id,
@@ -179,11 +180,31 @@ def test_codex_provider_parses_agent_message_and_uses_read_only_oauth_cli() -> N
     result = provider.resolve("qué hora es", "system")
 
     assert result["intent"] == "general_qa"
-    assert captured["command"][:6] == [
-        "codex", "exec", "-m", "gpt-5.6-luna", "--ephemeral", "--json"
+    assert captured["command"] == [
+        "codex", "exec", "-m", "gpt-5.6-luna",
+        "-c", 'model_reasoning_effort="low"',
+        "--ephemeral", "--json", "--sandbox", "read-only",
+        "-C", "/repo", "system\n\nqué hora es",
     ]
-    assert "--sandbox" in captured["command"]
     assert captured["kwargs"]["timeout"] == 30.0
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_codex_command_uses_valid_reasoning_effort(effort: str) -> None:
+    assert build_codex_command("gpt-5.6-luna", effort, prompt="p") == [
+        "codex", "exec", "-m", "gpt-5.6-luna",
+        "-c", f'model_reasoning_effort="{effort}"',
+        "--ephemeral", "--json", "--sandbox", "read-only", "p",
+    ]
+
+
+
+def test_codex_command_falls_back_to_low_for_invalid_effort() -> None:
+    assert build_codex_command("gpt-5.6-luna", "invalid", prompt="p") == [
+        "codex", "exec", "-m", "gpt-5.6-luna",
+        "-c", 'model_reasoning_effort="low"',
+        "--ephemeral", "--json", "--sandbox", "read-only", "p",
+    ]
 
 
 # --- GeminiProvider ---------------------------------------------------------

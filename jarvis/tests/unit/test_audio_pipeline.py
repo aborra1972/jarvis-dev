@@ -217,6 +217,30 @@ def test_utterance_capture_returns_transcript(tmp_path: Path) -> None:
     assert duration == pytest.approx(0.4)
 
 
+def test_replayed_preroll_skips_consuming_calibration_before_stt(tmp_path: Path) -> None:
+    """Name-wake replay must reach capture before calibration reads live audio."""
+    from jarvis.audio.capture import SoundDeviceCapturer
+
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    capturer.enqueue_back([_speech(), _silence()])
+    capturer._queue.put(_speech())
+    capturer._queue.put(_silence())
+    vad = _vad()
+    calibrated = []
+    original_calibrate = vad.calibrate
+
+    def record_calibration(*args, **kwargs):
+        calibrated.append(True)
+        return original_calibrate(*args, **kwargs)
+
+    vad.calibrate = record_calibration
+    stt = FakeSTT("friday, abrí firefox")
+    capture = UtteranceCapture(capturer, stt, vad, wav_dir=tmp_path, calibrate_ms=500)
+
+    assert capture.capture() == "friday, abrí firefox"
+    assert calibrated == []
+
+
 def test_utterance_capture_flattens_audio_for_speaker_verification(tmp_path: Path) -> None:
     capturer = FakeCapturer(
         [_speech().reshape(-1, 1), _silence().reshape(-1, 1)]

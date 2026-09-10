@@ -127,6 +127,7 @@ class SoundDeviceCapturer:
         self._queue: Queue[np.ndarray] = Queue()
         # Re-injected pre-roll (name-gated wake): read BEFORE live frames.
         self._front: deque[np.ndarray] = deque()
+        self._replayed_preroll = False
         self._stream = None
 
     def start(self) -> None:
@@ -169,7 +170,20 @@ class SoundDeviceCapturer:
         speaking RIGHT NOW); when it fires, rewind() re-injects these blocks
         so the utterance capture reads the name before any live audio.
         """
-        self._front.extendleft(reversed(list(blocks)))
+        blocks = list(blocks)
+        if blocks:
+            self._replayed_preroll = True
+        self._front.extendleft(reversed(blocks))
+
+    def consume_replayed_preroll(self) -> bool:
+        """Return whether the next capture owns replayed pre-roll audio.
+
+        Calibration must not read from the capturer before this replay is
+        consumed, because those frames are the current utterance.
+        """
+        replayed = self._replayed_preroll
+        self._replayed_preroll = False
+        return replayed
 
     def flush(self, ms: int = 1000) -> None:
         """Discard up to ``ms`` of queued audio (post-playback stale mic).
@@ -181,6 +195,7 @@ class SoundDeviceCapturer:
         pre-roll front buffer (name wake) is drained entirely first — it is
         bounded by the pre-roll window and is stale by definition.
         """
+        self._replayed_preroll = False
         while self._front:
             self._front.popleft()
         n_blocks = max(int(ms / self.block_ms), 1)

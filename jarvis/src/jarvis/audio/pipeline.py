@@ -93,6 +93,9 @@ class UtteranceCapture:
         calibrate = getattr(self.vad, "calibrate", None)
         if calibrate is None or self._calibrate_ms <= 0:
             return
+        consume_replayed_preroll = getattr(self.capturer, "consume_replayed_preroll", None)
+        if callable(consume_replayed_preroll) and consume_replayed_preroll():
+            return
         calibrate(
             self.capturer,
             ms=self._calibrate_ms,

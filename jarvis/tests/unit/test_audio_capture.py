@@ -295,6 +295,14 @@ def test_enqueue_back_reads_front_blocks_first() -> None:
     assert capturer.read_frames(timeout=0.01) is queued_b
 
 
+def test_enqueue_back_marks_replayed_preroll_for_one_capture() -> None:
+    capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)
+    capturer.enqueue_back([_sine()])
+
+    assert capturer.consume_replayed_preroll() is True
+    assert capturer.consume_replayed_preroll() is False
+
+
 def test_flush_drains_front_and_queue() -> None:
     """flush() must discard the re-injected front buffer too (T-FLUSH-01)."""
     capturer = SoundDeviceCapturer(sample_rate=SAMPLE_RATE, block_ms=BLOCK_MS)

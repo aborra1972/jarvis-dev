@@ -607,6 +607,157 @@ class LocalSpotifyAdapter:
         return SpotifyResult(False, SpotifyErrorCode.CANCELLED, "")
 
 
+class CatalogCode(str, Enum):
+    SINGLE = "single"
+    MULTIPLE = "multiple"
+    NOT_FOUND = "not_found"
+    INVALID_REQUEST = "invalid_request"
+    UNSUPPORTED = "unsupported"
+    INVALID_SELECTION = "invalid_selection"
+    SELECTED = "selected"
+    CANCELLED = "cancelled"
+    PROVIDER_ERROR = "provider_error"
+
+
+@dataclass(frozen=True)
+class CatalogCandidate:
+    """Safe, in-memory catalog metadata; provider payloads never cross this boundary."""
+
+    selection_id: str
+    kind: str
+    name: str
+    uri: str
+
+
+@dataclass(frozen=True)
+class CatalogResult:
+    code: CatalogCode
+    candidates: tuple[CatalogCandidate, ...] = ()
+    candidate: CatalogCandidate | None = None
+
+
+class CatalogOperation:
+    """Small injectable cancellation primitive for offline catalog calls."""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+
+@dataclass
+class _PendingCatalog:
+    session_id: str
+    candidates: dict[str, CatalogCandidate]
+    expires_at: float
+
+
+class CatalogClient:
+    """Injected-only official Spotify catalog contract for albums and artists."""
+
+    SEARCH_URL = "https://api.spotify.com/v1/search"
+    MAX_QUERY_LENGTH = 100
+    MAX_RESULTS = 10
+    DEFAULT_TIMEOUT_S = 5.0
+
+    def __init__(self, *, provider: Callable[..., Any], clock: Callable[[], float] = time.time,
+                 ttl_s: float = 120.0, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
+        if not callable(provider) or not 1.0 <= ttl_s <= 600.0 or not 0.1 <= timeout_s <= 30.0:
+            raise ValueError("invalid catalog boundary")
+        self._provider = provider
+        self._clock = clock
+        self._ttl_s = float(ttl_s)
+        self._timeout_s = float(timeout_s)
+        self._pending: _PendingCatalog | None = None
+        self.playback_calls: list[Any] = []
+
+    @property
+    def pending_count(self) -> int:
+        self._expire()
+        return len(self._pending.candidates) if self._pending else 0
+
+    def search(self, kind: str, query: str, *, session_id: str, limit: int = MAX_RESULTS,
+               operation: Any | None = None) -> CatalogResult:
+        if self._cancelled(operation):
+            self.invalidate("cancelled")
+            return CatalogResult(CatalogCode.CANCELLED)
+        if kind not in {"album", "artist"}:
+            return CatalogResult(CatalogCode.UNSUPPORTED)
+        if not isinstance(query, str):
+            return CatalogResult(CatalogCode.INVALID_REQUEST)
+        query = query.strip()
+        if not session_id or not query or len(query) > self.MAX_QUERY_LENGTH:
+            return CatalogResult(CatalogCode.INVALID_REQUEST)
+        bounded_limit = min(max(1, int(limit)), self.MAX_RESULTS)
+        params = {"q": query, "type": kind, "limit": bounded_limit}
+        try:
+            response = self._provider("GET", self.SEARCH_URL, params, self._timeout_s)
+        except Exception:
+            self.invalidate("provider_error")
+            return CatalogResult(CatalogCode.PROVIDER_ERROR)
+        if self._cancelled(operation):
+            self.invalidate("cancelled")
+            return CatalogResult(CatalogCode.CANCELLED)
+        if isinstance(response, dict):
+            collection = response.get("artists" if kind == "artist" else "albums", response)
+            items = collection.get("items", []) if isinstance(collection, dict) else []
+        else:
+            items = getattr(response, "items", [])
+        if not isinstance(items, list):
+            self.invalidate("invalid_response")
+            return CatalogResult(CatalogCode.PROVIDER_ERROR)
+        candidates = tuple(self._candidate(kind, item) for item in items[:bounded_limit])
+        candidates = tuple(candidate for candidate in candidates if candidate is not None)
+        self._pending = _PendingCatalog(
+            session_id=session_id,
+            candidates={candidate.selection_id: candidate for candidate in candidates},
+            expires_at=self._clock() + self._ttl_s,
+        )
+        if not candidates:
+            return CatalogResult(CatalogCode.NOT_FOUND)
+        code = CatalogCode.SINGLE if len(candidates) == 1 else CatalogCode.MULTIPLE
+        return CatalogResult(code, candidates)
+
+    def resolve(self, selection_id: str, *, session_id: str) -> CatalogResult:
+        self._expire()
+        pending = self._pending
+        if pending is None or pending.session_id != session_id:
+            return CatalogResult(CatalogCode.INVALID_SELECTION)
+        candidate = pending.candidates.pop(selection_id, None)
+        if candidate is None:
+            return CatalogResult(CatalogCode.INVALID_SELECTION)
+        if not pending.candidates:
+            self._pending = None
+        return CatalogResult(CatalogCode.SELECTED, candidate=candidate)
+
+    def invalidate(self, reason: str = "invalidated") -> None:
+        self._pending = None
+
+    def _expire(self) -> None:
+        if self._pending is not None and self._clock() >= self._pending.expires_at:
+            self._pending = None
+
+    @staticmethod
+    def _cancelled(operation: Any | None) -> bool:
+        return bool(operation is not None and callable(getattr(operation, "cancelled", None))
+                    and operation.cancelled())
+
+    @staticmethod
+    def _candidate(kind: str, item: Any) -> CatalogCandidate | None:
+        if not isinstance(item, dict):
+            return None
+        item_id, name, uri = item.get("id"), item.get("name"), item.get("uri")
+        if not all(isinstance(value, str) and value for value in (item_id, name, uri)):
+            return None
+        if item.get("type", kind) != kind:
+            return None
+        return CatalogCandidate(secrets.token_urlsafe(9), kind, name, uri)
+
+
 class SpotifyService:
     """Dedicated dispatch boundary for the validated local Spotify intents."""
 

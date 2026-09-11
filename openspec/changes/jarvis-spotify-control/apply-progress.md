@@ -369,3 +369,35 @@ No persisted task checkbox was changed: this was a correction to the existing OA
 
 - **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; `actionContext.mode: repo-local`; allowed edit roots limited to the canonical workspace; strict TDD active; provider-authorized work unit `spotify-stage2-loopback-callback-state`; parent runtime token authenticated without a second attempt.
 - **Produced:** apply progress for the dedicated callback safe slice; next recommended phase `sdd-verify`; broad OAuth and all catalog/playback/release rows remain unchecked. No commit or push was performed.
+
+## Authorized work unit `spotify-stage2-catalog-clarification`
+
+- **Status:** completed for the provider-authorized offline/injected catalog safe slice. The broad catalog task remains unchecked; only the dedicated safe-slice row was marked `[x]` in `tasks.md`.
+- **Scope:** Added `CatalogClient`, bounded album/artist search request construction for the official `/v1/search` endpoint, safe no-result/single/multiple normalization, opaque short-lived session-bound selection IDs, one-time resolution, replacement/TTL/off/cancellation invalidation, and a provider-injection-only boundary. No live HTTP, token exchange, browser, socket, playback, intents, registry, lifecycle, diagnostics, documentation, or generic execution behavior was added.
+- **Files changed by this work unit:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_catalog.py`, `openspec/changes/jarvis-spotify-control/tasks.md`, and this progress artifact. Pre-existing unrelated `.atl` changes were preserved.
+- **Workload:** 151 added source lines, 149 added test lines, and 1 task checkbox line in this bounded slice; no commit or push was performed. The prior broad feature forecast remains high-risk and is not authorized by this slice.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added `jarvis/tests/unit/test_spotify_catalog.py` first; collection failed because `CatalogCode`/`CatalogClient` were absent. The tests cover bounded endpoint parameters, supported kinds, empty/single/multiple results, opaque IDs, session/TTL/one-time selection, replacement, off, cancellation, malformed payload items, and the no-playback contract. |
+| GREEN | Implemented the smallest injected-only catalog boundary and corrected one test assertion to inspect the normalized resolved candidate; focused catalog tests passed: `8 passed`. |
+| TRIANGULATE | Focused Spotify regression set passed: `65 passed`; required full offline suite passed: `1097 passed, 3 deselected`; `jarvis/.venv/bin/python -m compileall -q jarvis/src` and `git diff --check` passed. All provider interactions were fake-callable injections; no network, sockets, secrets, token exchange, browser, playback, or live provider was used. |
+| REFACTOR | Kept raw provider payloads out of `CatalogCandidate`, bounded the official endpoint contract, centralized pending-selection invalidation, and left broad OAuth, playback, intent, registry, lifecycle, diagnostics, documentation, and generic execution rows untouched. |
+
+### Remaining tasks
+
+The broad catalog row remains intentionally unchecked, along with the following unrelated Stage 2 rows; the persisted `tasks.md` artifact is authoritative:
+
+- [ ] Add authorized album/artist catalog contracts and normalization at `jarvis/src/jarvis/services/spotify.py` (split catalog client if necessary) with tests in `jarvis/tests/unit/test_spotify_catalog.py`: bounded query/results, official search endpoint only, no-result/single/multiple normalization, opaque short-lived session-bound selection IDs, replacement/TTL/off/cancellation invalidation, and no playback during search or ambiguity. <!-- sdd-owner: implementation -->
+- [ ] Extend validated intent prompts/patterns and dispatch for `spotify_search` and `spotify_play_selection` in `jarvis/src/jarvis/interpreter/schema.py`, `jarvis/src/jarvis/interpreter/interpreter.py`, `jarvis/src/jarvis/interpreter/golden.py`, and `jarvis/src/jarvis/actions/base.py`; add tests in `jarvis/tests/unit/test_spotify_intents.py` proving numbers/exact pending references are the only clarification selectors and arbitrary URI/device/entity data cannot cross the boundary. <!-- sdd-owner: implementation -->
+- [ ] Implement Premium/account/device readiness and playback policy in `jarvis/src/jarvis/services/spotify.py` with tests in `jarvis/tests/unit/test_spotify_playback.py`. <!-- sdd-owner: implementation -->
+- [ ] Integrate Stage 2 status/error speech, diagnostics, history/log redaction, and lifecycle cancellation in the existing action/orchestrator/diagnostics/log surfaces. <!-- sdd-owner: implementation -->
+- [ ] Document OAuth consent, minimum scopes, Premium requirement, local-only versus networked behavior, clarification rules, target restrictions, disable/revoke procedure, and rollback. <!-- sdd-owner: implementation -->
+- [ ] Run the complete required pytest command and an explicitly authorized, bounded integration smoke test only if credentials, keyring, network, Premium account, Spotify Desktop, and the configured target are all available. <!-- sdd-owner: implementation -->
+
+### Structured status consumed/produced
+
+- **Consumed:** provider-authorized work unit `spotify-stage2-catalog-clarification`; runtime attempt token `sha256:616cb9bcd4674c2c12a22c41f851a6edfddc371c91048b412f838c7cdee90cd4`; canonical repo `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context with edits limited to the four user-specified surfaces; strict TDD active; high-risk forecast resolved by this bounded safe slice.
+- **Produced:** apply progress for the dedicated catalog safe slice; `next_recommended: sdd-verify`; broad catalog, OAuth, playback, intents, lifecycle, diagnostics, documentation, and release rows remain unchecked. No commit or push was performed.

@@ -424,3 +424,28 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - Persisted task row 2.2.2 was re-read and confirmed `[x]`; no other task checkbox was changed.
 - Structured status consumed: change `jarvis-spotify-control`, `applyState: ready`, repo-local canonical workspace, strict TDD active, allowed files limited by parent, and parent token `sha256:e0ec4befd655344a3737cdce6f98b58875f31aadf47a2d434519e92ec5b11914`.
 - Structured status produced: apply complete for this work unit; `next_recommended: sdd-verify`; no commit or push performed.
+
+## Authorized work unit `spotify-stage2-playback-policy`
+
+- **Status:** completed for task 2.3.1 only; all other unchecked implementation rows remain untouched.
+- **Scope:** Added an injected-only `PlaybackPolicy` with `PlaybackOperation`, typed playback outcomes, exact approved-scope and Premium checks, unique local Spotify identity validation, exactly one configured computer fingerprint, pending-catalog selection resolution, bounded API calls, readback verification, cancellation checks, and fail-closed target/content handling. No transfer, device switching, Connect/MPRIS/browser fallback, sockets, secrets, network transport, or live provider behavior was added.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_playback.py`, and the task 2.3.1 checkbox in `tasks.md`. Pre-existing `.atl` changes were preserved.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added `test_spotify_playback.py` first; collection failed because the new playback policy exports were absent. |
+| GREEN | Implemented the smallest injected policy; focused playback suite passed: `10 passed`. |
+| TRIANGULATE | Fake API/local-identity tests cover approved scopes, Premium, missing/ambiguous desktop targets, unknown selections, URI restrictions, bounded calls, readback uncertainty, cancellation, and absence of fallback endpoints. Full pytest, compileall, and diff checks are recorded below. |
+| REFACTOR | Kept playback behind `play_selection`, made direct provider/transport injection mandatory, restricted context URIs to current catalog candidates, and retained existing OAuth, PKCE, catalog, intents, and Stage 1 behavior. |
+
+### Verification and workload
+
+- Required focused command: `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_spotify_playback.py` → `10 passed`.
+- Full command: `cd /media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q`.
+- Compile command: `jarvis/.venv/bin/python -m compileall -q jarvis/src`.
+- `git diff --check` passed before final verification.
+- Authenticated provider runtime token: `sha256:7ebbf6e9f706c05dfbd9883148db150f11770187b8ebc5225d700de7eb856c00`.
+- Workload boundary: 163 added source lines and 155 added focused-test lines; task/progress evidence is outside the implementation count. No commit or push performed.
+- Structured status consumed: change `jarvis-spotify-control`, repo-local canonical workspace, strict TDD active, allowed edit surfaces exactly as user specified, and provider-authorized bounded work unit `spotify-stage2-playback-policy`. `next_recommended: sdd-verify`.

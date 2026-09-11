@@ -607,6 +607,169 @@ class LocalSpotifyAdapter:
         return SpotifyResult(False, SpotifyErrorCode.CANCELLED, "")
 
 
+class PlaybackCode(str, Enum):
+    OK = "ok"
+    NOT_AUTHORIZED = "not_authorized"
+    PREMIUM_REQUIRED = "premium_required"
+    TARGET_MISSING = "target_missing"
+    TARGET_AMBIGUOUS = "target_ambiguous"
+    UNPLAYABLE = "unplayable"
+    INVALID_SELECTION = "invalid_selection"
+    STATE_UNKNOWN = "state_unknown"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    PROVIDER_ERROR = "provider_error"
+
+
+@dataclass(frozen=True)
+class PlaybackResult:
+    code: PlaybackCode
+
+    @property
+    def ok(self) -> bool:
+        return self.code is PlaybackCode.OK
+
+
+class PlaybackOperation:
+    """Volatile cancellation seam for bounded injected playback calls."""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+
+class PlaybackPolicy:
+    """Fail-closed policy for one verified local Spotify Desktop target."""
+
+    ACCOUNT_URL = "https://api.spotify.com/v1/me"
+    DEVICES_URL = "https://api.spotify.com/v1/me/player/devices"
+    PLAY_URL = "https://api.spotify.com/v1/me/player/play"
+    READBACK_URL = "https://api.spotify.com/v1/me/player"
+    _ALLOWED_CONTEXTS = {"album", "artist"}
+
+    def __init__(self, *, api: Callable[..., Any], local_identity: Callable[[], Any],
+                 configured_fingerprint: str | None, scopes: Any,
+                 timeout_s: float = 5.0) -> None:
+        if not callable(api) or not callable(local_identity) or not 0.1 <= timeout_s <= 30.0:
+            raise ValueError("invalid playback boundary")
+        self._api = api
+        self._local_identity = local_identity
+        self._fingerprint = configured_fingerprint
+        self._scopes = scopes
+        self._timeout = float(timeout_s)
+
+    def play_selection(self, catalog: CatalogClient, selection_id: str, *, session_id: str,
+                       operation: Any | None = None) -> PlaybackResult:
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        selected = catalog.resolve(selection_id, session_id=session_id)
+        if selected.code is not CatalogCode.SELECTED or selected.candidate is None:
+            return PlaybackResult(PlaybackCode.INVALID_SELECTION)
+        candidate = selected.candidate
+        if (candidate.kind not in self._ALLOWED_CONTEXTS
+                or not self._playable_uri(candidate.uri, candidate.kind)):
+            return PlaybackResult(PlaybackCode.UNPLAYABLE)
+        return self._play(candidate, operation=operation)
+
+    def _play(self, candidate: CatalogCandidate, *, operation: Any | None = None) -> PlaybackResult:
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        if (not isinstance(candidate, CatalogCandidate)
+                or candidate.kind not in self._ALLOWED_CONTEXTS
+                or not self._playable_uri(candidate.uri, candidate.kind)):
+            return PlaybackResult(PlaybackCode.UNPLAYABLE)
+        if self._scopes != APPROVED_SPOTIFY_SCOPES:
+            return PlaybackResult(PlaybackCode.NOT_AUTHORIZED)
+        if not self._fingerprint:
+            return PlaybackResult(PlaybackCode.TARGET_MISSING)
+        try:
+            identities = self._local_identity()
+        except Exception:
+            return PlaybackResult(PlaybackCode.TARGET_MISSING)
+        if not isinstance(identities, (list, tuple)) or identities != ["spotify"]:
+            return PlaybackResult(PlaybackCode.TARGET_MISSING if not identities else PlaybackCode.TARGET_AMBIGUOUS)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        try:
+            account = self._api("GET", self.ACCOUNT_URL, None, self._timeout)
+        except TimeoutError:
+            return PlaybackResult(PlaybackCode.TIMEOUT)
+        except Exception:
+            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        if not isinstance(account, dict) or account.get("product") != "premium":
+            return PlaybackResult(PlaybackCode.PREMIUM_REQUIRED)
+        try:
+            response = self._api("GET", self.DEVICES_URL, None, self._timeout)
+        except TimeoutError:
+            return PlaybackResult(PlaybackCode.TIMEOUT)
+        except Exception:
+            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        devices = response.get("devices", []) if isinstance(response, dict) else []
+        matches = [device for device in devices if self._matches_target(device)] if isinstance(devices, list) else []
+        if not matches:
+            return PlaybackResult(PlaybackCode.TARGET_MISSING)
+        if len(matches) != 1:
+            return PlaybackResult(PlaybackCode.TARGET_AMBIGUOUS)
+        device_id = matches[0].get("id")
+        if not isinstance(device_id, str) or not device_id:
+            return PlaybackResult(PlaybackCode.TARGET_MISSING)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        try:
+            accepted = self._api("PUT", self.PLAY_URL, {
+                "device_id": device_id, "context_uri": candidate.uri,
+            }, self._timeout)
+        except TimeoutError:
+            return PlaybackResult(PlaybackCode.TIMEOUT)
+        except Exception:
+            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        if not isinstance(accepted, dict) or accepted.get("accepted") is not True:
+            return PlaybackResult(PlaybackCode.UNPLAYABLE)
+        try:
+            state = self._api("GET", self.READBACK_URL, None, self._timeout)
+        except TimeoutError:
+            return PlaybackResult(PlaybackCode.TIMEOUT)
+        except Exception:
+            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
+        if self._cancelled(operation):
+            return PlaybackResult(PlaybackCode.CANCELLED)
+        if not self._readback_matches(state, device_id, candidate.uri):
+            return PlaybackResult(PlaybackCode.STATE_UNKNOWN)
+        return PlaybackResult(PlaybackCode.OK)
+
+    def _matches_target(self, device: Any) -> bool:
+        return (isinstance(device, dict) and device.get("type") == "computer"
+                and device.get("fingerprint") == self._fingerprint)
+
+    @staticmethod
+    def _playable_uri(uri: Any, kind: str) -> bool:
+        return isinstance(uri, str) and uri == uri.strip() and uri.startswith(f"spotify:{kind}:")
+
+    @staticmethod
+    def _readback_matches(state: Any, device_id: str, uri: str) -> bool:
+        if not isinstance(state, dict) or not isinstance(state.get("device"), dict):
+            return False
+        item = state.get("item")
+        return (state["device"].get("id") == device_id and isinstance(item, dict)
+                and item.get("uri") == uri)
+
+    @staticmethod
+    def _cancelled(operation: Any | None) -> bool:
+        return bool(operation is not None and callable(getattr(operation, "cancelled", None))
+                    and operation.cancelled())
+
+
 class CatalogCode(str, Enum):
     SINGLE = "single"
     MULTIPLE = "multiple"

@@ -200,7 +200,8 @@ class KeyringClientIdStore:
             return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
         try:
             self._backend.set_password(self.SERVICE, self.USERNAME, value)
-            self._backend.delete_password(self.SERVICE, self._disabled_username)
+            if self._backend.get_password(self.SERVICE, self._disabled_username) is not None:
+                self._backend.delete_password(self.SERVICE, self._disabled_username)
         except Exception:
             return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
         return ClientIdResult(ClientIdStatus.OK)

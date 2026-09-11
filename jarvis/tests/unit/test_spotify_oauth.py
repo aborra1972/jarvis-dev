@@ -161,6 +161,29 @@ def test_client_id_store_is_separate_validated_and_redacted() -> None:
     assert store.load().status is ClientIdStatus.MISSING
 
 
+def test_client_id_save_ignores_delete_of_absent_disabled_marker() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class Backend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            if (service, username) not in values:
+                raise KeyError(username)
+            del values[(service, username)]
+
+    store = KeyringClientIdStore(backend=Backend())
+    client_id = "f" * 32
+    assert store.save(client_id).status is ClientIdStatus.OK
+    loaded = store.load()
+    assert loaded.status is ClientIdStatus.OK
+    assert loaded.value == client_id
+
+
 def test_client_id_store_disable_is_durable_and_storage_failures_are_typed() -> None:
     values: dict[tuple[str, str], str] = {}
 

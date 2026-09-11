@@ -201,7 +201,8 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
     """Load the narrow, disabled-by-default PKCE configuration boundary.
 
     Explicit environment values remain the CI/setup override. When absent,
-    recover the Client ID from the OS keyring only.
+    recover the Client ID from the OS keyring only after the API is explicitly
+    enabled; disabled-by-default configuration must not probe credential storage.
     """
     env = os.environ if environ is None else environ
     defaults: dict[str, object] = {
@@ -213,7 +214,7 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
     enabled = env.get("SPOTIFY_API_ENABLED", "false").strip().lower()
     configured_client_id = env.get("SPOTIFY_CLIENT_ID")
     client_id = configured_client_id.strip() if configured_client_id is not None else ""
-    if configured_client_id is None:
+    if configured_client_id is None and enabled in {"true", "1", "yes"}:
         try:
             from jarvis.services.spotify import resolve_spotify_client_id
             stored = resolve_spotify_client_id(None, store=_spotify_client_id_store())

@@ -61,6 +61,42 @@ def test_provider_device_uri_and_unsupported_entities_are_rejected(payload: dict
         validate(payload)
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "dale play",
+        "dale play spotify",
+        "poné música",
+        "pone musica",
+        "reproducí",
+        "reproduce",
+        "play spotify",
+        "reproducir spotify",
+    ],
+)
+def test_natural_spotify_play_aliases_are_deterministic(raw: str) -> None:
+    result = intent_from(raw)
+    assert result is not None
+    assert result.intent == "spotify_play"
+    assert result.entities == {}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["pausá", "pausa", "pause spotify", "pausar spotify", "pará la música", "para la musica"],
+)
+def test_natural_spotify_pause_aliases_are_deterministic(raw: str) -> None:
+    result = intent_from(raw)
+    assert result is not None
+    assert result.intent == "spotify_pause"
+    assert result.entities == {}
+
+
+def test_spotify_control_does_not_combine_with_open_app_text() -> None:
+    assert intent_from("abrí Spotify y dale play").intent == "open_app"
+    assert intent_from("abrí Spotify y pausá").intent == "open_app"
+
+
 def test_search_and_selection_never_fall_through_to_generic_execute() -> None:
     assert "spotify_search" not in base.build_registry().handlers()
     assert "spotify_play_selection" not in base.build_registry().handlers()

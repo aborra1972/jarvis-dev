@@ -167,9 +167,17 @@ _MAKE_BUILD = re.compile(
     rf"^{_verb_alt('compilar')}(?: (?:el proyecto|todo))?$"
 )
 
-# Exact Spotify controls and bounded catalog clarification forms.
-_SPOTIFY_PLAY = re.compile(r"^(?:reproducir|reproduci) spotify$")
-_SPOTIFY_PAUSE = re.compile(r"^(?:pausar|pausa) spotify$")
+# Exact Spotify controls and bounded catalog clarification forms. These are
+# intentionally full-string matches: a control alias must never absorb an
+# arbitrary open_app request or trailing text.
+_SPOTIFY_PLAY = re.compile(
+    r"^(?:dale play(?: spotify)?|pon(?:e|er) (?:la )?musica|"
+    r"reproduc(?:i|e)(?: spotify)?|reproducir spotify|play spotify)$"
+)
+_SPOTIFY_PAUSE = re.compile(
+    r"^(?:paus(?:a|e)(?: spotify)?|pause spotify|pausar spotify|par(?:a|ar|e) (?:la )?musica|"
+    r"stop spotify)$"
+)
 _SPOTIFY_SEARCH = re.compile(
     r"^(?:buscar|busca) (?:el |la )?(album|artista|artistas) (.+)$"
 )

@@ -267,7 +267,19 @@ def build_registry(
 
     registry = Registry()
     if spotify_service is None:
-        spotify_service = SpotifyService(adapter=spotify_adapter or LocalSpotifyAdapter())
+        configured_adapter = spotify_adapter is None
+        if configured_adapter:
+            spotify_adapter = LocalSpotifyAdapter(
+                playerctl_bin=config.SPOTIFY_PLAYERCTL_BIN,
+                identity=config.SPOTIFY_MPRIS_IDENTITY,
+                timeout_s=config.SPOTIFY_LOCAL_TIMEOUT_S,
+            )
+        # Injected adapters are test/dedicated boundaries and must remain
+        # usable independently of the production opt-in switch.
+        spotify_service = SpotifyService(
+            adapter=spotify_adapter,
+            enabled=config.SPOTIFY_LOCAL_ENABLED if configured_adapter else True,
+        )
     registry.register("spotify_play", spotify_service.dispatch)
     registry.register("spotify_pause", spotify_service.dispatch)
     if catalog_client is not None:

@@ -82,6 +82,33 @@ def test_spotify_handlers_are_registered_separately_from_generic_execute():
     assert registry.handlers()["spotify_pause"] is not registry.handlers()["execute"]
 
 
+def test_build_registry_uses_configured_local_spotify_control(monkeypatch):
+    from jarvis.services import spotify
+
+    captured = {}
+
+    class FakeAdapter:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(spotify, "LocalSpotifyAdapter", FakeAdapter)
+    monkeypatch.setattr(base.config, "SPOTIFY_LOCAL_ENABLED", True)
+    monkeypatch.setattr(base.config, "SPOTIFY_PLAYERCTL_BIN", "/opt/playerctl")
+    monkeypatch.setattr(base.config, "SPOTIFY_MPRIS_IDENTITY", "spotify.desktop")
+    monkeypatch.setattr(base.config, "SPOTIFY_LOCAL_TIMEOUT_S", 4.5)
+
+    registry = base.build_registry()
+    handler = registry.handlers()["spotify_play"]
+    service = handler.__self__
+
+    assert captured == {
+        "playerctl_bin": "/opt/playerctl",
+        "identity": "spotify.desktop",
+        "timeout_s": 4.5,
+    }
+    assert service._enabled is True
+
+
 # --- Shared helpers --------------------------------------------------------
 def test_exclusive_write_creates_new_file(tmp_path) -> None:
     path = tmp_path / "doc.md"

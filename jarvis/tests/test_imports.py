@@ -103,6 +103,8 @@ def test_cli_start_runs_real_pipeline(
     monkeypatch.setattr(jarvis.config, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(jarvis.config, "RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(jarvis.config, "PID_FILE", tmp_path / "run" / "jarvis.pid")
+    monkeypatch.setattr(jarvis.config, "TRANSCRIPTS_FILE", tmp_path / "transcripts.jsonl")
+    monkeypatch.setattr(jarvis.config, "USAGE_SUGGESTIONS_FILE", tmp_path / "usage_suggestions.json")
     ran: list[object] = []
     monkeypatch.setattr(jarvis.orchestrator.loop, "run", lambda pipeline, iterations=None: ran.append(pipeline))
 

@@ -57,6 +57,26 @@ def test_keyring_store_round_trip_and_delete() -> None:
     assert store.load().status is CredentialStatus.MISSING
 
 
+def test_keyring_disable_keeps_durable_marker_after_token_deletion() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class Backend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            values.pop((service, username), None)
+
+    store = KeyringCredentialStore(backend=Backend())
+    assert store.save("token").status is CredentialStatus.OK
+    assert store.disable().status is CredentialStatus.OK
+    assert values == {("jarvis.spotify", "oauth:disabled"): "1"}
+    assert KeyringCredentialStore(backend=store._backend).load().status is CredentialStatus.DISABLED
+
+
 def test_keyring_failure_is_storage_unavailable_without_fallback() -> None:
     class Broken:
         def get_password(self, service, username):
@@ -136,6 +156,76 @@ def test_unauthorized_api_response_cleans_up_and_revoke_is_local_only() -> None:
     assert client.revoke().code is OAuthErrorCode.OK
 
 
+@pytest.mark.parametrize("expires_in", ["not-a-number", "nan", "inf", 0, -1, True])
+def test_malformed_or_nonpositive_expiry_fails_closed(expires_in) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore()
+    client = OAuthClient(
+        enabled=True,
+        client_id="client",
+        store=store,
+        transport=lambda *args: _Response(
+            200,
+            {"access_token": "access", "refresh_token": "refresh", "expires_in": expires_in},
+        ),
+        clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "v" * 43)
+
+    result = client.exchange_code(tx, "code", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.INVALID_RESPONSE
+    assert store.value is None
+
+
+def test_disable_persists_marker_and_blocks_reactivation_until_authorized() -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore({"access_token": "old", "refresh_token": "refresh", "expires_at": 9999.0, "scope": list(APPROVED_SPOTIFY_SCOPES)})
+    client = OAuthClient(enabled=True, client_id="client", store=store, transport=lambda *args: pytest.fail("transport called"))
+
+    assert client.disable().code is OAuthErrorCode.DISABLED
+    assert store.disabled
+    store.value = {"access_token": "restored", "refresh_token": "refresh", "expires_at": 9999.0, "scope": list(APPROVED_SPOTIFY_SCOPES)}
+    assert client.access_token().code is OAuthErrorCode.DISABLED
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "v" * 43)
+    assert client.exchange_code(tx, "code", session_id="session-1").code is OAuthErrorCode.DISABLED
+
+
+def test_explicit_enable_clears_durable_disable() -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore()
+    store.disabled = True
+    client = OAuthClient(enabled=True, client_id="client", store=store, transport=lambda *args: pytest.fail("transport called"))
+
+    assert client.enable().code is OAuthErrorCode.OK
+    assert not store.disabled
+
+
+@pytest.mark.parametrize("scope", [None, 42, [["user-read-playback-state"]], ["unexpected"], ["user-read-playback-state", None]])
+def test_malformed_persisted_scope_fails_closed_without_raising(scope) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore({"access_token": "access", "refresh_token": "refresh", "expires_at": 9999.0, "scope": scope})
+    client = OAuthClient(enabled=True, client_id="client", store=store, transport=lambda *args: pytest.fail("transport called"))
+
+    assert client.access_token().code is OAuthErrorCode.INVALID_RESPONSE
+    assert store.deleted
+
+
+def test_disabled_marker_is_not_replaced_by_deleted_credentials() -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore()
+    store.disabled = True
+    client = OAuthClient(enabled=True, client_id="client", store=store, transport=lambda *args: pytest.fail("transport called"))
+
+    assert client.access_token().code is OAuthErrorCode.DISABLED
+    assert store.value is None
+
+
 def test_disabled_and_transport_failures_are_bounded_typed_errors() -> None:
     from jarvis.services.spotify import OAuthClient, OAuthErrorCode
 
@@ -162,9 +252,12 @@ class _MemoryTokenStore:
     def __init__(self, value=None):
         self.value = value
         self.deleted = False
+        self.disabled = False
 
     def load(self):
         from jarvis.services.spotify import CredentialResult, CredentialStatus
+        if self.disabled:
+            return CredentialResult(CredentialStatus.DISABLED)
         if self.value is None:
             return CredentialResult(CredentialStatus.MISSING)
         return CredentialResult(CredentialStatus.OK, __import__("json").dumps(self.value))
@@ -179,4 +272,16 @@ class _MemoryTokenStore:
         from jarvis.services.spotify import CredentialResult, CredentialStatus
         self.deleted = True
         self.value = None
+        self.disabled = False
+        return CredentialResult(CredentialStatus.OK)
+
+    def disable(self):
+        from jarvis.services.spotify import CredentialResult, CredentialStatus
+        self.disabled = True
+        self.value = None
+        return CredentialResult(CredentialStatus.OK)
+
+    def enable(self):
+        from jarvis.services.spotify import CredentialResult, CredentialStatus
+        self.disabled = False
         return CredentialResult(CredentialStatus.OK)

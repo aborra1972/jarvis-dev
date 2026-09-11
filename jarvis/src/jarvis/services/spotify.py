@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import re
 import secrets
 import subprocess
@@ -89,6 +90,7 @@ def create_pkce_transaction(
 class CredentialStatus(str, Enum):
     OK = "ok"
     MISSING = "missing"
+    DISABLED = "disabled"
     STORAGE_UNAVAILABLE = "storage_unavailable"
 
 
@@ -105,6 +107,7 @@ class KeyringCredentialStore:
         self._backend = backend if backend is not None else self._default_backend()
         self._service = service
         self._username = username
+        self._disabled_username = f"{username}:disabled"
 
     @staticmethod
     def _default_backend() -> Any | None:
@@ -118,6 +121,8 @@ class KeyringCredentialStore:
         if self._backend is None:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         try:
+            if self._backend.get_password(self._service, self._disabled_username) == "1":
+                return CredentialResult(CredentialStatus.DISABLED)
             value = self._backend.get_password(self._service, self._username)
         except Exception:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
@@ -128,6 +133,26 @@ class KeyringCredentialStore:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         try:
             self._backend.set_password(self._service, self._username, value)
+            self._backend.delete_password(self._service, self._disabled_username)
+        except Exception:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        return CredentialResult(CredentialStatus.OK)
+
+    def enable(self) -> CredentialResult:
+        if self._backend is None:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.delete_password(self._service, self._disabled_username)
+        except Exception:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        return CredentialResult(CredentialStatus.OK)
+
+    def disable(self) -> CredentialResult:
+        if self._backend is None:
+            return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.set_password(self._service, self._disabled_username, "1")
+            self._backend.delete_password(self._service, self._username)
         except Exception:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         return CredentialResult(CredentialStatus.OK)
@@ -188,6 +213,11 @@ class OAuthClient:
     def exchange_code(self, transaction: PKCETransaction, code: str, *, session_id: str) -> OAuthResult:
         if not self._enabled:
             return self._result(OAuthErrorCode.DISABLED)
+        stored = self._store.load()
+        if stored.status is CredentialStatus.DISABLED:
+            return self._result(OAuthErrorCode.DISABLED)
+        if stored.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
         if not code or not transaction.consume(session_id, now=self._clock()):
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
         response = self._send({
@@ -249,7 +279,23 @@ class OAuthClient:
     def revoke(self) -> OAuthResult:
         return self._cleanup(OAuthErrorCode.OK)
 
-    disable = revoke
+    def enable(self) -> OAuthResult:
+        enable = getattr(self._store, "enable", None)
+        if not callable(enable):
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        result = enable()
+        if result.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        return self._result(OAuthErrorCode.OK)
+
+    def disable(self) -> OAuthResult:
+        disable = getattr(self._store, "disable", None)
+        if not callable(disable):
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        result = disable()
+        if result.status is CredentialStatus.STORAGE_UNAVAILABLE:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        return self._result(OAuthErrorCode.DISABLED)
 
     def _send(self, data: dict[str, str]) -> Any:
         try:
@@ -277,10 +323,15 @@ class OAuthClient:
         refresh = payload.get("refresh_token") or old_refresh_token
         if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        if isinstance(expires, bool):
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
         try:
-            expires_at = self._clock() + float(expires)
+            expiry_seconds = float(expires)
         except (TypeError, ValueError):
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        if not math.isfinite(expiry_seconds) or expiry_seconds <= 0:
+            return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        expires_at = self._clock() + expiry_seconds
         scopes = set(str(payload.get("scope", "")).split()) or set(APPROVED_SPOTIFY_SCOPES)
         if scopes != APPROVED_SPOTIFY_SCOPES:
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
@@ -292,20 +343,30 @@ class OAuthClient:
         result = self._store.load()
         if result.status is CredentialStatus.STORAGE_UNAVAILABLE:
             return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
+        if result.status is CredentialStatus.DISABLED:
+            return self._result(OAuthErrorCode.DISABLED)
         if result.status is CredentialStatus.MISSING or not result.value:
             return self._result(OAuthErrorCode.NOT_AUTHORIZED)
         try:
             record = json.loads(result.value)
         except (TypeError, ValueError):
             return self._cleanup(OAuthErrorCode.INVALID_RESPONSE)
+        if isinstance(record, dict) and record.get("disabled") is True:
+            return self._result(OAuthErrorCode.DISABLED)
         return OAuthResult(OAuthErrorCode.OK, "", payload=record) if self._valid_record(record) else self._cleanup(OAuthErrorCode.INVALID_RESPONSE)
 
     @staticmethod
     def _valid_record(record: Any) -> bool:
-        return (isinstance(record, dict) and isinstance(record.get("access_token"), str)
+        if not (isinstance(record, dict) and isinstance(record.get("access_token"), str)
                 and isinstance(record.get("refresh_token"), str)
                 and isinstance(record.get("expires_at"), (int, float))
-                and set(record.get("scope", ())) == APPROVED_SPOTIFY_SCOPES)
+                and not isinstance(record.get("expires_at"), bool)
+                and math.isfinite(record["expires_at"]) and record["expires_at"] > 0):
+            return False
+        scope = record.get("scope")
+        return (isinstance(scope, (list, tuple, set, frozenset))
+                and all(isinstance(member, str) for member in scope)
+                and set(scope) == APPROVED_SPOTIFY_SCOPES)
 
     def _save_token(self, result: OAuthResult) -> OAuthResult:
         saved = self._store.save(json.dumps(result.payload, separators=(",", ":")))

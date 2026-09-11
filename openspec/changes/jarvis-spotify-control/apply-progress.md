@@ -320,3 +320,31 @@ The broad OAuth row and all catalog, playback, lifecycle, diagnostics, documenta
 
 - **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; `actionContext.mode: repo-local`; allowed edit root is that workspace; parent-authorized work unit `spotify-stage2-injected-token-lifecycle`; strict TDD active; delivery resolved as `auto-chain`; parent attempt authority `523bd3c7146b151b2886e28b1ca654bf9efa32d063a3c26fb2ab8a162f975061`.
 - **Produced:** apply progress for the checked dedicated slice; `next_recommended: sdd-verify`; no unsafe action-context warnings.
+
+## Authorized correction `spotify-oauth-disable-expiry-fail-closed`
+
+- **Status:** completed; bounded to the durable OAuth disable marker and fail-closed expiry parsing correction.
+- **Scope:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_oauth.py`, and this progress artifact only. No external calls, credentials, network, task checkbox, or unrelated source/test surface was changed.
+- **Behavior:** `disable()` persists a separate keyring marker and removes token material; marker state blocks access until a successful authorized save clears it. OAuth expiry values now require a non-boolean, finite, strictly positive numeric value, and persisted expiry records receive the same validation.
+- **Workload:** 113 source/test authored changed lines (111 net), within the user-authorized 120-line correction limit; progress documentation is additional OpenSpec evidence and is not part of the source/test correction budget.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added expiry parametrization and durable-disable regression tests first; focused OAuth tests failed for NaN/infinity/nonpositive/boolean expiry and missing disabled-state handling. |
+| GREEN | Added keyring marker status, separate disable path, disabled-load handling, and finite-positive expiry validation; focused suite passed: `20 passed`. |
+| TRIANGULATE | Required full command passed `1080 passed, 1 failed, 1 warning`; the sole failure is the pre-existing live proactive usage-note assertion in `jarvis/tests/test_imports.py::test_cli_start_runs_real_pipeline` (`firefox 127 veces`). `git diff --check` passed. No network, credentials, OAuth provider, or external call was used. |
+| REFACTOR | Kept revoke deletion semantics separate from durable disable, preserved keyring-only storage, and limited edits to the authorized Spotify OAuth source/test seams. |
+
+### Remaining tasks and status
+
+No persisted task checkbox was changed: this was a correction to the existing OAuth lifecycle slice, while the broad OAuth task and all other implementation rows remain as previously recorded. `actionContext.mode` was repo-local with the authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; no warnings or unsafe edit-root conditions were present. Next recommended phase is `sdd-verify`.
+
+## Follow-up correction `spotify-oauth-disable-exchange-and-scope-validation`
+
+- **Status:** implementation completed; this follow-up stayed within the existing OAuth correction boundary and remains uncommitted.
+- **Scope:** `jarvis/src/jarvis/services/spotify.py` and `jarvis/tests/unit/test_spotify_oauth.py`. No task checkbox, credential, network, provider, or unrelated source surface was changed.
+- **Behavior:** Durable disabled state now blocks `exchange_code()` before transport even if credentials are restored; explicit `enable()` is the only reactivation path. Persisted scope records accept only string collections with exactly the approved scopes and return typed `INVALID_RESPONSE` after cleanup for malformed shapes, without raising.
+- **Verification:** focused OAuth tests `26 passed`; full suite `1088 passed, 1 warning`; `git diff --check` passed. The remaining warning is the pre-existing unknown `e2e` pytest marker at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
+- **Boundary:** no commit or push was performed. The broad OAuth task and remaining Stage 2 rows remain unchecked and require separate authorized work units.

@@ -401,3 +401,26 @@ The broad catalog row remains intentionally unchecked, along with the following 
 
 - **Consumed:** provider-authorized work unit `spotify-stage2-catalog-clarification`; runtime attempt token `sha256:616cb9bcd4674c2c12a22c41f851a6edfddc371c91048b412f838c7cdee90cd4`; canonical repo `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; repo-local action context with edits limited to the four user-specified surfaces; strict TDD active; high-risk forecast resolved by this bounded safe slice.
 - **Produced:** apply progress for the dedicated catalog safe slice; `next_recommended: sdd-verify`; broad catalog, OAuth, playback, intents, lifecycle, diagnostics, documentation, and release rows remain unchecked. No commit or push was performed.
+
+## Authorized work unit `spotify-stage2-search-selection-intents`
+
+- **Status:** completed for task 2.2.2 only; the broad catalog task and all other Stage 2 rows remain unchecked.
+- **Scope:** Added validated `spotify_search` and `spotify_play_selection` schema entities, deterministic Spanish golden forms, compact classifier prompt allowlisting, and optional dedicated dispatch to the existing injected catalog boundary. Numeric and opaque pending selectors are bounded; URI, device, provider, backend, playlist, recommendation, and generic execution fields are rejected.
+- **Files changed:** `jarvis/src/jarvis/interpreter/schema.py`, `jarvis/src/jarvis/interpreter/golden.py`, `jarvis/src/jarvis/actions/base.py`, `jarvis/tests/unit/test_spotify_intents.py`, and the selected checkbox in `tasks.md`. `interpreter.py` was inspected and remained unchanged because its validated LLM path already accepts the schema boundary.
+- **Non-goals preserved:** No `service.py` edits, network, secrets, browser, sockets, token exchange, playback, lifecycle, diagnostics, documentation, or generic execution behavior.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | New focused tests failed 7 cases: search forms routed to `web_search`, selectors were unmatched, and the dedicated intent behavior was absent. |
+| GREEN | Added schema constraints, Spanish search/selection golden patterns, prompt allowlisting, and injected catalog dispatch; focused suite passed `15 passed`. |
+| TRIANGULATE | Focused interpreter/schema/golden/registry/catalog/service suite passed `345 passed`; full required `jarvis/.venv/bin/pytest -q` passed `1112 passed, 3 deselected`; compileall and `git diff --check` passed. |
+| REFACTOR | Kept Stage 2 dispatch optional and separate from existing local Spotify handlers, returned only safe candidate metadata, preserved generic `execute`, callback/PKCE/catalog boundaries, and made no service edits. |
+
+### Verification and workload
+
+- Changed implementation/test scope: 116 source diff lines plus 133 lines in the new focused test file; OpenSpec evidence is additional. Unrelated pre-existing `.atl` changes were preserved.
+- Persisted task row 2.2.2 was re-read and confirmed `[x]`; no other task checkbox was changed.
+- Structured status consumed: change `jarvis-spotify-control`, `applyState: ready`, repo-local canonical workspace, strict TDD active, allowed files limited by parent, and parent token `sha256:e0ec4befd655344a3737cdce6f98b58875f31aadf47a2d434519e92ec5b11914`.
+- Structured status produced: apply complete for this work unit; `next_recommended: sdd-verify`; no commit or push performed.

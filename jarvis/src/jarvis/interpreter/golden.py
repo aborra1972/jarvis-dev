@@ -167,9 +167,16 @@ _MAKE_BUILD = re.compile(
     rf"^{_verb_alt('compilar')}(?: (?:el proyecto|todo))?$"
 )
 
-# Exact Spotify-only controls; content, players, and command suffixes do not match.
+# Exact Spotify controls and bounded catalog clarification forms.
 _SPOTIFY_PLAY = re.compile(r"^(?:reproducir|reproduci) spotify$")
 _SPOTIFY_PAUSE = re.compile(r"^(?:pausar|pausa) spotify$")
+_SPOTIFY_SEARCH = re.compile(
+    r"^(?:buscar|busca) (?:el |la )?(album|artista|artistas) (.+)$"
+)
+_SPOTIFY_SELECTION = re.compile(
+    r"^(?:reproducir|reproduci|elegir|elegi|seleccionar|selecciona) "
+    r"(?:(?:el |la )?(primero|primera|segundo|segunda|tercero|tercera|cuarto|cuarta|quinto|quinta)|seleccion (?:id )?([A-Za-z0-9_-]{8,32}))$"
+)
 
 
 def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
@@ -179,6 +186,20 @@ def _repo_from_match(m: re.Match[str]) -> dict[str, str]:
 
 def _web_search_from_match(m: re.Match[str]) -> dict[str, str]:
     return {"query": m.group(1).strip(), "engine": "google"}
+
+
+def _spotify_search_from_match(m: re.Match[str]) -> dict[str, str]:
+    kind = "album" if m.group(1) == "album" else "artist"
+    return {"kind": kind, "query": m.group(2).strip()}
+
+
+def _spotify_selection_from_match(m: re.Match[str]) -> dict[str, str]:
+    ordinal = {
+        "primero": "1", "primera": "1", "segundo": "2", "segunda": "2",
+        "tercero": "3", "tercera": "3", "cuarto": "4", "cuarta": "4",
+        "quinto": "5", "quinta": "5",
+    }
+    return {"selection_id": ordinal.get(m.group(1), m.group(2))}
 
 
 def _optional_text(default: str) -> Callable[[re.Match[str]], dict[str, str]]:
@@ -247,6 +268,8 @@ FAST_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str, Callable[[re.Match[str]], 
     (_MAKE_BUILD, "execute", _make_build_extract),
     (_SPOTIFY_PLAY, "spotify_play", lambda m: {}),
     (_SPOTIFY_PAUSE, "spotify_pause", lambda m: {}),
+    (_SPOTIFY_SEARCH, "spotify_search", _spotify_search_from_match),
+    (_SPOTIFY_SELECTION, "spotify_play_selection", _spotify_selection_from_match),
     (_OPEN_APP, "open_app", _single_group("app")),
     (_WEB_SEARCH, "web_search", _web_search_from_match),
     (_ASK, "ask", _single_group("query")),

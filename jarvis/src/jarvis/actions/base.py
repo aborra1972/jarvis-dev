@@ -64,6 +64,68 @@ def atomic_write(path: Path, content: str) -> None:
     os.replace(temp, path)
 
 
+class _SpotifyCatalogDispatch:
+    """Translate validated catalog intents to the injected catalog boundary."""
+
+    def __init__(self, catalog_client: object) -> None:
+        self._catalog = catalog_client
+
+    @staticmethod
+    def _session_id(session: object) -> str | None:
+        if isinstance(session, dict):
+            value = session.get("session_id")
+        else:
+            value = getattr(session, "session_id", None)
+        return value if isinstance(value, str) and value else None
+
+    def __call__(self, intent: Intent, session: object) -> ActionResult:
+        if intent.intent not in {"spotify_search", "spotify_play_selection"}:
+            return ActionResult(ok=False, spoken="Aún no sé hacer eso, señor.")
+        session_id = self._session_id(session)
+        if not session_id:
+            return ActionResult(ok=False, spoken="No pude identificar la selección de Spotify, señor.")
+        try:
+            if intent.intent == "spotify_search":
+                result = self._catalog.search(
+                    intent.entities["kind"], intent.entities["query"], session_id=session_id
+                )
+            else:
+                result = self._catalog.resolve(
+                    intent.entities["selection_id"], session_id=session_id
+                )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return ActionResult(ok=False, spoken="La solicitud de Spotify no es válida, señor.")
+
+        code = getattr(getattr(result, "code", None), "value", getattr(result, "code", None))
+        if intent.intent == "spotify_search":
+            if code == "not_found":
+                return ActionResult(ok=False, spoken="No encontré ese álbum o artista, señor.")
+            if code == "multiple":
+                candidates = tuple(getattr(result, "candidates", ()))
+                labels = [f"{index}. {getattr(item, 'name', '')}" for index, item in enumerate(candidates, 1)]
+                return ActionResult(ok=False, spoken="Elegí una opción: " + "; ".join(labels), data={
+                    "candidates": [
+                        {"selection_id": item.selection_id, "kind": item.kind, "name": item.name}
+                        for item in candidates
+                    ]
+                })
+            if code == "single":
+                candidates = tuple(getattr(result, "candidates", ()))
+                item = candidates[0] if candidates else None
+                if item is None:
+                    return ActionResult(ok=False, spoken="No pude confirmar el resultado de Spotify, señor.")
+                return ActionResult(ok=True, spoken=f"Encontré {item.name}, señor.", data={
+                    "selection_id": item.selection_id, "kind": item.kind, "name": item.name,
+                })
+        if code == "selected":
+            item = getattr(result, "candidate", None)
+            if item is not None:
+                return ActionResult(ok=True, spoken=f"Seleccioné {item.name}, señor.", data={
+                    "selection_id": item.selection_id, "kind": item.kind, "name": item.name,
+                })
+        return ActionResult(ok=False, spoken="No pude completar la solicitud de Spotify, señor.")
+
+
 class Registry:
     """Intent → handler map with dispatch; unknown intents answer unsupported."""
 
@@ -104,6 +166,7 @@ def build_registry(
     speaker: object | None = None,
     spotify_service: object | None = None,
     spotify_adapter: object | None = None,
+    catalog_client: object | None = None,
 ) -> Registry:
     """Wire every executor handler into one registry."""
     from jarvis.actions import assistant_lifecycle, files, opencode, reminders, system, web
@@ -114,6 +177,10 @@ def build_registry(
         spotify_service = SpotifyService(adapter=spotify_adapter or LocalSpotifyAdapter())
     registry.register("spotify_play", spotify_service.dispatch)
     registry.register("spotify_pause", spotify_service.dispatch)
+    if catalog_client is not None:
+        catalog_dispatch = _SpotifyCatalogDispatch(catalog_client)
+        registry.register("spotify_search", catalog_dispatch)
+        registry.register("spotify_play_selection", catalog_dispatch)
     oc = opencode.OpenCodeExecutor()
     registry.long_running_intents = opencode.LONG_RUNNING_INTENTS
     for intent in opencode.OPCODE_INTENTS:

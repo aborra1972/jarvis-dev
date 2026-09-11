@@ -40,7 +40,9 @@ ALLOWED_INTENTS: frozenset[str] = frozenset({
 # Destructive intents: only the golden hard gate may emit these.
 # Dedicated Stage 1 actions are schema-allowlisted but intentionally remain
 # outside the existing executor registry until their service work unit lands.
-SPOTIFY_INTENTS: frozenset[str] = frozenset({"spotify_play", "spotify_pause"})
+SPOTIFY_INTENTS: frozenset[str] = frozenset({
+    "spotify_play", "spotify_pause", "spotify_search", "spotify_play_selection",
+})
 
 DESTRUCTIVE_INTENTS: frozenset[str] = frozenset({
     "shutdown", "reboot", "power_off_self",
@@ -76,6 +78,8 @@ INTENT_DOMAIN: dict[str, str] = {
 INTENT_DOMAIN["unknown"] = ""
 
 REQUIRED_ENTITIES: dict[str, tuple[str, ...]] = {
+    "spotify_search": ("kind", "query"),
+    "spotify_play_selection": ("selection_id",),
     "open_repo": ("repo",),
     "ask": ("query",),
     "configure": ("text",),
@@ -145,6 +149,10 @@ def validate(payload: Any) -> Intent:
         raise SchemaError("bad_entities", f"entities must be an object, got {type(raw_entities).__name__}")
     if intent_name in {"spotify_play", "spotify_pause"} and raw_entities:
         raise SchemaError("unexpected_entities", f"{intent_name} does not accept entities")
+    if intent_name == "spotify_search" and set(raw_entities) != {"kind", "query"}:
+        raise SchemaError("unexpected_entities", "spotify_search accepts only kind and query")
+    if intent_name == "spotify_play_selection" and set(raw_entities) - {"selection_id", "kind"}:
+        raise SchemaError("unexpected_entities", "spotify_play_selection accepts only a pending selector")
     entities: dict[str, str] = {}
     for key, value in raw_entities.items():
         if value is None:
@@ -158,6 +166,18 @@ def validate(payload: Any) -> Intent:
         # Empty repo is legal for open_repo → active project delegation (PR3).
         if not entities.get(key, "") and not (key == "repo" and intent_name == "open_repo"):
             raise SchemaError("missing_entity", f"intent {intent_name} requires entity {key!r}")
+
+    if intent_name == "spotify_search":
+        if entities["kind"] not in {"album", "artist"}:
+            raise SchemaError("unsupported_entity", "Spotify search supports albums and artists only")
+        if len(entities["query"]) > 100 or "spotify:" in entities["query"].lower():
+            raise SchemaError("invalid_entity", "Spotify search query is not bounded or safe")
+    if intent_name == "spotify_play_selection":
+        selector = entities["selection_id"]
+        if not re.fullmatch(r"(?:[1-9][0-9]?|[A-Za-z0-9_-]{8,32})", selector):
+            raise SchemaError("invalid_entity", "selection must be a number or pending reference")
+        if "kind" in entities and entities["kind"] not in {"album", "artist"}:
+            raise SchemaError("unsupported_entity", "selection kind is unsupported")
 
     return Intent(intent=intent_name, entities=entities, confidence=confidence)
 
@@ -256,7 +276,7 @@ def fuzzy_correct_entities(intent: Intent, app_allowlist: set[str] | None = None
 
 def build_codex_system_prompt() -> str:
     """Compact Codex-only classifier prompt with no executable examples."""
-    intent_list = "|".join(sorted(ALLOWED_INTENTS))
+    intent_list = "|".join(sorted(ALLOWED_INTENTS | SPOTIFY_INTENTS))
     required = "; ".join(
         f"{intent}: {', '.join(entities)}" for intent, entities in sorted(REQUIRED_ENTITIES.items())
     )
@@ -267,9 +287,8 @@ def build_codex_system_prompt() -> str:
         '"text":"","url":"","engine":"google","command":""},'
         '"confidence":0.0,"answer":""}\n'
         f"Allowed intents (use exactly one): {intent_list}.\n"
-        "Required entities: " + required + ". open_repo may use empty repo for the active project.\n"
-        f"Never emit destructive intents ({destructive}) from LLM classification; "
-        "they are deterministic-only and must be rejected when suggested.\n"
+        "Required entities: " + required + ".\n"
+        f"Never emit destructive intents ({destructive}); reject them from LLM output.\n"
         "general_qa: non-command, non-search questions; full question in query. answer must always "
         "be concise Spanish text; if data is unavailable, explain or ask. Never empty or executable; "
         "at most 2000 characters.\n"
@@ -282,7 +301,7 @@ def build_codex_system_prompt() -> str:
 
 def build_system_prompt(*, include_general_qa_answer: bool = False) -> str:
     """JSON-only system prompt, optionally including Codex's QA answer field."""
-    intent_list = "|".join(sorted(ALLOWED_INTENTS))
+    intent_list = "|".join(sorted(ALLOWED_INTENTS | SPOTIFY_INTENTS))
     domain_lines = "\n".join(f"- {domain}: {', '.join(values)}" for domain, values in DOMAIN_INTENTS.items())
     return (
         "You map a voice command (Spanish rioplatense, already normalized) to exactly one "

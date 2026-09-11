@@ -458,3 +458,40 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **TDD evidence:** RED focused tests failed for the absent Stage 2 dispatch, diagnostics, and redaction seams; GREEN focused tests passed after minimal implementation; TRIANGULATE covered typed Premium/clarification mapping and secret removal; REFACTOR retained fail-closed defaults and injected-only behavior.
 - **Safety:** no raw provider output, tokens, authorization codes, state, verifier, URI, device ID, or arbitrary command data is spoken or persisted. Cancellation remains checked before late speech/history and operation context reaches injected Stage 2 handlers.
 - **Verification:** focused slice `93 passed`; full suite, compileall, and diff check are recorded in the handoff. No commit or push performed.
+
+## Current documentation/reconciliation slice
+
+- **Status:** completed as an explicitly authorized project-local reconciliation.
+  Historical entries above are preserved. Only the documentation, progress,
+  verification, and task surfaces named by the parent were edited.
+- **Task reconciliation:** checked only the completed 2.3.2 lifecycle/redaction
+  row and the 2.4 documentation row in `tasks.md`. The separate 2.4 release
+  verification row and broad OAuth/catalog rows remain unchecked.
+- **Documentation:** `jarvis/docs/comandos_jarvis.md` now states Stage 2's
+  explicit opt-in, exact two scopes, Premium requirement, Stage 1 offline vs
+  Stage 2 network boundary, mandatory multiple-result clarification, exact
+  **Spotify Desktop en esta PC** target, disable/revoke, fail-closed behavior,
+  rollback preserving Stage 1, and privacy/no-secrets rules. It does not promise
+  fallback, device switching, browser automation, or automatic selection.
+- **Project-local exception:** native SDD reconciliation was necessary because
+  stale intended-untracked metadata names a playback test that is already
+  tracked. This exception is documented, but no native SDD verification is
+  claimed. No live Spotify verification, provider call, credentials, or network
+  smoke test was performed.
+
+### Documentation/privacy TDD evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Review identified missing explicit gates, boundaries, clarification, target, rollback, and secret-handling guidance. |
+| GREEN | Added concise Spanish guidance while preserving independently usable Stage 1 instructions. |
+| TRIANGULATE | Cross-checked wording against the design and ran existing injected redaction, diagnostics, lifecycle, intent, OAuth, and playback tests; no live/native SDD verification. |
+| REFACTOR | Kept the change additive and bounded; removed ambiguity around fallback, device selection, browser automation, and automatic result choice. |
+
+### Validation
+
+- `cd /home/ale/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q jarvis/tests/test_diagnose.py jarvis/tests/unit/test_spotify_intents.py jarvis/tests/unit/test_spotify_playback.py jarvis/tests/unit/test_spotify_oauth.py jarvis/tests/unit/test_actions_base.py jarvis/tests/unit/test_loop.py` → `139 passed in 19.58s`.
+- `cd /home/ale/Proyectos/jarvis-dev && jarvis/.venv/bin/pytest -q` → `1127 passed, 3 deselected in 33.31s`.
+- `cd /home/ale/Proyectos/jarvis-dev && jarvis/.venv/bin/python -m compileall -q jarvis/src` → exit 0, no output.
+- `cd /home/ale/Proyectos/jarvis-dev && git diff --check` → exit 0, no output.
+- No live Spotify, native SDD, credentials, or network verification was performed; no commit or push was performed.

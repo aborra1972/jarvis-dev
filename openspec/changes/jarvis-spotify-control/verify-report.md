@@ -79,3 +79,42 @@ skill_resolution: fallback-path
 1. Schema validation and deterministic golden routing jointly constrain Spotify selection data before catalog dispatch.
 2. Injected offline tests can preserve OAuth PKCE callback and catalog boundaries without network or provider access.
 3. A verified bounded work unit does not make the parent OpenSpec change archive-ready while implementation tasks remain unchecked.
+
+## Current documentation/reconciliation slice
+
+**Status: bounded documentation and reconciliation complete; overall change remains incomplete.**
+
+This current entry supersedes the stale task accounting above without deleting
+the historical verification record. The committed implementation slice at
+`eb38937` was independently verified before this documentation pass: 93 focused
+tests, 1127 full-suite tests, compileall, and `git diff --check` passed. The
+current work checks only task rows 2.3.2 and 2.4's documentation row. Four
+implementation-owned rows remain unchecked, including broad OAuth/catalog work
+and the separate release-verification row; no live Spotify or native SDD
+verification is claimed.
+
+The native SDD ledger was not used as verification authority because its
+intended-untracked metadata is stale: it refers to a playback test that is
+already tracked. This is the explicitly authorized project-local reconciliation
+exception. No source, tests, proposal/spec/design, `.atl`, credentials, or
+unrelated files were changed.
+
+### Documentation/privacy TDD evidence
+
+- **RED:** the documentation/privacy review identified missing explicit opt-in,
+  exact-scope, Premium, network-boundary, target, clarification, rollback, and
+  secret-handling guidance.
+- **GREEN:** `jarvis/docs/comandos_jarvis.md` now documents those gates in
+  concise Spanish, keeps Stage 1 independently usable, and states fail-closed
+  behavior without fallback or automatic selection.
+- **TRIANGULATE:** the wording was checked against `design.md` and the existing
+  redaction/diagnostic/lifecycle evidence; no live Spotify or native SDD check
+  was performed.
+- **REFACTOR:** the section was kept additive and bounded, with Stage 1
+  instructions preserved and ambiguous device/browser/fallback promises removed.
+
+### Current validation evidence
+
+The exact validation commands and results for this reconciliation are recorded
+in `apply-progress.md`; no provider, network, credentials, or native SDD
+verification was used.

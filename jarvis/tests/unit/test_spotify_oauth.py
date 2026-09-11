@@ -7,7 +7,9 @@ from jarvis.services.spotify import (
     APPROVED_SPOTIFY_SCOPES,
     CredentialStatus,
     KeyringCredentialStore,
+    OAuthCallbackCode,
     create_pkce_transaction,
+    parse_pkce_callback,
 )
 
 
@@ -31,6 +33,58 @@ def test_pkce_transaction_consumes_once() -> None:
     tx = create_pkce_transaction("session-1", now=100.0, ttl_s=60.0, token_factory=lambda: "x" * 43)
     assert tx.consume("session-1", now=101.0)
     assert not tx.consume("session-1", now=102.0)
+
+
+def test_callback_accepts_exact_loopback_shape_and_consumes_transaction() -> None:
+    tx = create_pkce_transaction("session-1", now=100.0, ttl_s=60.0,
+                                 token_factory=iter(["v" * 43, "state"]).__next__)
+    result = parse_pkce_callback(
+        "http://127.0.0.1:8888/callback?code=auth-code&state=state",
+        transaction=tx, session_id="session-1", now=101.0,
+    )
+    assert result.code is OAuthCallbackCode.OK
+    assert result.authorization_code == "auth-code"
+    assert not tx.valid_for("session-1", now=101.0)
+
+
+def test_callback_rejects_wrong_redirect_shape_and_query_content() -> None:
+    callbacks = (
+        "http://127.0.0.1:8888/not-callback?code=c&state=s",
+        "http://127.0.0.1:8889/callback?code=c&state=s",
+        "https://127.0.0.1:8888/callback?code=c&state=s",
+        "http://127.0.0.1:8888/callback?code=c&state=s&extra=x",
+        "http://127.0.0.1:8888/callback#code=c&state=s",
+    )
+    for callback in callbacks:
+        tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
+        result = parse_pkce_callback(callback, transaction=tx, session_id="session-1", now=101.0)
+        assert result.code is OAuthCallbackCode.INVALID_CALLBACK
+        assert tx.valid_for("session-1", now=101.0)
+
+
+def test_callback_rejects_state_session_and_expiry_without_consuming() -> None:
+    cases = (("wrong-state", "session-1", 101.0, OAuthCallbackCode.STATE_MISMATCH),
+             ("state", "other-session", 101.0, OAuthCallbackCode.SESSION_MISMATCH),
+             ("state", "session-1", 160.0, OAuthCallbackCode.EXPIRED))
+    for state, session, now, expected in cases:
+        tx = create_pkce_transaction("session-1", now=100.0, ttl_s=60.0,
+                                     token_factory=iter(["v", "state"]).__next__)
+        result = parse_pkce_callback(
+            f"http://127.0.0.1:8888/callback?code=c&state={state}",
+            transaction=tx, session_id=session, now=now,
+        )
+        assert result.code is expected
+        assert tx.valid_for("session-1", now=101.0)
+
+
+def test_callback_is_one_time_and_requires_code() -> None:
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    callback = "http://127.0.0.1:8888/callback?code=c&state=state"
+    assert parse_pkce_callback(callback, transaction=tx, session_id="session-1", now=101.0).code is OAuthCallbackCode.OK
+    assert parse_pkce_callback(callback, transaction=tx, session_id="session-1", now=102.0).code is OAuthCallbackCode.ALREADY_CONSUMED
+    fresh = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    assert parse_pkce_callback("http://127.0.0.1:8888/callback?state=state", transaction=fresh,
+                               session_id="session-1", now=101.0).code is OAuthCallbackCode.INVALID_CALLBACK
 
 
 def test_approved_scopes_are_fixed() -> None:

@@ -348,3 +348,24 @@ No persisted task checkbox was changed: this was a correction to the existing OA
 - **Behavior:** Durable disabled state now blocks `exchange_code()` before transport even if credentials are restored; explicit `enable()` is the only reactivation path. Persisted scope records accept only string collections with exactly the approved scopes and return typed `INVALID_RESPONSE` after cleanup for malformed shapes, without raising.
 - **Verification:** focused OAuth tests `26 passed`; full suite `1088 passed, 1 warning`; `git diff --check` passed. The remaining warning is the pre-existing unknown `e2e` pytest marker at `jarvis/tests/e2e/test_e2e_smoke.py:30`.
 - **Boundary:** no commit or push was performed. The broad OAuth task and remaining Stage 2 rows remain unchecked and require separate authorized work units.
+
+## Authorized work unit `spotify-stage2-loopback-callback-state`
+
+- **Status:** completed for the provider-authorized offline callback safe slice. The broad OAuth task remains unchecked; only the dedicated callback sub-row was marked `[x]` in `tasks.md`.
+- **Scope:** `parse_pkce_callback()` validates injected callback URLs against the exact `http://127.0.0.1:8888/callback` shape, requires exactly one non-empty `code` and `state`, binds the transaction to the session, enforces expiry and one-time consumption, and compares state with `hmac.compare_digest`. The existing PKCE transaction model is reused. No listener, browser, network, token exchange invocation, catalog, playback, client ID, config, intent, registry, lifecycle, or documentation behavior was added.
+- **Files changed:** `jarvis/src/jarvis/services/spotify.py`, `jarvis/tests/unit/test_spotify_oauth.py`, and the dedicated safe-slice checkbox in `openspec/changes/jarvis-spotify-control/tasks.md`. `apply-progress.md` records this evidence.
+- **Workload:** 105 net changed lines in the allowed source/test/task surfaces before this evidence entry (50 additions/1 deletion in source, 54 test additions, 1 task line); within the provider-enforced 120-line bound. No client ID was added to the tests or implementation.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | Added four focused callback tests before implementation; collection failed because `OAuthCallbackCode` and `parse_pkce_callback` were absent. |
+| GREEN | Added the pure parser and exact redirect constant; focused OAuth suite passed: `30 passed`. |
+| TRIANGULATE | Required full command passed: `1089 passed, 3 deselected` in 35.31s. `git diff --check` and `jarvis/.venv/bin/python -m compileall -q jarvis/src` passed. Tests used injected strings, transactions, and clocks only; no browser, socket, network, credentials, client ID, token exchange, or provider was used. |
+| REFACTOR | Kept callback handling as a small offline seam beside the existing PKCE model, used typed safe outcomes with hidden authorization code representation, reused the canonical redirect constant, and preserved all excluded surfaces. |
+
+### Structured status consumed/produced
+
+- **Consumed:** change `jarvis-spotify-control`; artifact store `openspec`; authoritative workspace `/media/ale/Windows/Users/aleja/Documents/Proyectos/jarvis-dev`; `actionContext.mode: repo-local`; allowed edit roots limited to the canonical workspace; strict TDD active; provider-authorized work unit `spotify-stage2-loopback-callback-state`; parent runtime token authenticated without a second attempt.
+- **Produced:** apply progress for the dedicated callback safe slice; next recommended phase `sdd-verify`; broad OAuth and all catalog/playback/release rows remain unchecked. No commit or push was performed.

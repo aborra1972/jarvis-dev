@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -11,6 +12,7 @@ import secrets
 import subprocess
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -46,6 +48,22 @@ APPROVED_SPOTIFY_SCOPES = frozenset({
     "user-read-playback-state",
     "user-modify-playback-state",
 })
+LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+
+
+class OAuthCallbackCode(str, Enum):
+    OK = "ok"
+    INVALID_CALLBACK = "invalid_callback"
+    STATE_MISMATCH = "state_mismatch"
+    SESSION_MISMATCH = "session_mismatch"
+    EXPIRED = "expired"
+    ALREADY_CONSUMED = "already_consumed"
+
+
+@dataclass(frozen=True, repr=False)
+class OAuthCallbackResult:
+    code: OAuthCallbackCode
+    authorization_code: str | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -67,6 +85,37 @@ class PKCETransaction:
             return False
         self._consumed = True
         return True
+
+
+def parse_pkce_callback(
+    callback_url: str,
+    *,
+    transaction: PKCETransaction,
+    session_id: str,
+    now: float,
+) -> OAuthCallbackResult:
+    """Validate one injected loopback callback without performing I/O."""
+    if not isinstance(callback_url, str):
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+    parsed = urlsplit(callback_url)
+    if (parsed.scheme, parsed.netloc, parsed.path) != ("http", "127.0.0.1:8888", "/callback"):
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+    if parsed.fragment:
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if set(query) != {"code", "state"} or any(len(values) != 1 or not values[0] for values in query.values()):
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+    if transaction._consumed:
+        return OAuthCallbackResult(OAuthCallbackCode.ALREADY_CONSUMED)
+    if session_id != transaction.session_id:
+        return OAuthCallbackResult(OAuthCallbackCode.SESSION_MISMATCH)
+    if now >= transaction.expires_at:
+        return OAuthCallbackResult(OAuthCallbackCode.EXPIRED)
+    if not hmac.compare_digest(query["state"][0], transaction.state):
+        return OAuthCallbackResult(OAuthCallbackCode.STATE_MISMATCH)
+    if not transaction.consume(session_id, now=now):
+        return OAuthCallbackResult(OAuthCallbackCode.EXPIRED)
+    return OAuthCallbackResult(OAuthCallbackCode.OK, query["code"][0])
 
 
 def create_pkce_transaction(
@@ -222,7 +271,7 @@ class OAuthClient:
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
         response = self._send({
             "grant_type": "authorization_code", "code": code,
-            "redirect_uri": "http://127.0.0.1/callback",
+            "redirect_uri": LOOPBACK_REDIRECT_URI,
             "client_id": self._client_id or "", "code_verifier": transaction.verifier,
             "scope": " ".join(sorted(APPROVED_SPOTIFY_SCOPES)),
         })

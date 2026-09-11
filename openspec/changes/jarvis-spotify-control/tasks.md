@@ -59,6 +59,7 @@ The 800-line session review budget is likely exceeded by the combined two-stage 
 
 - [x] Replanned safe slice: add disabled-by-default OAuth configuration with the fixed two-scope policy, pure session-bound expiring one-time S256 PKCE transactions, and keyring-only load/save/delete returning `storage_unavailable` without plaintext fallback; do not implement token exchange, refresh, callback/network/API behavior, or complete the broad Stage 2 OAuth task. <!-- sdd-owner: implementation -->
 - [x] Replanned safe slice: implement only injected offline PKCE code exchange, expiring keyring-backed access-token refresh with single-flight rotation, local revoke/disable cleanup, 401/invalid-grant cleanup, fixed scopes, bounded transport, and redacted typed errors; do not implement browser/callback, catalog, playback, intents, or live transport behavior. <!-- sdd-owner: implementation -->
+- [x] Replanned safe slice: implement only injected offline loopback callback parsing and exact PKCE state validation for `http://127.0.0.1:8888/callback`, including session binding, expiry, one-time consumption, and constant-time state comparison; do not add listener, browser, network, token exchange, catalog, playback, config, intent, registry, lifecycle, or documentation behavior. <!-- sdd-owner: implementation -->
 
 ### 2.2 Catalog search and clarification state
 

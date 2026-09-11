@@ -118,3 +118,34 @@ unrelated files were changed.
 The exact validation commands and results for this reconciliation are recorded
 in `apply-progress.md`; no provider, network, credentials, or native SDD
 verification was used.
+
+## 2.4 release-verification reconciliation
+
+**Verdict: conditional offline release readiness; overall change incomplete.** The
+exact 2.4 release-verification row is now checked. Broad OAuth/catalog
+implementation rows remain unchecked, so this report does not claim overall
+change completion.
+
+### TDD evidence
+
+- **RED:** the pre-release failure matrix showed that live smoke prerequisites
+  were unavailable or unexercised: credentials, keyring, network, Premium,
+  Spotify Desktop, and the configured target. Live smoke was deferred.
+- **GREEN:** full suite `1127 passed, 3 deselected`; focused Stage 2 verification
+  `167 passed`; venv `compileall` passed; and `git diff --check` passed.
+- **TRIANGULATE:** rollback was verified with fake keyring/stores, including
+  disable/revoke cleanup without plaintext fallback. Stage 1 and `open_app`
+  behavior remained preserved. Tracked-artifact review found no secrets or raw
+  catalog data.
+- **REFACTOR:** the evidence was narrowed to conditional offline readiness with
+  no scope expansion and historical records preserved.
+
+### Explicit limitations and ledger exception
+
+Live smoke was deferred because credentials, keyring, network, Premium,
+Spotify Desktop, and the configured target were not exercised. No native SDD
+verification and no live provider action occurred. The stale native SDD ledger
+exception remains documented: intended-untracked metadata names a playback test
+that is already tracked, so this reconciliation does not claim native SDD
+verification. No source, tests, docs, config, dependencies, `.atl`, or unrelated
+files were changed; no commit or push occurred.

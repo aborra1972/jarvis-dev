@@ -464,9 +464,11 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Status:** completed as an explicitly authorized project-local reconciliation.
   Historical entries above are preserved. Only the documentation, progress,
   verification, and task surfaces named by the parent were edited.
-- **Task reconciliation:** checked only the completed 2.3.2 lifecycle/redaction
-  row and the 2.4 documentation row in `tasks.md`. The separate 2.4 release
-  verification row and broad OAuth/catalog rows remain unchecked.
+- **Task reconciliation at this checkpoint:** checked only the completed 2.3.2
+  lifecycle/redaction row and the 2.4 documentation row in `tasks.md`. The
+  separate 2.4 release-verification row was still pending at that historical
+  checkpoint; the later reconciliation below records its conditional offline
+  completion. Broad OAuth/catalog rows remain unchecked.
 - **Documentation:** `jarvis/docs/comandos_jarvis.md` now states Stage 2's
   explicit opt-in, exact two scopes, Premium requirement, Stage 1 offline vs
   Stage 2 network boundary, mandatory multiple-result clarification, exact
@@ -495,3 +497,12 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - `cd /home/ale/Proyectos/jarvis-dev && jarvis/.venv/bin/python -m compileall -q jarvis/src` → exit 0, no output.
 - `cd /home/ale/Proyectos/jarvis-dev && git diff --check` → exit 0, no output.
 - No live Spotify, native SDD, credentials, or network verification was performed; no commit or push was performed.
+
+## 2.4 release-verification reconciliation
+
+- **Status:** conditionally complete for offline release readiness; the overall change remains incomplete because broad OAuth/catalog implementation rows remain unchecked.
+- **RED:** the pre-release matrix identified live smoke prerequisites that were not exercised: credentials, keyring, network, Premium account, Spotify Desktop, and the configured target. Live smoke was therefore deferred; no native SDD verification or live provider action occurred.
+- **GREEN:** the full offline suite passed (`1127 passed, 3 deselected`); focused Stage 2 verification passed (`167 passed`); `jarvis/.venv/bin/python -m compileall -q jarvis/src` passed; and `git diff --check` passed.
+- **TRIANGULATE:** rollback was verified with fake keyring/stores, including disable/revoke cleanup without plaintext fallback. Stage 1 behavior and the allowlisted `open_app` path were preserved. Tracked-artifact review found no secrets or raw catalog data.
+- **REFACTOR:** evidence was reconciled into this bounded conditional release-readiness record without changing source, tests, docs, config, dependencies, `.atl`, or historical entries. The stale native SDD ledger exception is preserved: intended-untracked metadata names a playback test that is already tracked, so no native SDD verification is claimed.
+- **Limitations:** this is conditional offline readiness, not live integration acceptance. No credentials, keyring, network, Premium/Desktop target, native SDD verifier, or provider action was exercised. No commit or push was performed.

@@ -77,3 +77,28 @@ def test_spotify_oauth_config_rejects_invalid_values_fail_closed() -> None:
     })
     assert values["enabled"] is False
     assert values["client_id"] is None
+
+
+def test_spotify_oauth_config_recovers_client_id_from_keyring(monkeypatch) -> None:
+    client_id = "a" * 32
+
+    class Result:
+        status = type("Status", (), {"value": "ok"})()
+        value = client_id
+
+    class Store:
+        def load(self):
+            return Result()
+
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: Store())
+    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true"})
+    assert values["enabled"] is True
+    assert values["client_id"] == client_id
+
+
+def test_spotify_oauth_config_explicit_environment_value_wins_over_keyring(monkeypatch) -> None:
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: pytest.fail("keyring should not be read"))
+    client_id = "b" * 32
+    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true", "SPOTIFY_CLIENT_ID": client_id})
+    assert values["enabled"] is True
+    assert values["client_id"] == client_id

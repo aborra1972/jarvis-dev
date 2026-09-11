@@ -3,10 +3,14 @@ import hashlib
 
 import pytest
 
+from jarvis import cli
 from jarvis.services.spotify import (
     APPROVED_SPOTIFY_SCOPES,
+    ClientIdStatus,
     CredentialStatus,
+    KeyringClientIdStore,
     KeyringCredentialStore,
+    resolve_spotify_client_id,
     OAuthCallbackCode,
     create_pkce_transaction,
     parse_pkce_callback,
@@ -129,6 +133,135 @@ def test_keyring_disable_keeps_durable_marker_after_token_deletion() -> None:
     assert store.disable().status is CredentialStatus.OK
     assert values == {("jarvis.spotify", "oauth:disabled"): "1"}
     assert KeyringCredentialStore(backend=store._backend).load().status is CredentialStatus.DISABLED
+
+
+def test_client_id_store_is_separate_validated_and_redacted() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class Backend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            values.pop((service, username), None)
+
+    store = KeyringClientIdStore(backend=Backend())
+    client_id = "a" * 32
+    assert store.save(client_id).status is ClientIdStatus.OK
+    loaded = store.load()
+    assert loaded.status is ClientIdStatus.OK
+    assert loaded.value == client_id
+    assert client_id not in repr(loaded)
+    assert values == {("jarvis.spotify.client", "client_id"): client_id}
+    assert store.save("not-a-client-id").status is ClientIdStatus.INVALID
+    assert store.delete().status is ClientIdStatus.OK
+    assert store.load().status is ClientIdStatus.MISSING
+
+
+def test_client_id_store_disable_is_durable_and_storage_failures_are_typed() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class Backend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            values.pop((service, username), None)
+
+    store = KeyringClientIdStore(backend=Backend())
+    assert store.save("b" * 32).status is ClientIdStatus.OK
+    assert store.disable().status is ClientIdStatus.OK
+    assert store.load().status is ClientIdStatus.DISABLED
+    assert store.enable().status is ClientIdStatus.OK
+    assert store.load().status is ClientIdStatus.MISSING
+
+    class Broken:
+        def get_password(self, service, username):
+            raise RuntimeError
+        def set_password(self, service, username, value):
+            raise RuntimeError
+        def delete_password(self, service, username):
+            raise RuntimeError
+
+    broken = KeyringClientIdStore(backend=Broken())
+    assert broken.load().status is ClientIdStatus.STORAGE_UNAVAILABLE
+    assert broken.save("c" * 32).status is ClientIdStatus.STORAGE_UNAVAILABLE
+
+
+def test_client_id_resolver_prefers_valid_explicit_setup_value() -> None:
+    store = KeyringClientIdStore(backend=object())
+    explicit = "d" * 32
+    result = resolve_spotify_client_id(explicit, store=store)
+    assert result.status is ClientIdStatus.OK
+    assert result.value == explicit
+    assert explicit not in repr(result)
+
+
+def test_client_id_resolver_recovers_stored_value_without_explicit_config() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class Backend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+        def delete_password(self, service, username):
+            values.pop((service, username), None)
+
+    store = KeyringClientIdStore(backend=Backend())
+    store.save("e" * 32)
+    result = resolve_spotify_client_id(None, store=store)
+    assert result.status is ClientIdStatus.OK
+    assert result.value == "e" * 32
+
+
+def test_spotify_setup_saves_hidden_client_id_without_secret(monkeypatch, capsys) -> None:
+    values = {}
+
+    class Store:
+        def save(self, value):
+            values["client_id"] = value
+            return type("Result", (), {"status": ClientIdStatus.OK})()
+
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "getpass", type("Getpass", (), {"getpass": lambda *args: "c" * 32}))
+    monkeypatch.setattr(cli, "KeyringClientIdStore", lambda: Store())
+    assert cli.main(["setup", "spotify"]) == 0
+    assert values == {"client_id": "c" * 32}
+    assert "c" * 32 not in capsys.readouterr().out
+
+
+def test_spotify_setup_rejects_invalid_client_id_without_writing(monkeypatch, capsys) -> None:
+    saved = []
+
+    class Store:
+        def save(self, value):
+            saved.append(value)
+            return type("Result", (), {"status": ClientIdStatus.INVALID})()
+
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "getpass", type("Getpass", (), {"getpass": lambda *args: "not-valid"}))
+    monkeypatch.setattr(cli, "KeyringClientIdStore", lambda: Store())
+    assert cli.main(["spotify", "setup"]) == 1
+    assert saved == []
+    assert "not-valid" not in capsys.readouterr().err
+
+
+def test_spotify_setup_noninteractive_fails_without_writing(monkeypatch, capsys) -> None:
+    saved = []
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cli, "KeyringClientIdStore", lambda: type("Store", (), {
+        "save": lambda self, value: saved.append(value),
+    })())
+    assert cli.main(["setup", "spotify"]) == 1
+    assert saved == []
+    assert "interactivo" in capsys.readouterr().err.lower()
 
 
 def test_keyring_failure_is_storage_unavailable_without_fallback() -> None:

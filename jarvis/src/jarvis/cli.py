@@ -10,12 +10,14 @@ repo-root .env.
 from __future__ import annotations
 
 import argparse
+import getpass
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from jarvis.orchestrator import loop
+from jarvis.services.spotify import ClientIdStatus, KeyringClientIdStore, resolve_spotify_client_id
 
 COMMANDS = (
     "start", "stop", "off", "on", "clean", "logs", "say", "diagnose",
@@ -149,12 +151,41 @@ def _handle_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_spotify_setup() -> int:
+    """Read and save a Spotify Client ID without exposing or persisting it."""
+    if not sys.stdin.isatty():
+        print("jarvis spotify setup: requiere modo interactivo.", file=sys.stderr)
+        return 1
+    try:
+        client_id = getpass.getpass("Spotify Client ID (no se muestra): ")
+    except (EOFError, KeyboardInterrupt, OSError) as exc:
+        print(f"jarvis spotify setup: no se pudo leer el Client ID ({exc}).", file=sys.stderr)
+        return 1
+    store = KeyringClientIdStore()
+    validated = resolve_spotify_client_id(client_id.strip(), store=store)
+    if validated.status is ClientIdStatus.INVALID:
+        print("jarvis spotify setup: Client ID inválido.", file=sys.stderr)
+        return 1
+    result = store.save(client_id.strip())
+    if result.status is ClientIdStatus.INVALID:
+        print("jarvis spotify setup: Client ID inválido.", file=sys.stderr)
+        return 1
+    if result.status is not ClientIdStatus.OK:
+        print("jarvis spotify setup: el keyring del sistema no está disponible.", file=sys.stderr)
+        return 1
+    print("Spotify configurado: Client ID guardado únicamente en el keyring del sistema.")
+    return 0
+
+
 def _handle_setup(args: argparse.Namespace) -> int:
-    """``jarvis setup [name]``: wizard to pick the agent/persona.
+    """``jarvis setup [name]``: wizard to pick the agent/persona or Spotify.
 
     Lists the 3 agents; with no name it prompts interactively (number or
     name). Persists JARVIS_AGENT=<name> in the repo-root .env.
     """
+    if args.name is not None and args.name.strip().lower() == "spotify":
+        return _handle_spotify_setup()
+
     from jarvis import config
 
     profiles = config.AGENT_PROFILES
@@ -197,7 +228,12 @@ def _handle_setup(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns a process exit code."""
     parser = build_parser()
-    args = parser.parse_args(argv)
+    # Keep the historical top-level command list stable while accepting the
+    # clearer Spotify setup spelling as an equivalent alias.
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv == ["spotify", "setup"]:
+        effective_argv = ["setup", "spotify"]
+    args = parser.parse_args(effective_argv)
     if args.command is None:
         parser.print_help()
         return 0

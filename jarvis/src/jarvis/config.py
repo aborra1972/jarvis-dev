@@ -191,8 +191,18 @@ _SPOTIFY_OAUTH_SCOPES = frozenset({
 })
 
 
+def _spotify_client_id_store():
+    """Construct the keyring-only Client ID store lazily."""
+    from jarvis.services.spotify import KeyringClientIdStore
+    return KeyringClientIdStore()
+
+
 def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[str, object]:
-    """Load the narrow, disabled-by-default PKCE configuration boundary."""
+    """Load the narrow, disabled-by-default PKCE configuration boundary.
+
+    Explicit environment values remain the CI/setup override. When absent,
+    recover the Client ID from the OS keyring only.
+    """
     env = os.environ if environ is None else environ
     defaults: dict[str, object] = {
         "enabled": False,
@@ -201,7 +211,16 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
         "scopes": _SPOTIFY_OAUTH_SCOPES,
     }
     enabled = env.get("SPOTIFY_API_ENABLED", "false").strip().lower()
-    client_id = env.get("SPOTIFY_CLIENT_ID", "").strip()
+    configured_client_id = env.get("SPOTIFY_CLIENT_ID")
+    client_id = configured_client_id.strip() if configured_client_id is not None else ""
+    if configured_client_id is None:
+        try:
+            from jarvis.services.spotify import resolve_spotify_client_id
+            stored = resolve_spotify_client_id(None, store=_spotify_client_id_store())
+            if getattr(getattr(stored, "status", None), "value", None) == "ok":
+                client_id = stored.value or ""
+        except Exception:
+            client_id = ""
     try:
         ttl = float(env.get("SPOTIFY_OAUTH_TRANSACTION_TTL_S", "300"))
     except (TypeError, ValueError):

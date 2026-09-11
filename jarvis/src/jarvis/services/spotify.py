@@ -149,6 +149,105 @@ class CredentialResult:
     value: str | None = field(default=None, repr=False)
 
 
+class ClientIdStatus(str, Enum):
+    OK = "ok"
+    MISSING = "missing"
+    INVALID = "invalid"
+    DISABLED = "disabled"
+    STORAGE_UNAVAILABLE = "storage_unavailable"
+
+
+@dataclass(frozen=True, repr=False)
+class ClientIdResult:
+    status: ClientIdStatus
+    value: str | None = field(default=None, repr=False)
+
+
+_SPOTIFY_CLIENT_ID = re.compile(r"[A-Za-z0-9]{32}\Z")
+
+
+class KeyringClientIdStore:
+    """Keyring-only store kept separate from OAuth tokens."""
+
+    SERVICE = "jarvis.spotify.client"
+    USERNAME = "client_id"
+
+    def __init__(self, *, backend: Any | None = None) -> None:
+        self._backend = backend if backend is not None else KeyringCredentialStore._default_backend()
+        self._disabled_username = f"{self.USERNAME}:disabled"
+
+    @staticmethod
+    def _valid(value: Any) -> bool:
+        return isinstance(value, str) and _SPOTIFY_CLIENT_ID.fullmatch(value) is not None
+
+    def load(self) -> ClientIdResult:
+        if self._backend is None:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        try:
+            if self._backend.get_password(self.SERVICE, self._disabled_username) == "1":
+                return ClientIdResult(ClientIdStatus.DISABLED)
+            value = self._backend.get_password(self.SERVICE, self.USERNAME)
+        except Exception:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        if value is None:
+            return ClientIdResult(ClientIdStatus.MISSING)
+        return ClientIdResult(ClientIdStatus.OK, value) if self._valid(value) else ClientIdResult(ClientIdStatus.INVALID)
+
+    def save(self, value: str) -> ClientIdResult:
+        if not self._valid(value):
+            return ClientIdResult(ClientIdStatus.INVALID)
+        if self._backend is None:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.set_password(self.SERVICE, self.USERNAME, value)
+            self._backend.delete_password(self.SERVICE, self._disabled_username)
+        except Exception:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        return ClientIdResult(ClientIdStatus.OK)
+
+    def disable(self) -> ClientIdResult:
+        if self._backend is None:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.set_password(self.SERVICE, self._disabled_username, "1")
+            self._backend.delete_password(self.SERVICE, self.USERNAME)
+        except Exception:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        return ClientIdResult(ClientIdStatus.OK)
+
+    def enable(self) -> ClientIdResult:
+        if self._backend is None:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.delete_password(self.SERVICE, self._disabled_username)
+        except Exception:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        return ClientIdResult(ClientIdStatus.OK)
+
+    def delete(self) -> ClientIdResult:
+        if self._backend is None:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        try:
+            self._backend.delete_password(self.SERVICE, self.USERNAME)
+        except Exception:
+            return ClientIdResult(ClientIdStatus.STORAGE_UNAVAILABLE)
+        return ClientIdResult(ClientIdStatus.OK)
+
+
+def resolve_spotify_client_id(
+    configured: str | None = None, *, store: KeyringClientIdStore | None = None,
+) -> ClientIdResult:
+    """Use an explicit setup value, otherwise recover the keyring value."""
+    if configured is not None:
+        return (ClientIdResult(ClientIdStatus.OK, configured)
+                if KeyringClientIdStore._valid(configured)
+                else ClientIdResult(ClientIdStatus.INVALID))
+    return (store or KeyringClientIdStore()).load()
+
+
+SpotifyClientIdStore = KeyringClientIdStore
+
+
 class KeyringCredentialStore:
     """Keyring-only credential boundary; unavailable storage fails closed."""
 

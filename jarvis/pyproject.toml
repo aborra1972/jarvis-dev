@@ -20,6 +20,7 @@ dependencies = [
     "silero-vad",
     "scikit-learn",
     "rapidfuzz",
+    "keyring>=23.0.0",
 ]
 
 [project.optional-dependencies]

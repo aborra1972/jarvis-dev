@@ -264,6 +264,21 @@ def test_spotify_setup_noninteractive_fails_without_writing(monkeypatch, capsys)
     assert "interactivo" in capsys.readouterr().err.lower()
 
 
+def test_missing_keyring_import_is_typed_storage_unavailable(monkeypatch) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def missing_keyring(name, *args, **kwargs):
+        if name == "keyring":
+            raise ModuleNotFoundError("No module named keyring")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_keyring)
+    assert KeyringCredentialStore().load().status is CredentialStatus.STORAGE_UNAVAILABLE
+    assert KeyringClientIdStore().load().status is ClientIdStatus.STORAGE_UNAVAILABLE
+
+
 def test_keyring_failure_is_storage_unavailable_without_fallback() -> None:
     class Broken:
         def get_password(self, service, username):

@@ -235,6 +235,31 @@ def check_spotify_local(*, probe: bool = False) -> DiagResult:
     )
 
 
+def check_spotify_stage2(*, status: object | None = None) -> DiagResult:
+    """Report injected Stage 2 state without probing or exposing credentials."""
+    if not getattr(config, "SPOTIFY_API_ENABLED", False):
+        return DiagResult("Spotify API", False, "integración deshabilitada", status="disabled")
+    if status is None:
+        return DiagResult("Spotify API", False, "estado no consultado", status="not_probed")
+    if isinstance(status, dict):
+        state = status.get("state", status.get("status"))
+    else:
+        state = getattr(status, "state", getattr(status, "status", None))
+    allowed = {"authorized", "expired", "revoked", "disabled", "storage_unavailable", "not_authorized"}
+    if state not in allowed:
+        return DiagResult("Spotify API", False, "estado no disponible", status="unknown")
+    ok = state == "authorized"
+    messages = {
+        "authorized": "autorización disponible",
+        "expired": "autorización vencida; requiere autorización nuevamente",
+        "revoked": "autorización revocada; requiere autorización nuevamente",
+        "disabled": "integración deshabilitada",
+        "storage_unavailable": "almacenamiento protegido no disponible",
+        "not_authorized": "requiere autorización explícita",
+    }
+    return DiagResult("Spotify API", ok, messages[state], status=state)
+
+
 def check_audio_output() -> DiagResult:
     """Check that audio playback is available."""
     player = config.PLAYER_BIN

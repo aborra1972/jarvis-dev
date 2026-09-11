@@ -115,6 +115,29 @@ def test_safe_run_reports_missing_command() -> None:
     assert code != 0
 
 
+def test_stage2_dispatch_maps_catalog_multiple_without_playback() -> None:
+    from jarvis.services.spotify import CatalogCode, CatalogResult
+
+    catalog = type("Catalog", (), {})()
+    catalog.search = lambda *args, **kwargs: CatalogResult(CatalogCode.MULTIPLE, ())
+    dispatch = base.SpotifyStage2Dispatch(catalog=catalog)
+    result = dispatch(_intent("spotify_search", {"kind": "album", "query": "x"}), {"session_id": "s"})
+    assert result.ok is False
+    assert result.spoken == "Elegí una opción: "
+
+
+def test_stage2_dispatch_maps_playback_errors_without_details() -> None:
+    from jarvis.services.spotify import PlaybackCode, PlaybackResult
+
+    playback = type("Playback", (), {})()
+    playback.play_selection = lambda *args, **kwargs: PlaybackResult(PlaybackCode.PREMIUM_REQUIRED)
+    dispatch = base.SpotifyStage2Dispatch(playback=playback)
+    result = dispatch(_intent("spotify_play_selection", {"selection_id": "opaque"}), {"session_id": "s"})
+    assert result.ok is False
+    assert "Premium" in result.spoken
+    assert "opaque" not in result.spoken
+
+
 # --- Threat matrix guards (no arbitrary shell, single power_off_self) -------
 def test_no_shell_or_os_system_in_any_executor() -> None:
     for source in ACTIONS_SOURCES:

@@ -449,3 +449,12 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - Authenticated provider runtime token: `sha256:7ebbf6e9f706c05dfbd9883148db150f11770187b8ebc5225d700de7eb856c00`.
 - Workload boundary: 163 added source lines and 155 added focused-test lines; task/progress evidence is outside the implementation count. No commit or push performed.
 - Structured status consumed: change `jarvis-spotify-control`, repo-local canonical workspace, strict TDD active, allowed edit surfaces exactly as user specified, and provider-authorized bounded work unit `spotify-stage2-playback-policy`. `next_recommended: sdd-verify`.
+
+## Authorized work unit `spotify-stage2-status-error-lifecycle`
+
+- **Status:** completed as a project-local exception. Native SDD apply was blocked by stale intended-untracked metadata for a playback test that is already tracked; the parent explicitly authorized this bounded implementation and evidence update.
+- **Scope:** added injected Stage 2 catalog/playback dispatch with typed safe speech, opt-in normalized Stage 2 diagnostics, OAuth redaction for transcript/history surfaces, and operation-context propagation for catalog/playback handlers. No Spotify provider source, OAuth transport, playback policy, config, dependency, browser, socket, or network behavior was changed.
+- **Files changed:** `jarvis/src/jarvis/actions/base.py`, `jarvis/src/jarvis/orchestrator/loop.py`, `jarvis/src/jarvis/diagnose.py`, `jarvis/src/jarvis/orchestrator/logs.py`, and focused regression tests in the corresponding allowed test surfaces.
+- **TDD evidence:** RED focused tests failed for the absent Stage 2 dispatch, diagnostics, and redaction seams; GREEN focused tests passed after minimal implementation; TRIANGULATE covered typed Premium/clarification mapping and secret removal; REFACTOR retained fail-closed defaults and injected-only behavior.
+- **Safety:** no raw provider output, tokens, authorization codes, state, verifier, URI, device ID, or arbitrary command data is spoken or persisted. Cancellation remains checked before late speech/history and operation context reaches injected Stage 2 handlers.
+- **Verification:** focused slice `93 passed`; full suite, compileall, and diff check are recorded in the handoff. No commit or push performed.

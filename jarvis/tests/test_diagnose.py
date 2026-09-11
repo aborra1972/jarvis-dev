@@ -192,6 +192,20 @@ class TestSpotifyDiagnostics:
         mock_run.assert_not_called()
 
 
+class TestStage2Diagnostics:
+    def test_stage2_disabled_is_safe(self, monkeypatch):
+        monkeypatch.setattr(diagnose.config, "SPOTIFY_API_ENABLED", False, raising=False)
+        result = diagnose.check_spotify_stage2()
+        assert result.status == "disabled"
+        assert result.ok is False
+
+    def test_stage2_status_exposes_only_normalized_state(self, monkeypatch):
+        monkeypatch.setattr(diagnose.config, "SPOTIFY_API_ENABLED", True, raising=False)
+        result = diagnose.check_spotify_stage2(status={"state": "authorized", "access_token": "secret"})
+        assert result.status == "authorized"
+        assert "secret" not in str(result)
+
+
 class TestRunAll:
     """Tests for run_all() integration."""
 

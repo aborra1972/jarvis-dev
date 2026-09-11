@@ -10,7 +10,28 @@ logs: ``clean_logs`` never touches anything outside the logs directory.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+
+_SECRET_KEYS = {"access_token", "refresh_token", "authorization_code", "code", "state", "verifier", "client_secret"}
+_SECRET_PARAM = re.compile(r"(?i)(access_token|refresh_token|authorization_code|code|state|verifier|client_secret)=([^&\s]+)")
+
+
+def redact_text(value: str) -> str:
+    """Remove OAuth material while retaining safe diagnostic context."""
+    return _SECRET_PARAM.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+
+
+def redact_entities(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: ("[REDACTED]" if str(key).casefold() in _SECRET_KEYS else redact_entities(item))
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_entities(item) for item in value]
+    if isinstance(value, str):
+        return redact_text(value)
+    return value
 
 
 class TranscriptLog:
@@ -30,10 +51,10 @@ class TranscriptLog:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
-            "transcript": transcript,
+            "transcript": redact_text(transcript),
             "intent": intent,
             "outcome": outcome,
-            "entities": entities,
+            "entities": redact_entities(entities),
         }
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")

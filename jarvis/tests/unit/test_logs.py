@@ -64,6 +64,21 @@ def test_transcript_log_appends_jsonl_records(tmp_path: Path) -> None:
     assert '"shutdown"' in lines[1]
 
 
+def test_transcript_log_redacts_auth_material(tmp_path: Path) -> None:
+    path = tmp_path / "transcripts.jsonl"
+    TranscriptLog(path).record(
+        "authorize code=secret-code&state=secret-state",
+        intent="spotify_auth",
+        entities={"access_token": "token-value", "query": "safe"},
+    )
+    text = path.read_text()
+    assert "secret-code" not in text
+    assert "secret-state" not in text
+    assert "token-value" not in text
+    assert "[REDACTED]" in text
+    assert '"query": "safe"' in text
+
+
 def test_transcript_log_skips_empty_transcripts(tmp_path: Path) -> None:
     path = tmp_path / "transcripts.jsonl"
     log = TranscriptLog(path)

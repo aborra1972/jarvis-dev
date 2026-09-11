@@ -45,7 +45,7 @@ from jarvis.orchestrator.contracts import (
     ActionResult, CaptureError, OperationContext, OperationToken,
 )
 from jarvis.audio.contracts import CaptureMode
-from jarvis.orchestrator.logs import TranscriptLog, clean_logs
+from jarvis.orchestrator.logs import TranscriptLog, clean_logs, redact_text
 from jarvis.orchestrator.name_gate import strip_agent_prefix
 from jarvis.orchestrator.session import GitRunner, Session, load_state
 from jarvis.orchestrator.state import Event, State
@@ -511,10 +511,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.SPEAKING, context
         step = pipeline.session.next_step(interpretation)
         if pipeline.transcript_log is not None and not (
-            interpretation.intent and interpretation.intent.intent in {"spotify_play", "spotify_pause"}
+            interpretation.intent and interpretation.intent.intent in {"spotify_play", "spotify_pause", "spotify_search", "spotify_play_selection"}
         ):
             pipeline.transcript_log.record(
-                transcript,
+                redact_text(transcript),
                 intent=interpretation.intent.intent if interpretation.intent else None,
                 outcome=step,
                 entities=interpretation.intent.entities if interpretation.intent else None,
@@ -653,13 +653,13 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         history_response = result.spoken or (
             streamed_response if isinstance(streamed_response, str) else ""
         )
-        if pipeline.transcript_log is not None and intent.intent in {"spotify_play", "spotify_pause"}:
+        if pipeline.transcript_log is not None and intent.intent in {"spotify_play", "spotify_pause", "spotify_search", "spotify_play_selection"}:
             pipeline.transcript_log.record(
-                context.transcript, intent=intent.intent, outcome="execute", entities=intent.entities
+                redact_text(context.transcript), intent=intent.intent, outcome="execute", entities=intent.entities
             )
         pipeline.session.record_turn(
-            context.transcript,
-            history_response,
+            redact_text(context.transcript),
+            redact_text(history_response),
             intent=intent.intent,
             ok=result.ok,
         )
@@ -714,8 +714,11 @@ def _bind_spotify_context(executor: object, context: _Context) -> None:
     setter = getattr(executor, "set_operation_context", None)
     if callable(setter):
         setter(operation_context)
-    for intent in ("spotify_play", "spotify_pause"):
+    for intent in ("spotify_play", "spotify_pause", "spotify_search", "spotify_play_selection"):
         handler = getattr(executor, "_handlers", {}).get(intent)
+        handler_setter = getattr(handler, "set_operation_context", None)
+        if callable(handler_setter):
+            handler_setter(operation_context)
         service = getattr(handler, "__self__", None)
         adapter = getattr(service, "_adapter", None)
         if adapter is not None and hasattr(adapter, "_operation"):

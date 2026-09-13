@@ -424,6 +424,47 @@ def test_no_wake(tmp_path: Path) -> None:
     assert run(pipeline, iterations=1) == "no_wake"
 
 
+def test_ptt_activation_starts_capture_without_wake_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: None)
+    loop_module._ptt_pending = True
+    pipeline = _pipeline(
+        wake=[False],
+        transcripts=["abrí firefox"],
+        interpreter_script=[_interp(_intent())],
+        tmp_path=tmp_path,
+    )
+
+    outcome = run(pipeline, iterations=4)
+
+    assert outcome == "executed"
+    assert len(pipeline.wake.results) == 1
+    assert [c.intent for c in pipeline.executor.calls] == ["open_app"]
+
+
+def test_ptt_is_ignored_while_switched_off(tmp_path: Path) -> None:
+    loop_module._ptt_pending = True
+    pipeline = _pipeline(
+        wake=[True], transcripts=["abrí firefox"], interpreter_script=[_interp(_intent())],
+        switch_state=lambda: True, tmp_path=tmp_path,
+    )
+
+    assert run(pipeline, iterations=2) == "off"
+    assert loop_module._ptt_pending is False
+    assert len(pipeline.wake.results) == 1
+    assert pipeline.executor.calls == []
+
+
+def test_ptt_while_active_is_ignored_without_replacing_epoch(tmp_path: Path) -> None:
+    pipeline = _pipeline(wake=[], transcripts=[], interpreter_script=[], tmp_path=tmp_path)
+    context = _Context(active_epoch=3, operation=OperationToken.next())
+    loop_module._ptt_pending = True
+
+    state, context = _tick(State.IDLE, pipeline, context)
+
+    assert state is State.LISTENING
+    assert context.active_epoch == 3
+
+
 class FakeTranscriptLog:
     def __init__(self) -> None:
         self.records: list[tuple[str, str | None, str]] = []

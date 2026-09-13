@@ -99,3 +99,16 @@ def test_setup_cancel_keeps_env_untouched(
     assert "GEMINI_API_KEY=abc" in env_path.read_text()
     assert "JARVIS_AGENT" not in env_path.read_text()
     assert "cancelado" in capsys.readouterr().out
+
+
+def test_ptt_requests_cli_voice_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_request_voice_turn(source: str = "cli_ptt") -> int:
+        calls.append(source)
+        return 0
+
+    monkeypatch.setattr(cli.loop, "request_voice_turn", fake_request_voice_turn)
+
+    assert cli.main(["ptt"]) == 0
+    assert calls == ["cli_ptt"]

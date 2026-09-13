@@ -18,6 +18,9 @@ def gui_module(monkeypatch):
     repository = ModuleType("gi.repository")
     for name in ("Gdk", "GLib", "Gtk", "Pango"):
         setattr(repository, name, SimpleNamespace())
+    repository.Gdk.ModifierType = SimpleNamespace(MOD1_MASK=1)
+    repository.Gdk.KEY_space = 32
+    repository.Gdk.keyval_name = lambda keyval: chr(keyval) if keyval != 32 else "space"
     monkeypatch.setitem(sys.modules, "gi", gi)
     monkeypatch.setitem(sys.modules, "gi.repository", repository)
 
@@ -74,6 +77,49 @@ def test_power_on_signals_existing_off_process(gui_module, monkeypatch):
 
     assert sent == [signal.SIGUSR2]
     assert app._is_on is True
+
+
+def test_talk_button_sends_ptt_without_toggling_power(gui_module, monkeypatch):
+    sent = []
+    state_updates = []
+    monkeypatch.setattr(gui_module, "_is_running", lambda: True)
+    monkeypatch.setattr(gui_module, "_send_signal", lambda sig: sent.append(sig) or True)
+    monkeypatch.setattr(gui_module, "_update_state", lambda **changes: state_updates.append(changes))
+    app = object.__new__(gui_module.JarvisGUI)
+    app._is_on = True
+    app._log = lambda *_: None
+
+    app._on_talk_clicked(None)
+
+    assert sent == [gui_module.PTT_SIGNAL]
+    assert state_updates == [{"manual_voice_turn_source": "gui_ptt"}]
+    assert app._is_on is True
+
+
+def test_alt_m_and_alt_space_route_to_power_and_ptt(gui_module, monkeypatch):
+    calls = []
+    app = object.__new__(gui_module.JarvisGUI)
+    app._on_power_clicked = lambda _button: calls.append("mute")
+    app._on_talk_clicked = lambda _button: calls.append("ptt")
+
+    event_m = SimpleNamespace(state=gui_module.Gdk.ModifierType.MOD1_MASK, keyval=ord("m"))
+    event_space = SimpleNamespace(state=gui_module.Gdk.ModifierType.MOD1_MASK, keyval=gui_module.Gdk.KEY_space)
+
+    assert app._on_key_press(None, event_m) is True
+    assert app._on_key_press(None, event_space) is True
+    assert calls == ["mute", "ptt"]
+
+
+def test_global_hotkeys_fall_back_when_xlib_unavailable(gui_module, monkeypatch):
+    logs = []
+    app = object.__new__(gui_module.JarvisGUI)
+    app._log = lambda msg: logs.append(msg)
+    app._window = SimpleNamespace(connect=lambda *args: logs.append(args[0]))
+    monkeypatch.setitem(sys.modules, "Xlib", None)
+
+    assert app._setup_hotkeys() is False
+    assert "key-press-event" in logs
+    assert any("atajos globales" in msg for msg in logs)
 
 
 def test_launch_attaches_to_existing_process_without_restart(gui_module, monkeypatch):

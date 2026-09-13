@@ -10,6 +10,7 @@ adapters in without rework; tests drive fakes.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -149,6 +150,7 @@ class _Context:
     operation: OperationToken | None = None
     authorization: Authorization | None = None
     voice_metrics: VoiceTurnMetrics | None = None
+    activation_source: str = "wake"
 
 
 def run(pipeline: Pipeline, *, iterations: int | None = None) -> str:
@@ -201,7 +203,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     global _active_operation
     _active_operation = context.operation
     _sync_wake_threshold(pipeline.wake)
-    # Process any pending SIGUSR1/SIGUSR2 before checking state.
+    # Process any pending runtime controls before checking state.
     # This runs in the main loop (not a signal handler) so I/O is safe.
     _apply_switch(
         pipeline.session, pipeline.switch_state, pipeline.speaker,
@@ -209,6 +211,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         authorization=context.authorization,
     )
     if _is_switched_off(pipeline):
+        _clear_ptt_pending()
         if context.active_epoch is not None:
             logger.info("off_precedence")
         context.active_epoch = None
@@ -219,8 +222,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
     if state is State.IDLE:
         playback_just_finished = False
         if _is_switched_off(pipeline):
+            _clear_ptt_pending()
             context.outcome = "switched_off"
             return State.OFF, context
+        ptt_state = _consume_ptt_request(pipeline, context)
+        if ptt_state is not None:
+            return ptt_state
         playing = _speaker_is_playing(pipeline.speaker)
         if playing:
             if (
@@ -400,6 +407,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             return State.OFF if _is_switched_off(pipeline) else State.IDLE, context
         try:
             context.voice_metrics = VoiceTurnMetrics()
+            setattr(context.voice_metrics, "activation_source", context.activation_source)
             transcript = _capture(
                 pipeline.capture, context.operation, clock=pipeline.clock.now,
                 metrics=context.voice_metrics,
@@ -1325,7 +1333,10 @@ def clean() -> int:
 # happens in _apply_switch() which runs in the main loop. This prevents
 # corrupted state.json from interrupted writes and avoids hardware races.
 
+PTT_SIGNAL = getattr(signal, "SIGRTMIN", signal.SIGURG)
+
 _switch_pending: bool | None = None  # SIGUSR1→True (off), SIGUSR2→False (on)
+_ptt_pending: bool = False  # dedicated push-to-talk control; never means power on
 _active_operation: OperationToken | None = None
 
 
@@ -1344,8 +1355,80 @@ def _register_switch_signals(session: Session, switch_state, speaker=None) -> No
             _active_operation.cancel("switch_off")
         _switch_pending = off
 
+    def _ptt(*_) -> None:
+        global _ptt_pending
+        _ptt_pending = True
+
     signal.signal(signal.SIGUSR1, lambda *_: _flip(True))
     signal.signal(signal.SIGUSR2, lambda *_: _flip(False))
+    signal.signal(PTT_SIGNAL, _ptt)
+
+
+def _clear_ptt_pending() -> None:
+    global _ptt_pending
+    _ptt_pending = False
+
+
+def _update_runtime_control_state(**changes) -> None:
+    path = config.STATE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            payload = json.loads(path.read_text())
+            if not isinstance(payload, dict):
+                payload = {}
+        except (FileNotFoundError, OSError, ValueError):
+            payload = {}
+        payload.update(changes)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _read_ptt_source(default: str = "cli_ptt") -> str:
+    try:
+        payload = json.loads(config.STATE_FILE.read_text())
+        value = payload.get("manual_voice_turn_source", default)
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return default
+    return value if value in {"gui_ptt", "cli_ptt"} else default
+
+
+def _consume_ptt_request(pipeline: Pipeline, context: _Context) -> tuple[State, _Context] | None:
+    global _ptt_pending
+    if not _ptt_pending:
+        return None
+    _ptt_pending = False
+    if _is_switched_off(pipeline):
+        context.outcome = "ptt_ignored_off"
+        return State.OFF, context
+    if context.active_epoch is not None or _speaker_is_playing(pipeline.speaker):
+        context.outcome = "ptt_ignored_busy"
+        return None
+    pipeline.session.reask_attempts = 0
+    context.outcome = "ptt"
+    context.wake_gated = False
+    context.activation_source = _read_ptt_source()
+    _activate_epoch(pipeline, context)
+    try:
+        pipeline.speaker.playback.play_beep()
+    except Exception:
+        pass
+    time.sleep(0.2)
+    readiness = _prepare_capture(pipeline, context, mode=CaptureMode.ORDINARY)
+    if not readiness.ready:
+        return State.IDLE, context
+    _write_fsm_state("listening")
+    return State.LISTENING, context
+
+
+def request_voice_turn(source: str = "cli_ptt") -> int:
+    """Ask the running loop for one manual voice turn without changing off/on state."""
+    source = source if source in {"gui_ptt", "cli_ptt"} else "cli_ptt"
+    _update_runtime_control_state(manual_voice_turn_source=source)
+    _signal_running(PTT_SIGNAL)
+    print("jarvis ptt: turno manual solicitado", file=sys.stderr)
+    return 0
 
 
 def _apply_switch(session: Session, switch_state=None, speaker=None, *, operation=None, authorization=None) -> None:

@@ -20,7 +20,7 @@ from jarvis.orchestrator import loop
 from jarvis.services.spotify import ClientIdStatus, KeyringClientIdStore, resolve_spotify_client_id
 
 COMMANDS = (
-    "start", "stop", "off", "on", "clean", "logs", "say", "diagnose",
+    "start", "stop", "off", "on", "clean", "logs", "say", "ptt", "diagnose",
     "agent", "setup",
 )
 
@@ -245,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         return loop.switch_off()
     if args.command == "on":
         return loop.switch_on()
+    if args.command == "ptt":
+        return loop.request_voice_turn("cli_ptt")
     if args.command == "clean":
         return loop.clean()
     if args.command == "agent":

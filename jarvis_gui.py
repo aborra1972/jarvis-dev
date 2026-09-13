@@ -39,6 +39,7 @@ FSM_STATE_FILE = Path.home() / ".local" / "state" / "jarvis" / "fsm_state"
 STATE_FILE = Path.home() / ".local" / "share" / "jarvis" / "state.json"
 DOCS_FILE = JARVIS_ROOT / "jarvis" / "docs" / "comandos_jarvis.md"
 CONTROL_LOG = Path.home() / ".local" / "state" / "jarvis" / "logs" / "control.log"
+PTT_SIGNAL = getattr(signal, "SIGRTMIN", signal.SIGURG)
 
 # FSM state → GUI label mapping
 _FSM_LABELS = {
@@ -460,6 +461,7 @@ class JarvisGUI:
         self._window.set_keep_above(True)
         self._window.set_position(Gtk.WindowPosition.CENTER)
         self._window.connect("destroy", self._on_destroy)
+        self._window.connect("key-press-event", self._on_key_press)
 
         # Main container
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -516,6 +518,13 @@ class JarvisGUI:
         self._power_btn.set_margin_end(20)
         self._power_btn.connect("clicked", self._on_power_clicked)
         main_box.pack_start(self._power_btn, False, False, 8)
+
+        self._talk_btn = Gtk.Button(label="🎙 HABLAR")
+        self._talk_btn.get_style_context().add_class("btn-secondary")
+        self._talk_btn.set_margin_start(20)
+        self._talk_btn.set_margin_end(20)
+        self._talk_btn.connect("clicked", self._on_talk_clicked)
+        main_box.pack_start(self._talk_btn, False, False, 0)
 
         # --- Sensitivity Slider ---
         slider_frame = Gtk.Frame()
@@ -694,6 +703,8 @@ class JarvisGUI:
         scroll.add(self._log_view)
         log_box.pack_start(scroll, True, True, 0)
 
+        self._setup_hotkeys()
+
     def _apply_css(self) -> None:
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(CSS)
@@ -727,6 +738,74 @@ class JarvisGUI:
             self._user_off = False
             self._log(f"{_assistant_name()} reactivado")
         self._update_ui()
+
+    def _on_talk_clicked(self, button) -> None:
+        if not _is_running():
+            self._log(f"{_assistant_name()} no está corriendo; no puedo iniciar HABLAR")
+            return
+        try:
+            _update_state(manual_voice_turn_source="gui_ptt")
+        except Exception as e:
+            self._log(f"Error HABLAR: {e}")
+            return
+        if _send_signal(PTT_SIGNAL):
+            self._log("HABLAR: turno manual solicitado")
+        else:
+            self._log("HABLAR: proceso no disponible")
+
+    def _on_key_press(self, widget, event) -> bool:
+        if not (event.state & Gdk.ModifierType.MOD1_MASK):
+            return False
+        key_name = (Gdk.keyval_name(event.keyval) or "").lower()
+        if key_name == "space" or event.keyval == getattr(Gdk, "KEY_space", 32):
+            self._on_talk_clicked(None)
+            return True
+        if key_name == "m" or event.keyval in (ord("m"), ord("M")):
+            self._on_power_clicked(None)
+            return True
+        return False
+
+    def _setup_hotkeys(self) -> bool:
+        session = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session == "wayland":
+            self._window.connect("key-press-event", self._on_key_press)
+            self._log("atajos globales no disponibles en Wayland; usando atajos con foco (Alt+Space/Alt+M)")
+            return False
+        try:
+            from Xlib import X, XK, display  # type: ignore  # optional python-xlib
+            dpy = display.Display()
+            root = dpy.screen().root
+            keys = {
+                dpy.keysym_to_keycode(XK.string_to_keysym("space")): "ptt",
+                dpy.keysym_to_keycode(XK.string_to_keysym("m")): "mute",
+            }
+            for keycode in keys:
+                if keycode:
+                    root.grab_key(keycode, X.Mod1Mask, True, X.GrabModeAsync, X.GrabModeAsync)
+            dpy.sync()
+        except Exception as exc:
+            self._window.connect("key-press-event", self._on_key_press)
+            self._log(f"atajos globales no disponibles ({exc}); usando atajos con foco (Alt+Space/Alt+M)")
+            return False
+
+        def _listen() -> None:
+            while not self._is_closed():
+                try:
+                    event = dpy.next_event()
+                    if event.type != X.KeyPress:
+                        continue
+                    action = keys.get(event.detail)
+                except Exception:
+                    return
+                if action == "ptt":
+                    self._add_idle(self._on_talk_clicked, None)
+                elif action == "mute":
+                    self._add_idle(self._on_power_clicked, None)
+
+        threading.Thread(target=_listen, daemon=True).start()
+        self._hotkey_display = dpy
+        self._log("atajos globales X11 activos; Alt+Space puede depender del gestor de ventanas")
+        return True
 
     def _reset_switch_state(self) -> None:
         """Reset switched_off to false so MicSwitch opens the mic."""
@@ -1126,6 +1205,12 @@ class JarvisGUI:
     def _on_destroy(self, widget) -> None:
         """Cancel GUI callbacks and kill jarvis subprocess tree before closing."""
         self._closed = True
+        hotkey_display = getattr(self, "_hotkey_display", None)
+        if hotkey_display is not None:
+            try:
+                hotkey_display.close()
+            except Exception:
+                pass
         self._cancel_glib_sources()
         self._stop_jarvis()
         Gtk.main_quit()

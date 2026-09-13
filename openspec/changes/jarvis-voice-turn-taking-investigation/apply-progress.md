@@ -61,9 +61,25 @@ Slice 3 writer-added source/test delta: `jarvis/src/jarvis/orchestrator/loop.py`
 - Expanded the standard Whisper prompt phrase data with exact lifecycle/weather follow-up forms: `hasta luego`, `terminamos`, `mañana`, `y mañana`, and common climate/weather variants.
 - Added focused regressions in loop/interpreter/STT prompt tests before implementation; source changes stayed limited to loop/interpreter plus phrase data.
 
+## Desktop manual voice-turn slice
+
+- Added a dedicated push-to-talk runtime signal (`PTT_SIGNAL`) separate from SIGUSR1/SIGUSR2 so manual turns never mean power-on.
+- Signal handlers still only set in-memory flags; the main loop applies switch/PTT state, mic readiness, beeps, and session I/O on normal ticks.
+- PTT is ignored while off/muted, and busy/active requests are consumed without replacing active epochs or creating stale execution.
+- GUI `HABLAR`, focused Alt+Space, and CLI `jarvis ptt` request one manual ordinary capture; GUI Alt+M reuses the existing off/on toggle semantics.
+- Optional global X11 hotkey setup is best-effort only; Wayland or missing `python-xlib` logs the limitation and keeps focused GTK shortcuts.
+- Activation source is attached at the loop metrics seam (`gui_ptt`/`cli_ptt`) when possible, but publishing it in the JSON snapshot would require editing the audio metrics model outside this slice; keep that as follow-up rather than inventing parallel telemetry.
+
+## CLI PTT fallback correction
+
+- Added the missing top-level `jarvis ptt` command, wired to the existing `loop.request_voice_turn("cli_ptt")` path without changing off/on switch semantics.
+- Added focused CLI regression coverage proving the command requests the `cli_ptt` source, and updated the CLI parser smoke test command registry.
+- Validation: focused CLI/loop suite `67 passed`; full `jarvis/.venv/bin/pytest` suite `1196 passed, 3 deselected`; `jarvis/.venv/bin/python -m compileall jarvis/src/jarvis` passed; `git diff --check` passed.
+
 ## Remaining tasks
 
 - Final native review/PR preparation remains with the parent orchestrator.
+- Publish activation source in the formal voice-turn metrics snapshot once the audio metrics schema is in scope.
 - No commits or pushes were made.
 
 ## Key Learnings

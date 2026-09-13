@@ -63,7 +63,7 @@ SKELETON_MODULES = (
 # removed too.
 
 CLI_COMMANDS = (
-    "start", "stop", "off", "on", "clean", "logs", "say", "diagnose",
+    "start", "stop", "off", "on", "clean", "logs", "say", "ptt", "diagnose",
     "agent", "setup",
 )
 # Wired in PR3 (start/off/on), task 6.3 (clean) or the agent selector

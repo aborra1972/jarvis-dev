@@ -90,6 +90,22 @@ def test_signal_handler_only_sets_flag(tmp_path) -> None:
     assert (tmp_path / "state.json").exists()
 
 
+def test_ptt_signal_handler_only_sets_dedicated_flag(tmp_path) -> None:
+    session = Session(state_path=str(tmp_path / "state.json"))
+    switch = _SwitchRecorder()
+
+    loop._register_switch_signals(session, switch)
+    try:
+        os.kill(os.getpid(), loop.PTT_SIGNAL)
+    finally:
+        signal.signal(loop.PTT_SIGNAL, signal.SIG_DFL)
+
+    assert loop._ptt_pending is True
+    assert loop._switch_pending is None
+    assert session.switched_off is False
+    assert not (tmp_path / "state.json").exists()
+
+
 def test_apply_switch_cancels_operation_before_releasing_mic(tmp_path) -> None:
     session = Session(state_path=str(tmp_path / "state.json"))
     switch = _SwitchRecorder()

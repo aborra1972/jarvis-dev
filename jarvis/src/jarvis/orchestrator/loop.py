@@ -39,7 +39,7 @@ from jarvis.interpreter import Interpretation, resolve_intent
 from jarvis.interpreter.dictation import DictationManager
 from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.orchestrator.confirm import (
-    CONFIRM_TIMEOUT_S, Authorization, Confirmation, confirm,
+    CONFIRM_TIMEOUT_S, Authorization, Confirmation, confirm, confirmation_prompt,
 )
 from jarvis.orchestrator.contracts import (
     ActionResult, CaptureError, OperationContext, OperationToken,
@@ -96,6 +96,13 @@ def _spoken_toward(default_message: str) -> str:
     if address == "señor":
         return default_message
     return default_message.replace("señor", address)
+
+
+@dataclass(frozen=True)
+class ReadinessResult:
+    ready: bool
+    reason: str = ""
+    completed_at: float | None = None
 
 
 @dataclass
@@ -242,8 +249,9 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                     interrupt = getattr(pipeline.speaker, "interrupt", None)
                     if callable(interrupt):
                         interrupt()
-                    if hasattr(pipeline.wake, 'flush'):
-                        pipeline.wake.flush()
+                    if context.operation is not None:
+                        context.operation.cancel("barge_in")
+                    context.operation = OperationToken.next()
                     context.was_playing = False
                     context.last_spoke_at = 0.0
                     context.outcome = "barge_in"
@@ -252,10 +260,11 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                     except Exception:
                         pass  # best effort — don't block on beep failure
                     time.sleep(0.2)
-                    if hasattr(pipeline.wake, 'flush'):
-                        pipeline.wake.flush()
-                    if hasattr(pipeline.wake, 'capturer'):
-                        pipeline.wake.capturer.start()
+                    readiness = _prepare_capture(
+                        pipeline, context, mode=CaptureMode.ORDINARY
+                    )
+                    if not readiness.ready:
+                        return State.IDLE, context
                     pipeline.session.reask_attempts = 0
                     _write_fsm_state("listening")
                     context.wake_gated = False  # barge-in is legacy-only now
@@ -285,27 +294,25 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             if remaining > 0:
                 time.sleep(remaining)
             context.last_spoke_at = 0.0
-            # Flush wake detector buffer — discard any TTS audio captured
-            # before the mic was restarted.
-            if hasattr(pipeline.wake, 'flush'):
-                pipeline.wake.flush()
-            # T-FLUSH-01: drain the stale mic buffer (Jarvis's own reply
-            # audio) too, so it can't trigger a false wake word on the very
-            # next cycle. Only after TTS (the mic was open replaying audio).
-            if hasattr(pipeline.wake, 'capturer') and hasattr(
-                pipeline.wake.capturer, 'flush'
-            ):
-                pipeline.wake.capturer.flush(ms=config.AUDIO_FLUSH_MS)
-            # Restart mic after cooldown
-            if hasattr(pipeline.wake, 'capturer'):
-                pipeline.wake.capturer.start()
+            # Active conversation capture now enters through _prepare_capture;
+            # standby wake scanning still needs the mic opened here.
+            if context.active_epoch is None:
+                if hasattr(pipeline.wake, 'flush'):
+                    pipeline.wake.flush()
+                if hasattr(pipeline.wake, 'capturer') and hasattr(
+                    pipeline.wake.capturer, 'flush'
+                ):
+                    pipeline.wake.capturer.flush(ms=config.AUDIO_FLUSH_MS)
+                if hasattr(pipeline.wake, 'capturer'):
+                    pipeline.wake.capturer.start()
         # Conversation mode: right after a successfully-executed command,
         # skip the wake word for a short follow-up window instead of making
         # the person say "jarvis" again for every single exchange. Expires
         # on its own (config.CONVERSATION_WINDOW_S) so Jarvis doesn't keep
         # listening indefinitely after the conversation is actually over.
         if context.active_epoch is not None:
-            if not _prepare_ordinary_capture(pipeline, context):
+            readiness = _prepare_capture(pipeline, context, mode=CaptureMode.ORDINARY)
+            if not readiness.ready:
                 return State.IDLE, context
             logger.info("turn.waiting epoch=%s", context.active_epoch)
             _write_fsm_state("listening")
@@ -317,13 +324,15 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         ):
             context.conversation_until = 0.0
             pipeline.session.reask_attempts = 0
+            _activate_epoch(pipeline, context)
             try:
                 pipeline.speaker.playback.play_beep()
             except Exception:
                 pass  # best effort — don't block on beep failure
             time.sleep(0.2)
-            if hasattr(pipeline.wake, 'flush'):
-                pipeline.wake.flush()
+            readiness = _prepare_capture(pipeline, context, mode=CaptureMode.ORDINARY)
+            if not readiness.ready:
+                return State.IDLE, context
             context.outcome = "conversation_continue"
             _write_fsm_state("listening")
             context.wake_gated = False  # follow-up window: no name gate
@@ -371,13 +380,12 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             pipeline.speaker.playback.play_beep()
         except Exception:
             pass  # best effort — don't block on beep failure
-        # Wait for beep to fully play and speakers to settle
+        # Wait for beep to fully play and speakers to settle, then enter through
+        # the same capture-readiness barrier used by follow-ups and reasks.
         time.sleep(0.2)
-        # Flush wake detector buffer and restart mic for command capture
-        if hasattr(pipeline.wake, 'flush'):
-            pipeline.wake.flush()
-        if hasattr(pipeline.wake, 'capturer'):
-            pipeline.wake.capturer.start()
+        readiness = _prepare_capture(pipeline, context, mode=CaptureMode.ORDINARY)
+        if not readiness.ready:
+            return State.IDLE, context
         _write_fsm_state("listening")
         return State.LISTENING, context
 
@@ -488,6 +496,10 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             config.LLM_PROVIDER,
         )
 
+        if not _operation_is_current(pipeline, context, context.active_epoch):
+            context.outcome = "cancelled"
+            return State.OFF if _is_switched_off(pipeline) else State.IDLE, context
+
         # --- FALLBACK NOTIFICATION ---
         # Check if LLM provider fell back (e.g. Gemini quota → Ollama)
         if pipeline.llm_provider is not None:
@@ -535,7 +547,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
             pipeline.speaker.speak(f"{base_msg} ¿Quisiste {hint}?" if hint else base_msg)
             context.outcome = "reask"
             context.wake_gated = False  # reask retry: no name gate
-            return State.LISTENING, context
+            return State.SPEAKING, context
         if step == "reveal":
             pipeline.speaker.speak(_spoken_toward(REVEAL_PREFIX) + transcript)
             context.outcome = "revealed"
@@ -562,6 +574,21 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
         if context.operation.cancelled() or _is_switched_off(pipeline):
             context.outcome = "cancelled"
             return State.OFF if _is_switched_off(pipeline) else State.SPEAKING, context
+        if context.authorization is None:
+            auth = Authorization.create(intent.intent, context.operation)
+            readiness = _prepare_capture(
+                pipeline, context,
+                mode=CaptureMode.CONFIRMATION,
+                prompt=confirmation_prompt(intent),
+                require_prompt_completion=True,
+            )
+            if not readiness.ready or readiness.completed_at is None:
+                auth.invalidate(readiness.reason or "readiness_failed")
+                context.authorization = auth
+                context.outcome = "aborted"
+                return State.SPEAKING, context
+            auth.verify_prompt_completion(readiness.completed_at)
+            context.authorization = auth
         try:
             verdict = confirm(
                 intent,
@@ -753,12 +780,39 @@ def _close_goodbye(pipeline: Pipeline, context: _Context) -> None:
     pipeline.speaker.speak(_spoken_toward(GOODBYE_SPOKEN))
 
 
-def _prepare_ordinary_capture(pipeline: Pipeline, context: _Context) -> bool:
-    """Establish the playback-to-microphone readiness barrier."""
+def _prepare_capture(
+    pipeline: Pipeline,
+    context: _Context,
+    *,
+    mode: CaptureMode,
+    prompt: str | None = None,
+    require_prompt_completion: bool = False,
+) -> ReadinessResult:
+    """One fail-closed playback-to-microphone readiness barrier."""
     if context.active_epoch is None or _is_switched_off(pipeline):
-        return False
+        return ReadinessResult(False, "inactive")
+    if context.operation is not None and context.operation.cancelled():
+        return ReadinessResult(False, "cancelled")
+    if prompt is not None:
+        speak_and_wait = getattr(pipeline.speaker, "speak_and_wait", None)
+        if not callable(speak_and_wait):
+            pipeline.speaker.speak(prompt)
+            return ReadinessResult(False, "prompt_completion_unverified")
+        completion = speak_and_wait(prompt)
+        if not bool(getattr(completion, "completed", completion)):
+            return ReadinessResult(False, "prompt_completion_unverified")
+    elif require_prompt_completion:
+        return ReadinessResult(False, "prompt_completion_unverified")
+
     if _speaker_is_playing(pipeline.speaker):
-        return False
+        return ReadinessResult(False, "speaker_playing")
+
+    if context.last_spoke_at:
+        remaining = TTS_COOLDOWN_S - (time.monotonic() - context.last_spoke_at)
+        if remaining > 0:
+            time.sleep(remaining)
+        context.last_spoke_at = 0.0
+
     flush = getattr(pipeline.wake, "flush", None)
     if callable(flush):
         flush()
@@ -770,12 +824,21 @@ def _prepare_ordinary_capture(pipeline: Pipeline, context: _Context) -> bool:
         start = getattr(capturer, "start", None)
         if callable(start):
             start()
-    if _is_switched_off(pipeline):
-        logger.info("barrier.failed epoch=%s", context.active_epoch)
-        context.active_epoch = None
-        return False
-    logger.info("barrier.ready epoch=%s", context.active_epoch)
-    return True
+    if _is_switched_off(pipeline) or (
+        context.operation is not None and context.operation.cancelled()
+    ):
+        logger.info("barrier.failed epoch=%s mode=%s", context.active_epoch, mode.value)
+        if _is_switched_off(pipeline):
+            context.active_epoch = None
+        return ReadinessResult(False, "cancelled")
+    completed_at = pipeline.clock.now()
+    logger.info("barrier.ready epoch=%s mode=%s", context.active_epoch, mode.value)
+    return ReadinessResult(True, completed_at=completed_at)
+
+
+def _prepare_ordinary_capture(pipeline: Pipeline, context: _Context) -> bool:
+    """Compatibility wrapper for older tests and call sites."""
+    return _prepare_capture(pipeline, context, mode=CaptureMode.ORDINARY).ready
 
 
 def _needs_repo(intent: str) -> bool:
@@ -1304,10 +1367,10 @@ def _apply_switch(session: Session, switch_state=None, speaker=None, *, operatio
     session.switched_off = off
     session.save()
     if off and speaker is not None:
-        # Stop any in-progress TTS playback immediately
-        close_fn = getattr(speaker, "close", None)
-        if callable(close_fn):
-            close_fn()
+        # Off cancels active and queued TTS immediately; it must not flush stale output.
+        interrupt_fn = getattr(speaker, "interrupt", None)
+        if callable(interrupt_fn):
+            interrupt_fn()
     if switch_state is not None:
         switch_state()  # MicSwitch: stop/start the mic immediately
 

@@ -433,6 +433,7 @@ def gather_utterance_result(
     silent_s = 0.0
     duration_s = 0.0
     no_frame_polls = 0
+    consecutive_no_frame_polls = 0
     speech_started = False
 
     while not speech_started:
@@ -446,9 +447,11 @@ def gather_utterance_result(
             return CaptureResult(CaptureStatus.DEVICE_FAILURE, tuple(), 0.0, False, no_frame_polls, exc)
         if block is None:
             no_frame_polls += 1
-            if no_frame_polls >= max_no_frame_polls:
+            consecutive_no_frame_polls += 1
+            if consecutive_no_frame_polls >= max_no_frame_polls:
                 return CaptureResult(CaptureStatus.NO_FRAME, tuple(), 0.0, False, no_frame_polls)
             continue
+        consecutive_no_frame_polls = 0
         block = normalize_audio_block(block)
         if vad.is_speech(block):
             speech_started = True
@@ -469,9 +472,11 @@ def gather_utterance_result(
             return CaptureResult(CaptureStatus.DEVICE_FAILURE, tuple(), duration_s, True, no_frame_polls, exc)
         if block is None:
             no_frame_polls += 1
-            if no_frame_polls >= max_no_frame_polls:
-                break
+            consecutive_no_frame_polls += 1
+            if consecutive_no_frame_polls >= max_no_frame_polls:
+                return CaptureResult(CaptureStatus.NO_FRAME, tuple(), duration_s, True, no_frame_polls)
             continue
+        consecutive_no_frame_polls = 0
         block = normalize_audio_block(block)
         blocks.append(block)
         duration_s += vad.block_duration

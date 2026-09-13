@@ -19,6 +19,7 @@ import pytest
 from jarvis.interpreter import Interpretation
 from jarvis.interpreter.schema import Intent
 from jarvis.orchestrator.contracts import ActionResult, OperationToken
+from jarvis.audio.contracts import CaptureMode
 from jarvis.orchestrator.loop import (
     LONG_OPERATION_ACK,
     REASK_1,
@@ -376,7 +377,7 @@ def test_reask_twice_then_reveal_transcript(tmp_path: Path) -> None:
         interpreter_script=[low, low, low],
         tmp_path=tmp_path,
     )
-    outcome = run(pipeline, iterations=5)
+    outcome = run(pipeline, iterations=8)
     assert outcome == "revealed"
     said = pipeline.speaker.said
     assert any(REASK_1 in s for s in said)
@@ -1200,3 +1201,422 @@ def test_external_off_signal_cancels_active_operation_immediately(monkeypatch, t
     assert token.cancelled() is True
     assert token.reason == "switch_off"
     loop_module._active_operation = None
+
+
+def test_active_ordinary_capture_uses_readiness_barrier_before_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop_module._switch_pending = None
+    events: list[str] = []
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: 10.0)
+
+    class OrderedMic:
+        def flush(self, ms: int = 1000) -> None:
+            events.append(f"capture_flush:{ms}")
+
+        def start(self) -> None:
+            events.append("mic_start")
+
+        def stop(self) -> None:
+            events.append("mic_stop")
+
+    class OrderedWake(FakeWake):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.capturer = OrderedMic()
+
+        def flush(self) -> None:
+            events.append("wake_flush")
+
+    class OrderedSpeaker(FakeSpeaker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.playing = True
+
+        def is_playing(self) -> bool:
+            events.append(f"is_playing:{self.playing}")
+            return self.playing
+
+    class OrderedCapture:
+        def capture(self, **kwargs):
+            events.append(f"capture:{kwargs['mode'].value}")
+            return None
+
+    speaker = OrderedSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=OrderedWake(), capture=OrderedCapture(),
+        interpreter=FakeInterpreter([]), speaker=speaker, executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")), cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context(active_epoch=1, operation=OperationToken.next())
+
+    state, context = _tick(State.IDLE, pipeline, context)
+    assert state is State.IDLE
+    speaker.playing = False
+    state, context = _tick(State.IDLE, pipeline, context)
+    assert state is State.LISTENING
+    state, context = _tick(state, pipeline, context)
+
+    capture_index = events.index("capture:ordinary")
+    assert events[:2] == ["is_playing:True", "mic_stop"]
+    assert events[capture_index - 4:capture_index] == [
+        "wake_flush",
+        "capture_flush:1000",
+        "mic_start",
+        "is_playing:False",
+    ]
+
+
+def test_reask_prompt_returns_through_readiness_barrier_before_retry_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: 20.0)
+
+    class OrderedMic:
+        def flush(self, ms: int = 1000) -> None:
+            events.append(f"capture_flush:{ms}")
+
+        def start(self) -> None:
+            events.append("mic_start")
+
+        def stop(self) -> None:
+            events.append("mic_stop")
+
+    class OrderedWake(FakeWake):
+        def __init__(self) -> None:
+            super().__init__([True])
+            self.capturer = OrderedMic()
+
+        def flush(self) -> None:
+            events.append("wake_flush")
+
+    class OrderedSpeaker(FakeSpeaker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.playing = False
+
+        def speak(self, text: str) -> None:
+            events.append("speak_reask")
+            self.playing = True
+            super().speak(text)
+
+        def is_playing(self) -> bool:
+            events.append(f"is_playing:{self.playing}")
+            return self.playing
+
+    class OrderedCapture(FakeCapture):
+        def capture(self, **kwargs):
+            events.append(f"capture:{kwargs['mode'].value}")
+            return super().capture()
+
+    speaker = OrderedSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=OrderedWake(), capture=OrderedCapture(["no sé", None]),
+        interpreter=FakeInterpreter([_interp(needs_reask=True), _interp(_intent())]),
+        speaker=speaker, executor=FakeExecutor(), session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path), git_runner=lambda cwd: "/repo",
+    )
+    context = _Context()
+
+    state, context = _tick(State.IDLE, pipeline, context)
+    state, context = _tick(state, pipeline, context)
+    assert state is State.SPEAKING
+    assert events[-1] == "speak_reask"
+    state, context = _tick(state, pipeline, context)
+    assert state is State.IDLE
+    state, context = _tick(state, pipeline, context)
+    assert state is State.IDLE
+    speaker.playing = False
+    state, context = _tick(state, pipeline, context)
+    assert state is State.LISTENING
+    state, context = _tick(state, pipeline, context)
+
+    reask_index = events.index("speak_reask")
+    retry_capture_index = len(events) - 1
+    assert events[retry_capture_index] == "capture:ordinary"
+    assert events[reask_index + 1:retry_capture_index] == [
+        "mic_stop",
+        "is_playing:True",
+        "mic_stop",
+        "is_playing:False",
+        "sleep:2.0",
+        "is_playing:False",
+        "wake_flush",
+        "capture_flush:1000",
+        "mic_start",
+        "is_playing:False",
+    ]
+
+
+def test_confirmation_prompt_completion_and_barrier_anchor_exact_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: 30.0)
+    clock = FakeClock()
+    clock.t = 100.0
+
+    class OrderedMic:
+        def flush(self, ms: int = 1000) -> None:
+            events.append(f"capture_flush:{ms}")
+
+        def start(self) -> None:
+            events.append("mic_start")
+
+    class OrderedWake(FakeWake):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.capturer = OrderedMic()
+
+        def flush(self) -> None:
+            events.append("wake_flush")
+
+    class OrderedSpeaker(FakeSpeaker):
+        def speak_and_wait(self, text: str):
+            events.append("prompt_done")
+            self.speak(text)
+            clock.advance(7.0)
+            return type("Completion", (), {"completed": True})()
+
+        def is_playing(self) -> bool:
+            events.append("is_playing:False")
+            return False
+
+    class OrderedCapture:
+        def __init__(self) -> None:
+            self.deadlines: list[float | None] = []
+
+        def capture(self, **kwargs):
+            events.append(f"capture:{kwargs['mode'].value}")
+            self.deadlines.append(kwargs["deadline"])
+            return "sí"
+
+    capture = OrderedCapture()
+    pipeline = Pipeline(
+        clock=clock, wake=OrderedWake(), capture=capture,
+        interpreter=FakeInterpreter([]), speaker=OrderedSpeaker(), executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")), cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context(
+        active_epoch=1,
+        operation=OperationToken.next(),
+        interpretation=_interp(_intent(intent="shutdown", confirm_required=True)),
+    )
+
+    state, context = _tick(State.CONFIRMING, pipeline, context)
+
+    assert state is State.EXECUTING
+    assert context.authorization is not None
+    assert context.authorization.t0 == 107.0
+    assert context.authorization.deadline == 122.0
+    assert capture.deadlines == [122.0]
+    assert events == [
+        "prompt_done",
+        "is_playing:False",
+        "wake_flush",
+        "capture_flush:1000",
+        "mic_start",
+        "capture:confirmation",
+    ]
+
+
+def test_confirmation_affirmative_at_exact_t_plus_15_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: 40.0)
+    clock = FakeClock()
+
+    class DeadlineCapture:
+        def capture(self, **kwargs):
+            clock.advance(15.0)
+            return "sí"
+
+    pipeline = Pipeline(
+        clock=clock, wake=FakeWake([]), capture=DeadlineCapture(),
+        interpreter=FakeInterpreter([]), speaker=VerifiedPromptSpeaker(), executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")), cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context(
+        active_epoch=1,
+        operation=OperationToken.next(),
+        interpretation=_interp(_intent(intent="shutdown", confirm_required=True)),
+    )
+
+    state, context = _tick(State.CONFIRMING, pipeline, context)
+
+    assert state is State.SPEAKING
+    assert context.outcome == "timed_out"
+    assert pipeline.executor.calls == []
+
+
+class VerifiedPromptSpeaker(FakeSpeaker):
+    def speak_and_wait(self, text: str):
+        self.speak(text)
+        return type("Completion", (), {"completed": True})()
+
+    def is_playing(self) -> bool:
+        return False
+
+
+def test_switch_off_interrupts_without_flushing_goodbye_ack(tmp_path: Path) -> None:
+    token = OperationToken.next()
+    auth = loop_module.Authorization.create("shutdown", token)
+
+    class OffSpeaker:
+        def __init__(self) -> None:
+            self.interrupted = 0
+            self.closed = 0
+            self.said: list[str] = []
+
+        def interrupt(self) -> None:
+            self.interrupted += 1
+
+        def close(self) -> None:
+            self.closed += 1
+
+        def speak(self, text: str) -> None:
+            self.said.append(text)
+
+    speaker = OffSpeaker()
+    session = load_state(str(tmp_path / "state.json"))
+    loop_module._switch_pending = True
+
+    loop_module._apply_switch(session, speaker=speaker, operation=token, authorization=auth)
+
+    assert session.switched_off is True
+    assert token.cancelled() is True
+    assert token.reason == "switch_off"
+    assert auth.state.value == "invalidated"
+    assert auth.reason == "switch_off"
+    assert speaker.interrupted == 1
+    assert speaker.closed == 0
+    assert speaker.said == []
+
+
+def test_goodbye_invalidates_authorization_operation_and_requires_fresh_wake(tmp_path: Path) -> None:
+    token = OperationToken.next()
+    auth = loop_module.Authorization.create("shutdown", token)
+    pipeline = _pipeline(
+        wake=[False],
+        transcripts=["terminamos", "abrí firefox"],
+        interpreter_script=[Interpretation(control="goodbye")],
+        tmp_path=tmp_path,
+    )
+    context = _Context(active_epoch=1, operation=token, authorization=auth)
+
+    state, context = _tick(State.LISTENING, pipeline, context)
+    assert state is State.SPEAKING
+    assert context.outcome == "goodbye"
+    assert context.active_epoch is None
+    assert context.operation is None
+    assert context.authorization is None
+    assert token.cancelled() is True
+    assert token.reason == "goodbye"
+    assert auth.state.value == "invalidated"
+    assert auth.reason == "goodbye"
+    assert any("Hasta luego" in text for text in pipeline.speaker.said)
+
+    state, context = _tick(state, pipeline, context)
+    state, context = _tick(state, pipeline, context)
+
+    assert state is State.IDLE
+    assert context.outcome == "goodbye"
+    assert pipeline.executor.calls == []
+    assert pipeline.interpreter.calls == ["terminamos"]
+
+
+def test_stale_operation_after_interpretation_does_not_execute_or_record_history(tmp_path: Path) -> None:
+    token = OperationToken.next()
+    journal = FakeTranscriptLog()
+
+    class CancellingInterpreter:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def __call__(self, text: str) -> Interpretation:
+            self.calls.append(text)
+            token.cancel("epoch_replaced")
+            return _interp(_intent())
+
+    history_path = tmp_path / "history.json"
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=FakeWake([]), capture=FakeCapture(["abrí firefox"]),
+        interpreter=CancellingInterpreter(), speaker=FakeSpeaker(), executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json"), history_path=str(history_path)),
+        cwd=str(tmp_path), git_runner=lambda cwd: "/repo", transcript_log=journal,
+    )
+    context = _Context(active_epoch=1, operation=token)
+
+    state, context = _tick(State.LISTENING, pipeline, context)
+
+    assert state is State.IDLE
+    assert context.outcome == "cancelled"
+    assert pipeline.executor.calls == []
+    assert pipeline.speaker.said == []
+    assert journal.records == []
+    assert not history_path.exists()
+
+
+def test_enabled_barge_in_interrupts_and_enters_listening_through_readiness_barrier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis import config
+
+    events: list[str] = []
+    monkeypatch.setattr(config, "BARGE_IN_ENABLED", True)
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+
+    class BargeMic:
+        def start(self) -> None:
+            events.append("mic_start")
+
+        def stop(self) -> None:
+            events.append("mic_stop")
+
+        def flush(self, ms: int = 1000) -> None:
+            events.append(f"capture_flush:{ms}")
+
+    class BargeWake(FakeWake):
+        def __init__(self) -> None:
+            super().__init__([True])
+            self.capturer = BargeMic()
+
+        def flush(self) -> None:
+            events.append("wake_flush")
+
+    class BargeSpeaker(BeepRecordingSpeaker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.playing = True
+
+        def is_playing(self) -> bool:
+            events.append(f"is_playing:{self.playing}")
+            return self.playing
+
+        def interrupt(self) -> None:
+            events.append("interrupt")
+            self.playing = False
+
+    speaker = BargeSpeaker()
+    pipeline = Pipeline(
+        clock=FakeClock(), wake=BargeWake(), capture=FakeCapture([]),
+        interpreter=FakeInterpreter([]), speaker=speaker, executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")), cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+    context = _Context(active_epoch=1, operation=OperationToken.next())
+
+    state, context = _tick(State.IDLE, pipeline, context)
+
+    assert state is State.LISTENING
+    assert context.outcome == "barge_in"
+    assert "interrupt" in events
+    assert events[-4:] == ["is_playing:False", "wake_flush", "capture_flush:1000", "mic_start"]

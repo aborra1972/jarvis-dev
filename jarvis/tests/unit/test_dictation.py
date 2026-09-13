@@ -150,3 +150,20 @@ def test_nonstandalone_goodbye_is_not_dictation_control() -> None:
     dm = DictationManager()
     assert dm.is_control_command("no terminamos") is None
     assert dm.is_control_command("dijo hasta luego") is None
+
+
+@pytest.mark.parametrize("text", ["terminamos", "hasta luego"])
+def test_exact_goodbye_phrases_precede_dictation_content(text: str) -> None:
+    dm = DictationManager()
+    dm.activate()
+    assert dm.process_transcript(text) == (True, "goodbye")
+    assert dm.state.get_full_text() == ""
+
+
+@pytest.mark.parametrize("text", ["no terminamos", "dijo hasta luego", 'escribí "hasta luego"'])
+def test_nonstandalone_goodbye_phrases_remain_dictation_data(text: str) -> None:
+    dm = DictationManager()
+    dm.activate()
+    should_respond, _ = dm.process_transcript(text)
+    assert should_respond is False
+    assert dm.state.get_full_text() == text

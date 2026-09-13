@@ -460,3 +460,20 @@ def test_goodbye_like_content_is_not_control() -> None:
     assert result.intent is None
     assert result.needs_reask is True
     assert result.reason == "no_provider"
+
+
+@pytest.mark.parametrize("text", ["terminamos", "hasta luego"])
+def test_standalone_goodbye_phrases_are_exact_lifecycle_controls(text: str) -> None:
+    result = resolve_intent(text, provider=None, app_allowlist=ALLOWLIST)
+    assert result.control == "goodbye"
+    assert result.intent is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["no terminamos", "dijo hasta luego", "terminamos mañana", 'escribí "hasta luego"'],
+)
+def test_nonstandalone_goodbye_phrases_fail_closed_as_content(text: str) -> None:
+    result = resolve_intent(text, provider=None, app_allowlist=ALLOWLIST)
+    assert result.control is None
+    assert result.intent is None

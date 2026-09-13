@@ -171,6 +171,32 @@ def test_ordinary_capture_waits_through_no_frames_and_bounds_preroll() -> None:
     assert result.no_frame_polls == 2
 
 
+def test_sustained_no_frame_after_onset_is_not_a_completed_utterance() -> None:
+    result = gather_utterance_result(
+        FakeCapturer([_sine(), None, None]),
+        _vad(silence_s=0.2, max_s=1.0),
+        max_no_frame_polls=2,
+    )
+
+    assert result.status is CaptureStatus.NO_FRAME
+    assert result.blocks == ()
+    assert result.onset_seen is True
+    assert result.no_frame_polls == 2
+
+
+def test_transient_no_frame_after_onset_does_not_end_utterance() -> None:
+    result = gather_utterance_result(
+        FakeCapturer([_sine(), None, _sine(), _silence(), _silence()]),
+        _vad(silence_s=0.2, max_s=1.0),
+        max_no_frame_polls=3,
+    )
+
+    assert result.status is CaptureStatus.UTTERANCE
+    assert result.onset_seen is True
+    assert result.no_frame_polls == 1
+    assert len(result.blocks) == 4
+
+
 def test_capture_cancellation_and_device_failure_are_distinct() -> None:
     cancelled = gather_utterance_result(
         FakeCapturer([_silence(), _sine()]), _vad(), stop_requested=lambda: True

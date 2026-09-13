@@ -433,6 +433,7 @@ def _tick(state: State, pipeline: Pipeline, context: _Context) -> tuple[State, _
                 return State.IDLE, context
             logger.info("name_gate.accepted agent=%s", config.agent_name())
             transcript = stripped
+            context.wake_gated = False
 
         # --- SPEAKER VERIFICATION ---
         # Check if the voice matches the enrolled speaker

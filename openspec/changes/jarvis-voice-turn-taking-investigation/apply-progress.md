@@ -54,6 +54,13 @@ Slice 3 writer-added source/test delta: `jarvis/src/jarvis/orchestrator/loop.py`
 - Barge-in integration stayed entirely in `loop.py`; `BARGE_IN_ENABLED` remains disabled by default and no AEC/provider/hardware changes were added.
 - `test_audio_pipeline.py` was not edited because it was outside the explicitly allowed Slice 3 edit surfaces; existing full-suite audio pipeline coverage remained green.
 
+## Follow-up voice recognition fixes
+
+- Cleared `wake_gated` immediately after a verified name wake strips the agent prefix, so active-conversation follow-ups such as `y mañana` do not require the name again.
+- Goodbye lifecycle matching now accepts standalone STT terminal punctuation/case (`Hasta luego.`, `hasta luego!`) while preserving content/quoted/negated fail-closed boundaries.
+- Expanded the standard Whisper prompt phrase data with exact lifecycle/weather follow-up forms: `hasta luego`, `terminamos`, `mañana`, `y mañana`, and common climate/weather variants.
+- Added focused regressions in loop/interpreter/STT prompt tests before implementation; source changes stayed limited to loop/interpreter plus phrase data.
+
 ## Remaining tasks
 
 - Final native review/PR preparation remains with the parent orchestrator.

@@ -25,11 +25,17 @@ from jarvis.interpreter.focus import is_code_editor_focused
 from jarvis.interpreter.normalize import normalize, normalize_boundary
 
 GOODBYE_PHRASES: frozenset[str] = frozenset({"terminamos", "hasta luego"})
+_TERMINAL_STT_PUNCTUATION = ".!?¡¿"
+
+
+def _goodbye_boundary_surface(text: str) -> str:
+    """Normalize only outer space/case plus terminal STT punctuation."""
+    return normalize_boundary(text).rstrip(_TERMINAL_STT_PUNCTUATION).strip()
 
 
 def is_goodbye(text: str) -> bool:
     """Return true only for an exact, standalone goodbye transcript."""
-    return normalize_boundary(text) in GOODBYE_PHRASES
+    return _goodbye_boundary_surface(text) in GOODBYE_PHRASES
 
 logger = logging.getLogger("jarvis.interpreter")
 

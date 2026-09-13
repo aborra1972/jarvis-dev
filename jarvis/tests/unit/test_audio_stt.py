@@ -155,6 +155,12 @@ def test_stt_error_is_exception_type() -> None:
     assert issubclass(STTError, Exception)
 
 
+def test_standard_phrase_prompt_includes_voice_turn_followups() -> None:
+    phrases = (Path(__file__).parents[2] / "data" / "standard_phrases_rioplatense.txt").read_text()
+    for phrase in ("hasta luego", "terminamos", "mañana", "y mañana", "cómo está el clima mañana"):
+        assert phrase in phrases
+
+
 def test_missing_wav_raises_stterror(tmp_path: Path) -> None:
     stt = WhisperSTT(
         whisper_cli=tmp_path / "whisper-cli",

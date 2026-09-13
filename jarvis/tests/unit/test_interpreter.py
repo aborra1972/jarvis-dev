@@ -469,6 +469,13 @@ def test_standalone_goodbye_phrases_are_exact_lifecycle_controls(text: str) -> N
     assert result.intent is None
 
 
+@pytest.mark.parametrize("text", ["Hasta luego.", "hasta luego!", "TERMINAMOS."])
+def test_standalone_goodbye_accepts_terminal_stt_punctuation(text: str) -> None:
+    result = resolve_intent(text, provider=None, app_allowlist=ALLOWLIST)
+    assert result.control == "goodbye"
+    assert result.intent is None
+
+
 @pytest.mark.parametrize(
     "text",
     ["no terminamos", "dijo hasta luego", "terminamos mañana", 'escribí "hasta luego"'],

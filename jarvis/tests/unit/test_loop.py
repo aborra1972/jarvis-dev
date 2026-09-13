@@ -923,6 +923,56 @@ def test_name_wake_discards_transcript_without_name(
     assert pipeline.speaker.said == []  # discarded silently
 
 
+def test_name_wake_clears_gate_for_active_followup_y_manana(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JARVIS_AGENT", "friday")
+    monkeypatch.setattr(loop_module.time, "sleep", lambda seconds: None)
+    first = _intent()
+    followup = _intent(intent="ask", entities={"query": "y mañana"})
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=NameFakeWake([True]),
+        capture=FakeCapture(["friday, cómo está el clima", "y mañana"]),
+        interpreter=FakeInterpreter([_interp(first), _interp(followup)]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+
+    outcome = run(pipeline, iterations=7)
+
+    assert outcome == "executed"
+    assert pipeline.interpreter.calls == ["cómo está el clima", "y mañana"]
+    assert [c.intent for c in pipeline.executor.calls] == ["open_app", "ask"]
+    assert len(pipeline.wake.results) == 0
+
+
+def test_name_wake_still_rejects_y_manana_when_inactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JARVIS_AGENT", "friday")
+    pipeline = Pipeline(
+        clock=FakeClock(),
+        wake=NameFakeWake([True]),
+        capture=FakeCapture(["y mañana"]),
+        interpreter=FakeInterpreter([]),
+        speaker=FakeSpeaker(),
+        executor=FakeExecutor(),
+        session=load_state(str(tmp_path / "state.json")),
+        cwd=str(tmp_path),
+        git_runner=lambda cwd: "/repo",
+    )
+
+    outcome = run(pipeline, iterations=2)
+
+    assert outcome == "name_mismatch"
+    assert pipeline.interpreter.calls == []
+    assert pipeline.executor.calls == []
+
+
 def test_name_mismatch_ends_active_turn_before_next_wake_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

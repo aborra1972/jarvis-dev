@@ -64,3 +64,10 @@ Slice 3 writer-added source/test delta: `jarvis/src/jarvis/orchestrator/loop.py`
 - The off path was still using `close()`, which can flush queued speech; Slice 3 changed it to the existing interruption seam so off has stronger precedence than output and goodbye acknowledgement.
 - The stale-token risk existed after interpretation but before session routing/logging; the new guard prevents cancelled late interpretation results from producing history, TTS, follow-up, or execution.
 - The barge-in path already interrupted TTS, but bypassed capture-buffer flush and mic-readiness evidence; routing it through `_prepare_capture()` reuses the Slice 2 barrier without enabling barge-in by default.
+
+## GUI teardown hardening follow-up
+
+- `jarvis_gui.py` now tracks GUI-owned GLib timeout/idle source IDs and removes them during `destroy` before subprocess shutdown.
+- Destroy marks the GUI closed before cleanup, so late UI refreshes, log writes, status updates, FSM polling, restart callbacks, and process-exit callbacks fail closed without touching GTK widgets.
+- Subprocess cleanup still terminates the direct Jarvis process group and verified PID-file process group; closed GUI cleanup skips only widget/log updates.
+- Regression coverage lives in `jarvis/tests/test_jarvis_gui.py` for source tracking/removal, closed-callback no-ops, and safe closed-window process cleanup.

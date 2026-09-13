@@ -135,3 +135,88 @@ def test_read_output_flips_iniciando_to_esperando_activacion(gui_module, monkeyp
 
     assert "Esperando activación..." in calls
     assert exits and exits[0][0] is app._jarvis_proc and exits[0][1] == 0
+
+
+def test_init_tracks_owned_glib_timeout_sources(gui_module, monkeypatch):
+    scheduled: list[tuple[int, object]] = []
+
+    def timeout_add(interval, callback):
+        source_id = len(scheduled) + 10
+        scheduled.append((interval, callback))
+        return source_id
+
+    monkeypatch.setattr(gui_module.GLib, "timeout_add", timeout_add, raising=False)
+    monkeypatch.setattr(gui_module.JarvisGUI, "_build_window", lambda self: None)
+    monkeypatch.setattr(gui_module.JarvisGUI, "_apply_css", lambda self: None)
+    monkeypatch.setattr(gui_module.JarvisGUI, "_reset_switch_state", lambda self: None)
+
+    app = gui_module.JarvisGUI(auto_launch=True)
+
+    assert scheduled == [(500, app._launch_jarvis), (2000, app._poll_status)]
+    assert app._glib_sources == {10, 11}
+
+
+def test_destroy_marks_closed_and_cancels_owned_glib_sources_before_stopping(gui_module, monkeypatch):
+    removed: list[int] = []
+    calls: list[str] = []
+    monkeypatch.setattr(gui_module.GLib, "source_remove", lambda sid: removed.append(sid) or True, raising=False)
+    monkeypatch.setattr(gui_module.Gtk, "main_quit", lambda: calls.append("quit"), raising=False)
+
+    app = object.__new__(gui_module.JarvisGUI)
+    app._glib_sources = {21, 22}
+    app._closed = False
+    app._stop_jarvis = lambda: calls.append(f"stop_closed={app._closed}")
+
+    app._on_destroy(None)
+
+    assert app._closed is True
+    assert sorted(removed) == [21, 22]
+    assert app._glib_sources == set()
+    assert calls == ["stop_closed=True", "quit"]
+
+
+def test_closed_gui_ignores_late_ui_log_poll_and_process_exit_callbacks(gui_module, monkeypatch):
+    app = object.__new__(gui_module.JarvisGUI)
+    app._closed = True
+    app._is_on = True
+    app._user_off = False
+    app._jarvis_proc = object()
+    app._status_label = SimpleNamespace(set_text=lambda *_: pytest.fail("status label touched"))
+    app._status_detail = SimpleNamespace(set_text=lambda *_: pytest.fail("status detail touched"))
+    app._power_btn = SimpleNamespace(set_label=lambda *_: pytest.fail("power button touched"))
+    app._log_view = SimpleNamespace(get_buffer=lambda: pytest.fail("log widget touched"))
+    app._log_lines = []
+
+    monkeypatch.setattr(gui_module, "_is_running", lambda: pytest.fail("poll touched runtime"))
+
+    app._update_ui()
+    app._log("late output")
+    assert app._poll_status() is False
+    assert app._on_jarvis_exit(app._jarvis_proc, 0) is False
+    assert app._log_lines == []
+
+
+def test_stop_jarvis_preserves_process_cleanup_but_skips_closed_widget_updates(gui_module, monkeypatch):
+    calls: list[tuple[str, int]] = []
+
+    class _Proc:
+        pid = 1234
+
+        def poll(self):
+            return None
+
+    app = object.__new__(gui_module.JarvisGUI)
+    app._closed = True
+    app._jarvis_proc = _Proc()
+    app._is_on = True
+    app._log = lambda *_: pytest.fail("closed GUI should not log")
+    app._update_ui = lambda: pytest.fail("closed GUI should not update widgets")
+
+    monkeypatch.setattr(gui_module.os, "getpgid", lambda pid: pid + 100)
+    monkeypatch.setattr(gui_module.os, "killpg", lambda pgid, sig: calls.append(("killpg", pgid)))
+    monkeypatch.setattr(gui_module, "_read_pid", lambda: None)
+
+    app._stop_jarvis()
+
+    assert calls == [("killpg", 1334)]
+    assert app._is_on is False

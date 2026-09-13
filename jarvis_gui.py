@@ -404,6 +404,8 @@ class JarvisGUI:
         self._user_off = False  # track manual off
         self._jarvis_proc: subprocess.Popen | None = None
         self._restart_pending = False
+        self._closed = False
+        self._glib_sources: set[int] = set()
         self._threshold = _read_wake_threshold()
         self._log_lines: list[str] = []
 
@@ -412,9 +414,43 @@ class JarvisGUI:
 
         if auto_launch:
             self._reset_switch_state()
-            GLib.timeout_add(500, self._launch_jarvis)
+            self._add_timeout(500, self._launch_jarvis)
 
-        GLib.timeout_add(2000, self._poll_status)
+        self._add_timeout(2000, self._poll_status)
+
+    def _add_timeout(self, interval_ms: int, callback) -> int:
+        if self._is_closed():
+            return 0
+        source_id = GLib.timeout_add(interval_ms, callback)
+        if source_id:
+            self._glib_sources.add(source_id)
+        return source_id
+
+    def _add_idle(self, callback, *args) -> int:
+        if self._is_closed():
+            return 0
+        source_id = GLib.idle_add(callback, *args)
+        if source_id:
+            self._glib_sources.add(source_id)
+        return source_id
+
+    def _cancel_glib_sources(self) -> None:
+        for source_id in list(getattr(self, "_glib_sources", set())):
+            try:
+                GLib.source_remove(source_id)
+            except Exception:
+                pass
+            finally:
+                self._glib_sources.discard(source_id)
+
+    def _is_closed(self) -> bool:
+        return bool(getattr(self, "_closed", False))
+
+    def _set_status_detail(self, text: str) -> bool:
+        if self._is_closed():
+            return False
+        self._status_detail.set_text(text)
+        return False
 
     def _build_window(self) -> None:
         name = _assistant_name()
@@ -700,6 +736,8 @@ class JarvisGUI:
             pass
 
     def _launch_jarvis(self) -> bool:
+        if self._is_closed():
+            return False
         if _is_running():
             self._is_on = not _state_switch_is_off()
             self._user_off = not self._is_on
@@ -737,7 +775,8 @@ class JarvisGUI:
 
         self._log(f"Iniciando {_assistant_name()}...")
         self._log(f"Asistente: {_AGENT_META[agent]['label']}")
-        self._status_detail.set_text("Iniciando...")
+        if not self._is_closed():
+            self._status_detail.set_text("Iniciando...")
 
         try:
             env = os.environ.copy()
@@ -785,12 +824,13 @@ class JarvisGUI:
             except (ProcessLookupError, OSError):
                 pass
 
-        if killed:
-            self._log(f"{_assistant_name()} y sus procesos terminaron")
-        else:
-            self._log(f"No había procesos de {_assistant_name()} activos")
         self._is_on = False
-        self._update_ui()
+        if not self._is_closed():
+            if killed:
+                self._log(f"{_assistant_name()} y sus procesos terminaron")
+            else:
+                self._log(f"No había procesos de {_assistant_name()} activos")
+            self._update_ui()
 
     def _read_output(self) -> None:
         process = self._jarvis_proc
@@ -798,14 +838,16 @@ class JarvisGUI:
             for line in process.stdout:
                 line = _personalize_runtime_text(line.strip())
                 if line:
-                    GLib.idle_add(self._log, line)
+                    self._add_idle(self._log, line)
                     # Update status when Jarvis announces readiness
                     if "listo" in line.lower() or "jarvis" in line.lower():
-                        GLib.idle_add(self._status_detail.set_text, "Esperando activación...")
+                        self._add_idle(self._set_status_detail, "Esperando activación...")
             returncode = process.wait()
-            GLib.idle_add(self._on_jarvis_exit, process, returncode)
+            self._add_idle(self._on_jarvis_exit, process, returncode)
 
     def _on_jarvis_exit(self, process: subprocess.Popen, returncode: int) -> bool:
+        if self._is_closed():
+            return False
         if process is not self._jarvis_proc:
             return False
         self._is_on = False
@@ -876,6 +918,8 @@ class JarvisGUI:
 
     def _update_provider_status(self, provider: str) -> None:
         """Update the provider status label."""
+        if self._is_closed():
+            return
         labels = {
             "local": "🏠 Solo IA local (sin conexión)",
             "gemini": "☁️ Gemini (nube — requiere API key)",
@@ -940,24 +984,32 @@ class JarvisGUI:
         def _wait_and_launch() -> None:
             for _ in range(50):
                 if not _is_running():
-                    GLib.idle_add(self._finish_restart)
+                    self._add_idle(self._finish_restart)
                     return
                 time.sleep(0.1)
-            GLib.idle_add(self._restart_failed)
+            self._add_idle(self._restart_failed)
 
         threading.Thread(target=_wait_and_launch, daemon=True).start()
 
     def _finish_restart(self) -> bool:
+        if self._is_closed():
+            self._restart_pending = False
+            return False
         self._restart_pending = False
         return self._launch_jarvis()
 
     def _restart_failed(self) -> bool:
+        if self._is_closed():
+            self._restart_pending = False
+            return False
         self._restart_pending = False
         self._log(f"{_assistant_name()} no terminó; no inicié un duplicado")
         return False
 
     def _update_agent_status(self, agent: str) -> None:
         """Update the agent status label."""
+        if self._is_closed():
+            return
         meta = _AGENT_META.get(agent)
         self._agent_status.set_text(meta["status"] if meta else agent)
 
@@ -989,6 +1041,8 @@ class JarvisGUI:
             self._log(f"Error agente (.env): {e}")
 
     def _update_ui(self) -> None:
+        if self._is_closed():
+            return
         if self._is_on:
             self._status_label.set_text("● ACTIVO")
             self._status_label.get_style_context().remove_class("status-inactive")
@@ -1007,6 +1061,8 @@ class JarvisGUI:
             self._power_btn.get_style_context().add_class("power-btn")
 
     def _poll_status(self) -> bool:
+        if self._is_closed():
+            return False
         running = _is_running()
         enabled = running and not _state_switch_is_off()
         if enabled != self._is_on:
@@ -1020,6 +1076,8 @@ class JarvisGUI:
 
     def _update_fsm_display(self) -> None:
         """Read FSM state file and update status labels."""
+        if self._is_closed():
+            return
         try:
             if not FSM_STATE_FILE.exists():
                 return
@@ -1045,6 +1103,8 @@ class JarvisGUI:
             pass  # best-effort — never crash the GUI
 
     def _log(self, msg: str) -> None:
+        if self._is_closed():
+            return
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {msg}\n"
         self._log_lines.append(line)
@@ -1064,7 +1124,9 @@ class JarvisGUI:
             pass
 
     def _on_destroy(self, widget) -> None:
-        """Kill jarvis subprocess tree before closing the GUI."""
+        """Cancel GUI callbacks and kill jarvis subprocess tree before closing."""
+        self._closed = True
+        self._cancel_glib_sources()
         self._stop_jarvis()
         Gtk.main_quit()
 

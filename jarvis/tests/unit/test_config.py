@@ -52,22 +52,47 @@ def test_spotify_oauth_config_is_disabled_by_default_with_fixed_policy(monkeypat
     values = config.load_spotify_oauth_config({})
     assert values == {
         "enabled": False,
+        "authorized": False,
         "client_id": None,
         "transaction_ttl_s": 300.0,
         "scopes": frozenset({"user-read-playback-state", "user-modify-playback-state"}),
     }
 
 
-def test_spotify_oauth_config_requires_explicit_enable_and_client_id() -> None:
+def test_spotify_oauth_config_requires_explicit_enable_authorization_and_keyring_id(monkeypatch) -> None:
     assert config.load_spotify_oauth_config({"SPOTIFY_CLIENT_ID": "client"})["enabled"] is False
+    assert config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true"})["enabled"] is False
+    client_id = "a" * 32
+
+    class Result:
+        status = type("Status", (), {"value": "ok"})()
+        value = client_id
+
+    class Store:
+        def load(self):
+            return Result()
+
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: Store())
     values = config.load_spotify_oauth_config({
-        "SPOTIFY_API_ENABLED": "true",
-        "SPOTIFY_CLIENT_ID": "client-id",
-        "SPOTIFY_OAUTH_TRANSACTION_TTL_S": "120",
+        "SPOTIFY_API_ENABLED": "true", "SPOTIFY_AUTHORIZED": "true",
+        "SPOTIFY_CLIENT_ID": "ignored", "SPOTIFY_OAUTH_TRANSACTION_TTL_S": "120",
     })
     assert values["enabled"] is True
-    assert values["client_id"] == "client-id"
+    assert values["authorized"] is True
+    assert values["client_id"] == client_id
     assert values["transaction_ttl_s"] == 120.0
+
+
+def test_spotify_oauth_config_declined_or_missing_authorization_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: pytest.fail("keyring must not be read"))
+    for authorization in (None, "false", "declined"):
+        environ = {"SPOTIFY_API_ENABLED": "true"}
+        if authorization is not None:
+            environ["SPOTIFY_AUTHORIZED"] = authorization
+        values = config.load_spotify_oauth_config(environ)
+        assert values["enabled"] is False
+        assert values["authorized"] is False
+        assert values["client_id"] is None
 
 
 def test_spotify_oauth_config_rejects_invalid_values_fail_closed() -> None:
@@ -92,7 +117,7 @@ def test_spotify_oauth_config_recovers_client_id_from_keyring(monkeypatch) -> No
             return Result()
 
     monkeypatch.setattr(config, "_spotify_client_id_store", lambda: Store())
-    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true"})
+    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true", "SPOTIFY_AUTHORIZED": "true"})
     assert values["enabled"] is True
     assert values["client_id"] == client_id
 
@@ -112,14 +137,13 @@ def test_spotify_oauth_config_keyring_failures_remain_fail_closed(monkeypatch, s
             return result
 
     monkeypatch.setattr(config, "_spotify_client_id_store", lambda: Store())
-    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true"})
+    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true", "SPOTIFY_AUTHORIZED": "true"})
     assert values["enabled"] is False
     assert values["client_id"] is None
 
 
-def test_spotify_oauth_config_explicit_environment_value_wins_over_keyring(monkeypatch) -> None:
-    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: pytest.fail("keyring should not be read"))
-    client_id = "b" * 32
-    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true", "SPOTIFY_CLIENT_ID": client_id})
-    assert values["enabled"] is True
-    assert values["client_id"] == client_id
+def test_spotify_oauth_config_does_not_accept_environment_client_id(monkeypatch) -> None:
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: pytest.fail("authorization is required before keyring"))
+    values = config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true", "SPOTIFY_CLIENT_ID": "b" * 32})
+    assert values["enabled"] is False
+    assert values["client_id"] is None

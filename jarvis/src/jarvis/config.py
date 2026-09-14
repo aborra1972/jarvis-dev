@@ -207,14 +207,18 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
     env = os.environ if environ is None else environ
     defaults: dict[str, object] = {
         "enabled": False,
+        "authorized": False,
         "client_id": None,
         "transaction_ttl_s": 300.0,
         "scopes": _SPOTIFY_OAUTH_SCOPES,
     }
     enabled = env.get("SPOTIFY_API_ENABLED", "false").strip().lower()
-    configured_client_id = env.get("SPOTIFY_CLIENT_ID")
-    client_id = configured_client_id.strip() if configured_client_id is not None else ""
-    if configured_client_id is None and enabled in {"true", "1", "yes"}:
+    authorization = env.get("SPOTIFY_AUTHORIZED", "false").strip().lower()
+    authorized = authorization in {"true", "1", "yes", "granted"}
+    if enabled not in {"true", "false", "1", "0", "yes", "no"} or not authorized:
+        return defaults
+    client_id = ""
+    if enabled in {"true", "1", "yes"}:
         try:
             from jarvis.services.spotify import resolve_spotify_client_id
             stored = resolve_spotify_client_id(None, store=_spotify_client_id_store())
@@ -228,12 +232,13 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
         return defaults
     if enabled not in {"true", "false", "1", "0", "yes", "no"}:
         return defaults
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_id):
+    if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
         return defaults
     if not math.isfinite(ttl) or not 30.0 <= ttl <= 600.0:
         return defaults
     defaults.update(
         enabled=enabled in {"true", "1", "yes"},
+        authorized=True,
         client_id=client_id,
         transaction_ttl_s=ttl,
     )
@@ -242,6 +247,7 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
 
 _SPOTIFY_OAUTH = load_spotify_oauth_config()
 SPOTIFY_API_ENABLED: bool = _SPOTIFY_OAUTH["enabled"]  # type: ignore[assignment]
+SPOTIFY_AUTHORIZED: bool = _SPOTIFY_OAUTH["authorized"]  # type: ignore[assignment]
 SPOTIFY_CLIENT_ID: str | None = _SPOTIFY_OAUTH["client_id"]  # type: ignore[assignment]
 SPOTIFY_OAUTH_TRANSACTION_TTL_S: float = _SPOTIFY_OAUTH["transaction_ttl_s"]  # type: ignore[assignment]
 SPOTIFY_OAUTH_SCOPES = _SPOTIFY_OAUTH_SCOPES

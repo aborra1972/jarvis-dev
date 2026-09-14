@@ -551,6 +551,33 @@ class _OAuthTransportFailure:
 SpotifyOAuthClient = OAuthClient
 
 
+def create_spotify_oauth_client(
+    configuration: Any,
+    *,
+    store: Any,
+    transport: Callable[..., Any],
+    clock: Callable[[], float] = time.time,
+    timeout_s: float = 5.0,
+) -> OAuthClient | None:
+    """Create OAuth only after the explicit offline setup gate passes.
+
+    Configuration is deliberately a safe, non-secret snapshot. Client IDs are
+    accepted here only after ``load_spotify_oauth_config`` has recovered and
+    validated them from the keyring setup seam.
+    """
+    if not isinstance(configuration, dict):
+        return None
+    client_id = configuration.get("client_id")
+    if (configuration.get("enabled") is not True
+            or configuration.get("authorized") is not True
+            or not KeyringClientIdStore._valid(client_id)):
+        return None
+    return OAuthClient(
+        enabled=True, client_id=client_id, store=store, transport=transport,
+        clock=clock, timeout_s=timeout_s,
+    )
+
+
 class LocalSpotifyAdapter:
     """Run only fixed playerctl operations against one configured Spotify identity."""
 

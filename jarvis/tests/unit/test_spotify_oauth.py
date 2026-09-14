@@ -320,6 +320,37 @@ def test_keyring_failure_is_storage_unavailable_without_fallback() -> None:
     assert not any("secret" in value for value in store.__dict__.values() if isinstance(value, str))
 
 
+def test_oauth_factory_fails_closed_without_complete_setup_gate() -> None:
+    from jarvis.services.spotify import create_spotify_oauth_client
+
+    def forbidden_transport(*args):
+        pytest.fail("OAuth transport must not be initialized")
+
+    assert create_spotify_oauth_client(
+        {"enabled": False, "authorized": True, "client_id": "a" * 32},
+        store=_MemoryTokenStore(), transport=forbidden_transport,
+    ) is None
+    assert create_spotify_oauth_client(
+        {"enabled": True, "authorized": False, "client_id": "a" * 32},
+        store=_MemoryTokenStore(), transport=forbidden_transport,
+    ) is None
+    assert create_spotify_oauth_client(
+        {"enabled": True, "authorized": True, "client_id": None},
+        store=_MemoryTokenStore(), transport=forbidden_transport,
+    ) is None
+
+
+def test_oauth_factory_accepts_only_keyring_validated_client_id_and_redacts_setup_state() -> None:
+    from jarvis.services.spotify import create_spotify_oauth_client
+
+    client = create_spotify_oauth_client(
+        {"enabled": True, "authorized": True, "client_id": "b" * 32},
+        store=_MemoryTokenStore(), transport=lambda *args: pytest.fail("transport called"),
+    )
+    assert client is not None
+    assert "b" * 32 not in repr(client)
+
+
 def test_exchange_uses_pkce_scopes_and_bounded_transport() -> None:
     from jarvis.services.spotify import OAuthClient, OAuthErrorCode
 

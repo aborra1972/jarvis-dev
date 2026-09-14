@@ -506,3 +506,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **TRIANGULATE:** rollback was verified with fake keyring/stores, including disable/revoke cleanup without plaintext fallback. Stage 1 behavior and the allowlisted `open_app` path were preserved. Tracked-artifact review found no secrets or raw catalog data.
 - **REFACTOR:** evidence was reconciled into this bounded conditional release-readiness record without changing source, tests, docs, config, dependencies, `.atl`, or historical entries. The stale native SDD ledger exception is preserved: intended-untracked metadata names a playback test that is already tracked, so no native SDD verification is claimed.
 - **Limitations:** this is conditional offline readiness, not live integration acceptance. No credentials, keyring, network, Premium/Desktop target, native SDD verifier, or provider action was exercised. No commit or push was performed.
+
+## 2026-09-11 session checkpoint
+
+- **Delivered:** Client ID keyring persistence/setup (`67fe681`), idempotent Secret Service setup fix (`55432b6`), configured local Spotify play/pause wiring and natural aliases (`22635a5`), and prior lifecycle/redaction/docs/release evidence (`eb38937`, `4809714`, `2d55365`).
+- **Verification:** latest control slice passed focused `139` and full `1156` tests with `3` E2E deselected; compileall and diff check passed. Keyring dependency is installed in the project venv; the configured Client ID is stored only in the system keyring.
+- **Known limitation:** album search/API wiring and the full OAuth browser/callback integration remain unfinished. Live smoke was not run. Native SDD attempt metadata remains stale and is intentionally not edited; `.atl` changes remain excluded.
+- **Resume next session:** implement the smallest injected OAuth/catalog integration slice, then wire a non-voice authorization/test entrypoint before any live smoke. Keep Stage 1 Desktop playback and Stage 2 fail-closed boundaries intact.

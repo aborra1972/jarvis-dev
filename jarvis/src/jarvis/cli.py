@@ -27,7 +27,7 @@ from jarvis.services.spotify import (
     SPOTIFY_LIVE_TIMEOUT_MAX_S, KeyringCredentialStore,
     create_spotify_oauth_client, SpotifyCatalogBridge, CatalogBridgeCode,
     PlaybackPolicy, PlaybackCode, SpotifyPlaybackBridge,
-    discover_spotify_identities,
+    discover_spotify_identities, spotify_device_fingerprint,
 )
 
 COMMANDS = (
@@ -159,6 +159,70 @@ def _handle_agent(args: argparse.Namespace) -> int:
     profile = config.AGENT_PROFILES[name]
     print(f"Agente cambiado a {profile['name']} (voz: {profile['voice']}).")
     print("El cambio se aplica al reiniciar jarvis.")
+    return 0
+
+
+def _handle_spotify_target_setup(*, writer=None) -> int:
+    """Enroll one confirmed Spotify Desktop API device without exposing its ID."""
+    from jarvis import config
+    configuration, store, transport = _spotify_search_dependencies()
+    if configuration.get("enabled") is not True or configuration.get("authorized") is not True:
+        print("jarvis spotify target setup: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    identities = _spotify_playback_dependencies()[1]()
+    if identities != ["spotify"]:
+        print("jarvis spotify target setup: Spotify MPRIS is not uniquely available.", file=sys.stderr)
+        return 1
+    client = create_spotify_oauth_client(configuration, store=store, transport=transport)
+    if client is None:
+        print("jarvis spotify target setup: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    try:
+        payload = SpotifyPlaybackBridge(oauth=client)("GET", PlaybackPolicy.DEVICES_URL, None, 5.0)
+    except Exception:
+        print("jarvis spotify target setup: provider failure; target unchanged.", file=sys.stderr)
+        return 1
+    devices = payload.get("devices") if isinstance(payload, dict) else None
+    if not isinstance(devices, list):
+        print("jarvis spotify target setup: malformed provider response; target unchanged.", file=sys.stderr)
+        return 1
+    valid = []
+    for device in devices:
+        if not isinstance(device, dict) or device.get("type") != "computer":
+            continue
+        try:
+            fingerprint = spotify_device_fingerprint(device.get("id"))
+        except ValueError:
+            continue
+        name = device.get("name") if isinstance(device.get("name"), str) else "unnamed device"
+        name = "".join(ch if ch.isprintable() and ch not in "\\x00\\x1f\\x7f" else "?" for ch in name).strip()[:40] or "unnamed device"
+        valid.append((fingerprint, name))
+    if not valid:
+        print("jarvis spotify target setup: no valid computer target; target unchanged.", file=sys.stderr)
+        return 1
+    try:
+        if len(valid) == 1:
+            print(f"Spotify Desktop target: {valid[0][1]} (computer)")
+            selected = valid[0] if input("Enroll this target? (yes/no): ").strip().casefold() == "yes" else None
+        else:
+            print("Spotify Desktop targets:")
+            for number, (_, name) in enumerate(valid, 1):
+                print(f"  {number}. {name} (computer)")
+            answer = input("Choose an exact target ordinal (Enter cancels): ").strip()
+            selected = valid[int(answer) - 1] if answer.isdigit() and 1 <= int(answer) <= len(valid) else None
+            if selected is not None and input("Enroll this target? (yes/no): ").strip().casefold() != "yes":
+                selected = None
+    except (EOFError, KeyboardInterrupt, ValueError):
+        selected = None
+    if selected is None:
+        print("Spotify target enrollment cancelled; target unchanged.", file=sys.stderr)
+        return 1
+    try:
+        (writer or config.set_spotify_target_fingerprint)(selected[0])
+    except Exception:
+        print("jarvis spotify target setup: configuration write failed; target unchanged.", file=sys.stderr)
+        return 1
+    print("Spotify target enrolled.")
     return 0
 
 
@@ -401,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_spotify_live_authorize(timeout_s)
     if effective_argv == ["spotify", "authorize"]:
         return _handle_spotify_authorize()
+    if effective_argv == ["spotify", "target", "setup"]:
+        return _handle_spotify_target_setup()
     if effective_argv == ["spotify", "setup"]:
         effective_argv = ["setup", "spotify"]
     args = parser.parse_args(effective_argv)

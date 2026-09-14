@@ -8,6 +8,7 @@ from jarvis.services.spotify import (
     PlaybackCode,
     PlaybackOperation,
     PlaybackPolicy,
+    spotify_device_fingerprint,
 )
 
 
@@ -42,21 +43,32 @@ def candidate_catalog(uri="spotify:artist:a1"):
     return catalog, result.candidates[0].selection_id
 
 
-def ready_policy(api, *, local=None, fingerprint="desktop-1", scopes=None):
+def ready_policy(api, *, local=None, fingerprint=None, scopes=None):
     return PlaybackPolicy(
         api=api,
         local_identity=local or (lambda: ["spotify"]),
-        configured_fingerprint=fingerprint,
+        configured_fingerprint=(spotify_device_fingerprint(api.devices[0]["id"])
+                               if fingerprint is None and api.devices else
+                               (fingerprint or spotify_device_fingerprint("volatile-id"))),
         scopes=APPROVED_SPOTIFY_SCOPES if scopes is None else scopes,
         timeout_s=2.0,
     )
 
 
+def test_device_fingerprint_is_domain_separated_and_requires_nonempty_id():
+    assert spotify_device_fingerprint("volatile-id") == spotify_device_fingerprint("volatile-id")
+    assert len(spotify_device_fingerprint("volatile-id")) == 64
+    assert spotify_device_fingerprint("volatile-id") != __import__("hashlib").sha256(b"volatile-id").hexdigest()
+    with pytest.raises(ValueError):
+        spotify_device_fingerprint("")
+    with pytest.raises(ValueError):
+        spotify_device_fingerprint(" volatile-id")
+
+
 def test_play_selection_requires_all_readiness_gates_and_reads_back_target():
     api = FakeApi(
         {"product": "premium"},
-        [{"id": "volatile-id", "name": "Jarvis Desktop", "type": "computer", "is_active": True,
-          "fingerprint": "desktop-1"}],
+        [{"id": "volatile-id", "name": "Jarvis Desktop", "type": "computer", "is_active": True}],
         {"device": {"id": "volatile-id", "type": "computer"}, "item": {"uri": "spotify:artist:a1"}},
     )
     policy = ready_policy(api)
@@ -82,7 +94,7 @@ def test_play_selection_requires_all_readiness_gates_and_reads_back_target():
         ({"product": "premium"}, [], [], APPROVED_SPOTIFY_SCOPES, PlaybackCode.TARGET_MISSING),
         ({"product": "premium"}, [
             {"id": "a", "name": "one", "type": "computer", "fingerprint": "desktop-1"},
-            {"id": "b", "name": "two", "type": "computer", "fingerprint": "desktop-1"},
+            {"id": "a", "name": "two", "type": "computer", "fingerprint": "desktop-1"},
         ], ["spotify"], APPROVED_SPOTIFY_SCOPES, PlaybackCode.TARGET_AMBIGUOUS),
         ({"product": "premium"}, [{"id": "a", "type": "mobile", "fingerprint": "desktop-1"}], ["spotify"], APPROVED_SPOTIFY_SCOPES, PlaybackCode.TARGET_MISSING),
     ],

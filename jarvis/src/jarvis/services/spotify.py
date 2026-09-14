@@ -42,6 +42,15 @@ class SpotifyResult:
 
 
 _SAFE_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+_SPOTIFY_DEVICE_ID = re.compile(r"[^\s\x00-\x1f\x7f]+\Z")
+_SPOTIFY_FINGERPRINT_DOMAIN = b"jarvis.spotify.device-id.fingerprint.v1\\x00"
+
+
+def spotify_device_fingerprint(device_id: Any) -> str:
+    """Derive a stable, domain-separated fingerprint without exposing the ID."""
+    if not isinstance(device_id, str) or not device_id or not _SPOTIFY_DEVICE_ID.fullmatch(device_id):
+        raise ValueError("invalid Spotify device identity")
+    return hashlib.sha256(_SPOTIFY_FINGERPRINT_DOMAIN + device_id.encode("utf-8")).hexdigest()
 
 
 APPROVED_SPOTIFY_SCOPES = frozenset({
@@ -1158,8 +1167,13 @@ class PlaybackPolicy:
         return PlaybackResult(PlaybackCode.OK)
 
     def _matches_target(self, device: Any) -> bool:
-        return (isinstance(device, dict) and device.get("type") == "computer"
-                and device.get("fingerprint") == self._fingerprint)
+        if not (isinstance(device, dict) and device.get("type") == "computer"):
+            return False
+        try:
+            derived = spotify_device_fingerprint(device.get("id"))
+        except ValueError:
+            return False
+        return hmac.compare_digest(derived, self._fingerprint or "")
 
     @staticmethod
     def _playable_uri(uri: Any, kind: str) -> bool:

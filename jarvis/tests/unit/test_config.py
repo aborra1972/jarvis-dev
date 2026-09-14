@@ -27,6 +27,16 @@ def test_spotify_playback_config_requires_explicit_safe_target_fingerprint() -> 
     assert config.load_spotify_playback_config({"SPOTIFY_TARGET_FINGERPRINT": "device id"}) == {"target_fingerprint": None}
 
 
+def test_spotify_target_fingerprint_writer_is_atomic_and_preserves_other_config(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("JARVIS_AGENT=jarvis\n")
+    result = config.set_spotify_target_fingerprint("a" * 64, env_file=env_file)
+    assert result == env_file
+    assert env_file.read_text() == "JARVIS_AGENT=jarvis\nSPOTIFY_TARGET_FINGERPRINT=" + "a" * 64 + "\n"
+    with pytest.raises(ValueError):
+        config.set_spotify_target_fingerprint("raw-device-id", env_file=env_file)
+
+
 def test_spotify_local_config_defaults_disabled_and_safe() -> None:
     values = config.load_spotify_local_config({})
     assert values == {"enabled": False, "playerctl_bin": "playerctl", "identity": "spotify", "timeout_s": 2.0}

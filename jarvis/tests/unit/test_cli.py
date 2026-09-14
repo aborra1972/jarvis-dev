@@ -1,7 +1,7 @@
 import pytest
 
 from jarvis import cli
-from jarvis.services.spotify import APPROVED_SPOTIFY_SCOPES
+from jarvis.services.spotify import APPROVED_SPOTIFY_SCOPES, spotify_device_fingerprint
 
 
 def test_spotify_authorize_routes_to_safe_url_constructor(monkeypatch, capsys):
@@ -157,6 +157,24 @@ def test_spotify_live_mode_rejects_timeout_above_hard_max(monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_spotify_live_authorization", pytest.fail)
     assert cli.main(["spotify", "authorize", "--live", "--timeout", "121"]) == 2
     assert "120" in capsys.readouterr().err
+
+
+def test_spotify_target_setup_requires_explicit_confirmation_and_writes_hash_only(monkeypatch, capsys):
+    raw_id = "provider-secret-id"
+    written = []
+    class Api:
+        def __call__(self, method, url, payload, timeout):
+            assert method == "GET" and url.endswith("/me/player/devices")
+            return {"devices": [{"id": raw_id, "name": "Desktop", "type": "computer"}]}
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), None))
+    monkeypatch.setattr(cli, "_spotify_playback_dependencies", lambda: ({}, lambda: ["spotify"]))
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "SpotifyPlaybackBridge", lambda **k: Api())
+    monkeypatch.setattr("builtins.input", lambda prompt: "yes")
+    assert cli._handle_spotify_target_setup(writer=written.append) == 0
+    assert written == [spotify_device_fingerprint(raw_id)]
+    output = capsys.readouterr().out
+    assert raw_id not in output
 
 
 def test_existing_setup_spotify_alias_remains_routed(monkeypatch):

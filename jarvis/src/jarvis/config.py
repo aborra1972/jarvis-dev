@@ -13,6 +13,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -178,6 +179,7 @@ def load_spotify_local_config(environ: Mapping[str, str] | None = None) -> dict[
 
 
 _SPOTIFY_PLAYBACK_FINGERPRINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+_SPOTIFY_DERIVED_FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def load_spotify_playback_config(environ: Mapping[str, str] | None = None) -> dict[str, object]:
@@ -185,6 +187,37 @@ def load_spotify_playback_config(environ: Mapping[str, str] | None = None) -> di
     env = os.environ if environ is None else environ
     value = env.get("SPOTIFY_TARGET_FINGERPRINT", "").strip()
     return {"target_fingerprint": value if _SPOTIFY_PLAYBACK_FINGERPRINT.fullmatch(value) else None}
+
+
+def set_spotify_target_fingerprint(value: str, *, env_file: Path | None = None) -> Path:
+    """Atomically persist only a validated derived target fingerprint."""
+    if not isinstance(value, str) or _SPOTIFY_DERIVED_FINGERPRINT.fullmatch(value) is None:
+        raise ValueError("invalid Spotify target fingerprint")
+    path = ENV_FILE if env_file is None else Path(env_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    output: list[str] = []
+    found = False
+    for line in lines:
+        if line.strip().startswith("SPOTIFY_TARGET_FINGERPRINT="):
+            if not found:
+                output.append(f"SPOTIFY_TARGET_FINGERPRINT={value}")
+                found = True
+        else:
+            output.append(line)
+    if not found:
+        output.append(f"SPOTIFY_TARGET_FINGERPRINT={value}")
+    content = "\n".join(output) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}.", delete=False) as tmp:
+        tmp.write(content)
+        temporary = Path(tmp.name)
+    try:
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return path
 
 
 _SPOTIFY_PLAYBACK = load_spotify_playback_config()

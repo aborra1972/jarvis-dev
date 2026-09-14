@@ -42,6 +42,28 @@ def test_spotify_live_mode_is_explicit_and_reports_safe_status(monkeypatch, caps
     assert callable(called["kwargs"]["server_factory"])
 
 
+def test_spotify_live_mode_reports_typed_code_without_sensitive_details(monkeypatch, capsys):
+    from jarvis.services.spotify import OAuthErrorCode, OAuthResult
+
+    monkeypatch.setattr(
+        cli,
+        "run_spotify_live_authorization",
+        lambda *args, **kwargs: OAuthResult(
+            OAuthErrorCode.PROVIDER_ERROR,
+            "safe authorization failure",
+            access_token="secret-token",
+            payload={"error": "secret-provider-payload"},
+        ),
+    )
+
+    assert cli.main(["spotify", "authorize", "--live"]) == 1
+    error = capsys.readouterr().err
+    assert "provider_error" in error
+    assert "safe authorization failure" in error
+    assert "secret-token" not in error
+    assert "secret-provider-payload" not in error
+
+
 def test_spotify_live_mode_passes_bounded_cli_timeout(monkeypatch):
     from jarvis.services.spotify import OAuthErrorCode, OAuthResult
 

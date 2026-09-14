@@ -199,7 +199,7 @@ def _handle_spotify_live_authorize(timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAU
     if result.code is OAuthErrorCode.OK:
         print("Spotify autorizado correctamente.")
         return 0
-    print(result.message, file=sys.stderr)
+    print(f"{result.code.value}: {result.message}", file=sys.stderr)
     return 1
 
 

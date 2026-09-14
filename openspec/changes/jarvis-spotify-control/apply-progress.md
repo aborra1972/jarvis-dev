@@ -558,3 +558,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** the explicit live callback window now defaults to 120 seconds and accepts an optional `--timeout` value, with a hard maximum of 120 seconds and no unbounded wait. The token HTTP transport remains independently capped at 30 seconds. Loopback binding, exact redirect, one callback, state/session/expiry validation, one-time consumption, cleanup, and fail-closed errors are unchanged.
 - **TDD evidence:** RED: focused OAuth/CLI tests failed for the missing 120-second window and CLI timeout route (3 failures). GREEN: focused OAuth/CLI tests passed (`57 passed`). TRIANGULATE: 120 seconds reaches the fixed loopback server; 120.1 seconds is rejected before browser/server use; existing invalid/declined/bind-failure and redaction tests remain green. REFACTOR: timeout constants are centralized and the live window is kept separate from the token transport limit.
 - **Validation:** no browser, socket, network/provider call, or real keyring mutation was performed.
+
+## Live OAuth CLI diagnostic correction
+
+- **Status:** completed as a narrow diagnostics-only correction; live authorization was not executed.
+- **Behavior:** failed `spotify authorize --live` output now includes the existing `OAuthErrorCode.value` alongside the existing safe message. Raw provider payloads, tokens, authorization code, state, verifier, URL, and exceptions remain unprinted.
+- **TDD evidence:** RED: the focused CLI test failed because `provider_error` was absent from stderr. GREEN: focused CLI tests passed (`7 passed`). TRIANGULATE: the test injects token and provider-payload sentinels and confirms neither is printed; existing timeout, bounded-timeout, and explicit-live routing tests remain green.
+- **Validation:** no live retry, browser, socket, network/provider call, or real keyring mutation was performed.

@@ -213,32 +213,35 @@ def load_spotify_oauth_config(environ: Mapping[str, str] | None = None) -> dict[
         "scopes": _SPOTIFY_OAUTH_SCOPES,
     }
     enabled = env.get("SPOTIFY_API_ENABLED", "false").strip().lower()
-    authorization = env.get("SPOTIFY_AUTHORIZED", "false").strip().lower()
-    authorized = authorization in {"true", "1", "yes", "granted"}
-    if enabled not in {"true", "false", "1", "0", "yes", "no"} or not authorized:
+    authorization_raw = env.get("SPOTIFY_AUTHORIZED")
+    authorization = authorization_raw.strip().lower() if authorization_raw is not None else ""
+    enabled_values = {"true", "false", "1", "0", "yes", "no"}
+    authorization_values = {"true", "false", "1", "0", "yes", "no", "granted"}
+    if enabled not in enabled_values or enabled not in {"true", "1", "yes"}:
         return defaults
-    client_id = ""
-    if enabled in {"true", "1", "yes"}:
-        try:
-            from jarvis.services.spotify import resolve_spotify_client_id
-            stored = resolve_spotify_client_id(None, store=_spotify_client_id_store())
-            if getattr(getattr(stored, "status", None), "value", None) == "ok":
-                client_id = stored.value or ""
-        except Exception:
-            client_id = ""
+    if authorization_raw is None or authorization not in authorization_values:
+        return defaults
+    authorized = authorization in {"true", "1", "yes", "granted"}
     try:
         ttl = float(env.get("SPOTIFY_OAUTH_TRANSACTION_TTL_S", "300"))
     except (TypeError, ValueError):
         return defaults
-    if enabled not in {"true", "false", "1", "0", "yes", "no"}:
-        return defaults
-    if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
-        return defaults
     if not math.isfinite(ttl) or not 30.0 <= ttl <= 600.0:
         return defaults
+
+    client_id = ""
+    try:
+        from jarvis.services.spotify import resolve_spotify_client_id
+        stored = resolve_spotify_client_id(None, store=_spotify_client_id_store())
+        if getattr(getattr(stored, "status", None), "value", None) == "ok":
+            client_id = stored.value or ""
+    except Exception:
+        client_id = ""
+    if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
+        return defaults
     defaults.update(
-        enabled=enabled in {"true", "1", "yes"},
-        authorized=True,
+        enabled=True,
+        authorized=authorized,
         client_id=client_id,
         transaction_ttl_s=ttl,
     )

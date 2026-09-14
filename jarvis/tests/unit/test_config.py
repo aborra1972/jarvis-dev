@@ -59,7 +59,7 @@ def test_spotify_oauth_config_is_disabled_by_default_with_fixed_policy(monkeypat
     }
 
 
-def test_spotify_oauth_config_requires_explicit_enable_authorization_and_keyring_id(monkeypatch) -> None:
+def test_spotify_oauth_config_requires_explicit_enable_and_keyring_id(monkeypatch) -> None:
     assert config.load_spotify_oauth_config({"SPOTIFY_CLIENT_ID": "client"})["enabled"] is False
     assert config.load_spotify_oauth_config({"SPOTIFY_API_ENABLED": "true"})["enabled"] is False
     client_id = "a" * 32
@@ -83,9 +83,34 @@ def test_spotify_oauth_config_requires_explicit_enable_authorization_and_keyring
     assert values["transaction_ttl_s"] == 120.0
 
 
-def test_spotify_oauth_config_declined_or_missing_authorization_fails_closed(monkeypatch) -> None:
+def test_spotify_oauth_config_loads_pending_authorization_from_keyring(monkeypatch) -> None:
+    client_id = "b" * 32
+
+    class Result:
+        status = type("Status", (), {"value": "ok"})()
+        value = client_id
+
+    class Store:
+        def load(self):
+            return Result()
+
+    monkeypatch.setattr(config, "_spotify_client_id_store", lambda: Store())
+    values = config.load_spotify_oauth_config({
+        "SPOTIFY_API_ENABLED": "true", "SPOTIFY_AUTHORIZED": "false",
+        "SPOTIFY_OAUTH_TRANSACTION_TTL_S": "90",
+    })
+    assert values == {
+        "enabled": True,
+        "authorized": False,
+        "client_id": client_id,
+        "transaction_ttl_s": 90.0,
+        "scopes": frozenset({"user-read-playback-state", "user-modify-playback-state"}),
+    }
+
+
+def test_spotify_oauth_config_declined_or_missing_authorization_still_requires_valid_client_id(monkeypatch) -> None:
     monkeypatch.setattr(config, "_spotify_client_id_store", lambda: pytest.fail("keyring must not be read"))
-    for authorization in (None, "false", "declined"):
+    for authorization in (None, "declined"):
         environ = {"SPOTIFY_API_ENABLED": "true"}
         if authorization is not None:
             environ["SPOTIFY_AUTHORIZED"] = authorization

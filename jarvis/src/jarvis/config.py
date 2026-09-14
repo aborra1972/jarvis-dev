@@ -177,6 +177,20 @@ def load_spotify_local_config(environ: Mapping[str, str] | None = None) -> dict[
     return defaults
 
 
+_SPOTIFY_PLAYBACK_FINGERPRINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+
+
+def load_spotify_playback_config(environ: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Load the explicitly configured, non-secret Spotify target fingerprint."""
+    env = os.environ if environ is None else environ
+    value = env.get("SPOTIFY_TARGET_FINGERPRINT", "").strip()
+    return {"target_fingerprint": value if _SPOTIFY_PLAYBACK_FINGERPRINT.fullmatch(value) else None}
+
+
+_SPOTIFY_PLAYBACK = load_spotify_playback_config()
+SPOTIFY_TARGET_FINGERPRINT: str | None = _SPOTIFY_PLAYBACK["target_fingerprint"]  # type: ignore[assignment]
+
+
 _SPOTIFY_LOCAL = load_spotify_local_config()
 SPOTIFY_LOCAL_ENABLED: bool = _SPOTIFY_LOCAL["enabled"]  # type: ignore[assignment]
 SPOTIFY_PLAYERCTL_BIN: str = _SPOTIFY_LOCAL["playerctl_bin"]  # type: ignore[assignment]

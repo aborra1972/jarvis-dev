@@ -26,6 +26,8 @@ from jarvis.services.spotify import (
     resolve_spotify_client_id, SPOTIFY_LIVE_TIMEOUT_DEFAULT_S,
     SPOTIFY_LIVE_TIMEOUT_MAX_S, KeyringCredentialStore,
     create_spotify_oauth_client, SpotifyCatalogBridge, CatalogBridgeCode,
+    PlaybackPolicy, PlaybackCode, SpotifyPlaybackBridge,
+    discover_spotify_identities,
 )
 
 COMMANDS = (
@@ -291,6 +293,55 @@ def _spotify_search_dependencies():
     return config.load_spotify_oauth_config(), KeyringCredentialStore(), _urllib_transport
 
 
+def _spotify_playback_dependencies():
+    from jarvis import config
+    return config.load_spotify_playback_config(), lambda: discover_spotify_identities(
+        config.SPOTIFY_PLAYERCTL_BIN, config.SPOTIFY_MPRIS_IDENTITY,
+    )
+
+
+def _handle_spotify_search_and_play(args: argparse.Namespace) -> int:
+    configuration, store, transport = _spotify_search_dependencies()
+    if configuration.get("enabled") is not True or configuration.get("authorized") is not True:
+        print("jarvis spotify search-and-play: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    playback_config, local_identity = _spotify_playback_dependencies()
+    fingerprint = playback_config.get("target_fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        print("jarvis spotify search-and-play: target is not configured.", file=sys.stderr)
+        return 1
+    client = create_spotify_oauth_client(configuration, store=store, transport=transport)
+    if client is None:
+        print("jarvis spotify search-and-play: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    bridge = SpotifyCatalogBridge(oauth=client, transport=transport)
+    result = bridge.search(args.kind, args.query, session_id="cli", limit=args.limit)
+    if result.code is not CatalogBridgeCode.OK or result.catalog is None or not result.catalog.candidates:
+        print(f"jarvis spotify search-and-play: {result.code.value}.", file=sys.stderr)
+        return 1
+    for number, candidate in enumerate(result.catalog.candidates, 1):
+        print(f"{number}. {candidate.name} — {candidate.artist or 'unknown artist'} ({candidate.kind})")
+    try:
+        choice = input("Elegí un resultado por número (Enter cancela): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("Selección cancelada.", file=sys.stderr)
+        return 1
+    if not choice.isdigit() or not 1 <= int(choice) <= len(result.catalog.candidates):
+        print("Selección cancelada.", file=sys.stderr)
+        return 1
+    selected = result.catalog.candidates[int(choice) - 1]
+    policy = PlaybackPolicy(
+        api=SpotifyPlaybackBridge(oauth=client), local_identity=local_identity,
+        configured_fingerprint=fingerprint, scopes=configuration.get("scopes"),
+    )
+    outcome = policy.play_selection(bridge.catalog, selected.selection_id, session_id="cli")
+    if outcome.code is not PlaybackCode.OK:
+        print(f"jarvis spotify search-and-play: {outcome.code.value}.", file=sys.stderr)
+        return 1
+    print(f"Reproduciendo {selected.name} — {selected.artist or 'unknown artist'} ({selected.kind}).")
+    return 0
+
+
 def _handle_spotify_search(args: argparse.Namespace) -> int:
     configuration, store, transport = _spotify_search_dependencies()
     if configuration.get("enabled") is not True or configuration.get("authorized") is not True:
@@ -327,8 +378,11 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the historical top-level command list stable while accepting the
     # clearer Spotify setup spelling as an equivalent alias.
     effective_argv = list(sys.argv[1:] if argv is None else argv)
-    if effective_argv[:2] == ["spotify", "search"]:
-        return _handle_spotify_search(_parse_spotify_search(effective_argv[2:]))
+    if effective_argv[:2] in (["spotify", "search"], ["spotify", "search-and-play"]):
+        parsed = _parse_spotify_search(effective_argv[2:])
+        if effective_argv[1] == "search-and-play":
+            return _handle_spotify_search_and_play(parsed)
+        return _handle_spotify_search(parsed)
     if effective_argv[:3] == ["spotify", "authorize", "--live"]:
         timeout_s = SPOTIFY_LIVE_TIMEOUT_DEFAULT_S
         remaining = effective_argv[3:]

@@ -461,6 +461,21 @@ The broad catalog row remains intentionally unchecked, along with the following 
 
 ## Current documentation/reconciliation slice
 
+## Authorized safe slice `spotify-search-and-play-same-process`
+
+- **Status:** completed for the bounded offline/injected CLI flow; broad Stage 2 rows remain unchanged.
+- **Behavior:** `spotify search-and-play --kind album|artist --query TEXT [--limit N]` searches through the OAuth/catalog bridge, prints only safe numbered metadata, requires an explicit numeric selection even for one result, resolves the same volatile catalog session, then invokes `PlaybackPolicy`. EOF, Ctrl-C, invalid numbers, unavailable OAuth, Premium, identity, fingerprint, device, or readback gates fail closed before playback.
+- **Files:** `jarvis/src/jarvis/cli.py`, `jarvis/src/jarvis/config.py`, `jarvis/src/jarvis/services/spotify.py`, and focused tests. No cross-process persistence, browser, keyring mutation, live provider, or playback was used.
+
+### TDD Cycle Evidence
+
+| Cycle | Evidence |
+|---|---|
+| RED | New config, OAuth adapter, and CLI selection tests failed because the target config, playback adapter, and command flow were absent. |
+| GREEN | Added the minimal same-process flow and fixed official-endpoint OAuth adapter; focused tests passed: `150 passed`. |
+| TRIANGULATE | Full suite passed `1273 passed, 3 deselected`; tests cover EOF, explicit selection, safe output, OAuth/catalog/playback gates, and readback. |
+| REFACTOR | Kept selection volatile and in-memory, restricted adapter endpoints, preserved standalone search and Stage 1, and did not run live capabilities. |
+
 - **Status:** completed as an explicitly authorized project-local reconciliation.
   Historical entries above are preserved. Only the documentation, progress,
   verification, and task surfaces named by the parent were edited.

@@ -180,6 +180,46 @@ def test_spotify_search_cli_routes_safe_candidates_without_playback(monkeypatch,
     assert "spotify:album:raw" not in output and "Björk" not in output
 
 
+def test_spotify_search_and_play_requires_numbered_selection_before_playback(monkeypatch, capsys):
+    from jarvis.services.spotify import CatalogBridgeCode, CatalogCandidate, CatalogResult, CatalogCode, PlaybackResult, PlaybackCode
+    candidate = CatalogCandidate("opaque", "artist", "Björk", "spotify:artist:raw")
+    class FakeBridge:
+        def __init__(self, **kwargs): self.catalog = object()
+        def search(self, *args, **kwargs):
+            return type("Result", (), {"code": CatalogBridgeCode.OK, "catalog": CatalogResult(CatalogCode.MULTIPLE, (candidate, CatalogCandidate("two", "artist", "Other", "spotify:artist:two")))})()
+    policy_calls = []
+    class Policy:
+        def __init__(self, **kwargs): pass
+        def play_selection(self, *args, **kwargs):
+            policy_calls.append(args); return PlaybackResult(PlaybackCode.OK)
+    monkeypatch.setattr(cli, "SpotifyCatalogBridge", FakeBridge)
+    monkeypatch.setattr(cli, "PlaybackPolicy", Policy, raising=False)
+    monkeypatch.setattr(cli, "SpotifyPlaybackBridge", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), lambda *a: None))
+    monkeypatch.setattr(cli, "_spotify_playback_dependencies", lambda: ({"target_fingerprint": "desktop-1"}, lambda: ["spotify"]))
+    monkeypatch.setattr("builtins.input", lambda prompt: "2")
+    assert cli.main(["spotify", "search-and-play", "--kind", "artist", "--query", "Björk"]) == 0
+    assert len(policy_calls) == 1 and policy_calls[0][1] == "two"
+    output = capsys.readouterr().out
+    assert "spotify:artist" not in output and "opaque" not in output and "Björk" in output
+
+
+def test_spotify_search_and_play_eof_never_plays(monkeypatch):
+    from jarvis.services.spotify import CatalogBridgeCode, CatalogCandidate, CatalogResult, CatalogCode
+    class FakeBridge:
+        def __init__(self, **kwargs): self.catalog = object()
+        def search(self, *args, **kwargs):
+            return type("Result", (), {"code": CatalogBridgeCode.OK, "catalog": CatalogResult(CatalogCode.SINGLE, (CatalogCandidate("one", "album", "Safe", "spotify:album:raw"),))})()
+    monkeypatch.setattr(cli, "SpotifyCatalogBridge", FakeBridge)
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), lambda *a: None))
+    monkeypatch.setattr(cli, "_spotify_playback_dependencies", lambda: ({"target_fingerprint": "desktop-1"}, lambda: ["spotify"]))
+    monkeypatch.setattr("builtins.input", lambda prompt: (_ for _ in ()).throw(EOFError))
+    monkeypatch.setattr(cli, "PlaybackPolicy", pytest.fail, raising=False)
+    assert cli.main(["spotify", "search-and-play", "--kind", "album", "--query", "Safe"]) == 1
+
+
 def test_spotify_search_cli_disabled_does_not_construct_or_transport(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": False, "authorized": False}, object(), pytest.fail))
     monkeypatch.setattr(cli, "create_spotify_oauth_client", pytest.fail)

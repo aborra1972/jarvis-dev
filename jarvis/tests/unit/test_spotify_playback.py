@@ -139,6 +139,18 @@ def test_unknown_readback_is_not_reported_as_success():
     assert result.code is PlaybackCode.STATE_UNKNOWN
 
 
+def test_oauth_playback_bridge_uses_fixed_api_and_normalizes_no_content():
+    from jarvis.services.spotify import SpotifyPlaybackBridge, OAuthErrorCode, OAuthResult
+    calls = []
+    class OAuth:
+        def request(self, method, url, payload):
+            calls.append((method, url, payload))
+            return OAuthResult(OAuthErrorCode.OK, "", payload={"product": "premium"})
+    bridge = SpotifyPlaybackBridge(oauth=OAuth())
+    assert bridge("GET", "https://api.spotify.com/v1/me", None, 2.0) == {"product": "premium"}
+    assert calls == [("GET", "https://api.spotify.com/v1/me", None)]
+
+
 def test_cancellation_prevents_playback_and_readback():
     api = FakeApi(
         {"product": "premium"},

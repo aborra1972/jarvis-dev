@@ -514,7 +514,14 @@ class OAuthClient:
             return self._cleanup(OAuthErrorCode.UNAUTHORIZED)
         if not isinstance(status, int) or status < 200 or status >= 300:
             return self._result(OAuthErrorCode.PROVIDER_ERROR)
-        return OAuthResult(OAuthErrorCode.OK, "", payload=None)
+        try:
+            payload = response.json() if callable(getattr(response, "json", None)) else None
+        except Exception:
+            if method.upper() == "PUT":
+                payload = None
+            else:
+                return self._result(OAuthErrorCode.INVALID_RESPONSE)
+        return OAuthResult(OAuthErrorCode.OK, "", payload=payload)
 
     def revoke(self) -> OAuthResult:
         return self._cleanup(OAuthErrorCode.OK)
@@ -695,7 +702,9 @@ def _urllib_transport(method: str, url: str, data: dict[str, str] | None,
             try:
                 payload = json.loads(response.read())
             except (json.JSONDecodeError, ValueError):
-                return _OAuthTransportFailure(OAuthErrorCode.INVALID_RESPONSE)
+                if url == OAuthClient.TOKEN_URL:
+                    return _OAuthTransportFailure(OAuthErrorCode.INVALID_RESPONSE)
+                payload = None
             return _HTTPResponse(response.status, payload)
     except HTTPError as error:
         try:
@@ -1190,6 +1199,7 @@ class CatalogCandidate:
     kind: str
     name: str
     uri: str
+    artist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1318,7 +1328,23 @@ class CatalogClient:
             return None
         if item.get("type", kind) != kind:
             return None
-        return CatalogCandidate(secrets.token_urlsafe(9), kind, name, uri)
+        artist = None
+        artists = item.get("artists")
+        if isinstance(artists, list) and artists and isinstance(artists[0], dict):
+            artist = artists[0].get("name") if isinstance(artists[0].get("name"), str) else None
+        return CatalogCandidate(secrets.token_urlsafe(9), kind, name, uri, artist)
+
+
+def discover_spotify_identities(playerctl_bin: str = "playerctl", identity: str = "spotify") -> list[str]:
+    """Read local player identities using one fixed, side-effect-free command."""
+    try:
+        result = subprocess.run([playerctl_bin, "-l"], shell=False, capture_output=True,
+                                text=True, timeout=2.0, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 class CatalogBridgeCode(str, Enum):
@@ -1342,6 +1368,13 @@ class CatalogBridgeResult:
 
 class SpotifyCatalogBridge:
     """Injectable OAuth-to-catalog boundary; it never creates a live transport."""
+
+    @property
+    def catalog(self) -> CatalogClient:
+        return self._catalog
+
+    def resolve(self, selection_id: str, *, session_id: str) -> CatalogResult:
+        return self._catalog.resolve(selection_id, session_id=session_id)
 
     def __init__(self, *, oauth: OAuthClient, transport: Callable[..., Any],
                  clock: Callable[[], float] = time.time, ttl_s: float = 120.0,
@@ -1426,6 +1459,30 @@ class SpotifyCatalogBridge:
         if code is CatalogCode.PROVIDER_ERROR:
             return CatalogBridgeCode.PROVIDER_ERROR
         return CatalogBridgeCode.OK
+
+
+class SpotifyPlaybackBridge:
+    """Adapt the existing OAuth request seam to the playback policy API."""
+
+    def __init__(self, *, oauth: OAuthClient) -> None:
+        if not callable(getattr(oauth, "request", None)):
+            raise ValueError("invalid playback OAuth boundary")
+        self._oauth = oauth
+        self._allowed_urls = {PlaybackPolicy.ACCOUNT_URL, PlaybackPolicy.DEVICES_URL,
+                              PlaybackPolicy.PLAY_URL, PlaybackPolicy.READBACK_URL}
+
+    def __call__(self, method: str, url: str, payload: dict[str, Any] | None,
+                 timeout: float) -> Any:
+        if url not in self._allowed_urls or method.upper() not in {"GET", "PUT"}:
+            raise RuntimeError("unsupported Spotify endpoint")
+        result = self._oauth.request(method, url, payload)
+        if result.code is OAuthErrorCode.NETWORK_TIMEOUT:
+            raise TimeoutError
+        if not result.ok:
+            raise RuntimeError("Spotify request failed")
+        if method.upper() == "PUT":
+            return {"accepted": True}
+        return result.payload
 
 
 class SpotifyService:

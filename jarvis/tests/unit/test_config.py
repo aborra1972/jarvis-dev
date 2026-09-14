@@ -21,6 +21,12 @@ def test_codex_reasoning_effort_invalid_input_fails_closed_to_low() -> None:
     assert config._resolve_codex_reasoning_effort("") == "low"
 
 
+def test_spotify_playback_config_requires_explicit_safe_target_fingerprint() -> None:
+    assert config.load_spotify_playback_config({}) == {"target_fingerprint": None}
+    assert config.load_spotify_playback_config({"SPOTIFY_TARGET_FINGERPRINT": "desktop-1"}) == {"target_fingerprint": "desktop-1"}
+    assert config.load_spotify_playback_config({"SPOTIFY_TARGET_FINGERPRINT": "device id"}) == {"target_fingerprint": None}
+
+
 def test_spotify_local_config_defaults_disabled_and_safe() -> None:
     values = config.load_spotify_local_config({})
     assert values == {"enabled": False, "playerctl_bin": "playerctl", "identity": "spotify", "timeout_s": 2.0}

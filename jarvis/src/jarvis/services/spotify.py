@@ -12,7 +12,7 @@ import secrets
 import subprocess
 import threading
 import time
-from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -56,6 +56,10 @@ SPOTIFY_LIVE_TIMEOUT_MAX_S = 120.0
 class OAuthCallbackCode(str, Enum):
     OK = "ok"
     INVALID_CALLBACK = "invalid_callback"
+    INVALID_PATH = "invalid_path"
+    INVALID_QUERY_KEYS = "invalid_query_keys"
+    DUPLICATE_OR_EMPTY_QUERY = "duplicate_or_empty_query"
+    FRAGMENT_PRESENT = "fragment_present"
     STATE_MISMATCH = "state_mismatch"
     SESSION_MISMATCH = "session_mismatch"
     EXPIRED = "expired"
@@ -98,26 +102,34 @@ def parse_pkce_callback(
 ) -> OAuthCallbackResult:
     """Validate one injected loopback callback without performing I/O."""
     if not isinstance(callback_url, str):
-        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
-    parsed = urlsplit(callback_url)
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_PATH)
+    try:
+        parsed = urlsplit(callback_url)
+    except ValueError:
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_PATH)
     if (parsed.scheme, parsed.netloc, parsed.path) != ("http", "127.0.0.1:8888", "/callback"):
-        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_PATH)
     if parsed.fragment:
-        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
-    query = parse_qs(parsed.query, keep_blank_values=True)
-    if set(query) != {"code", "state"} or any(len(values) != 1 or not values[0] for values in query.values()):
-        return OAuthCallbackResult(OAuthCallbackCode.INVALID_CALLBACK)
+        return OAuthCallbackResult(OAuthCallbackCode.FRAGMENT_PRESENT)
+    if parsed.query and any(not part for part in parsed.query.split("&")):
+        return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if {key for key, _ in query_pairs} != {"code", "state"}:
+        return OAuthCallbackResult(OAuthCallbackCode.INVALID_QUERY_KEYS)
+    if len(query_pairs) != 2 or any(not value for _, value in query_pairs):
+        return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
+    query = dict(query_pairs)
     if transaction._consumed:
         return OAuthCallbackResult(OAuthCallbackCode.ALREADY_CONSUMED)
     if session_id != transaction.session_id:
         return OAuthCallbackResult(OAuthCallbackCode.SESSION_MISMATCH)
     if now >= transaction.expires_at:
         return OAuthCallbackResult(OAuthCallbackCode.EXPIRED)
-    if not hmac.compare_digest(query["state"][0], transaction.state):
+    if not hmac.compare_digest(query["state"], transaction.state):
         return OAuthCallbackResult(OAuthCallbackCode.STATE_MISMATCH)
     if not transaction.consume(session_id, now=now):
         return OAuthCallbackResult(OAuthCallbackCode.EXPIRED)
-    return OAuthCallbackResult(OAuthCallbackCode.OK, query["code"][0])
+    return OAuthCallbackResult(OAuthCallbackCode.OK, query["code"])
 
 
 def create_pkce_transaction(

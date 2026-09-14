@@ -65,7 +65,8 @@ def test_spotify_live_mode_reports_typed_code_without_sensitive_details(monkeypa
 
 
 @pytest.mark.parametrize("callback_code", [
-    "state_mismatch", "invalid_callback", "expired", "already_consumed",
+    "state_mismatch", "invalid_path", "invalid_query_keys",
+    "duplicate_or_empty_query", "fragment_present", "expired", "already_consumed",
 ])
 def test_spotify_live_mode_reports_only_safe_callback_category(monkeypatch, capsys, callback_code):
     from jarvis.services.spotify import OAuthCallbackCode, OAuthErrorCode, OAuthResult

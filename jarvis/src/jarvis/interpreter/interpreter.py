@@ -282,6 +282,9 @@ def resolve_intent(
     # rioplatense variants via _verb_alt, so free-text entities (ask/web_search
     # queries) keep the user's original wording instead of corrupted verb forms.
     surface = normalize(text, canonicalize=False)
+    # Strip terminal STT punctuation (e.g. period from "que hora es.") so that
+    # golden gate patterns like '^(que hora es|decime la hora)$' match correctly.
+    surface = surface.rstrip(_TERMINAL_STT_PUNCTUATION).strip()
     if not surface:
         return Interpretation(needs_reask=True, reason="empty")
 

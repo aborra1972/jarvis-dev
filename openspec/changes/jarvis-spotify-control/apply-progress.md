@@ -579,3 +579,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** invalid query-key failures now expose only `keys:` followed by at most six names. Only `code`, `state`, `scope`, `error`, `error_description`, and `error_uri` are emitted; every other key is rendered as `unknown`. Query values and callback URLs remain excluded, and callback validation remains fail-closed.
 - **TDD evidence:** RED: new OAuth/CLI tests failed because callback results had no sanitized diagnostic field and CLI results had no diagnostic transport. GREEN: focused OAuth/CLI tests passed (`76 passed`). TRIANGULATE: tests cover known-key summaries, attacker-key redaction/bounding, CLI output, and unchanged callback categories. REFACTOR: diagnostics remain separate from typed callback categories and hidden from result representations.
 - **Validation:** compileall and `git diff --check` passed. No live authorization retry, browser open, network/provider call, keyring mutation, commit, or push was performed.
+
+## Spotify standard OAuth issuer parameter correction
+
+- **Status:** completed as a bounded offline callback-parser correction.
+- **Behavior:** `iss` is accepted as an optional callback parameter only when it equals exactly `https://accounts.spotify.com`; missing, invalid, empty, duplicate, and arbitrary parameters remain fail-closed. Exactly one non-empty `code` and `state`, exact loopback redirect, fragment rejection, session/state binding, expiry, and one-time consumption are preserved.
+- **Diagnostics:** `iss` is allowlisted by name only; issuer values, codes, state, URLs, and other secrets remain absent from sanitized diagnostics and CLI output.
+- **TDD evidence:** RED: focused OAuth/CLI tests reported four issuer/diagnostic failures. GREEN: focused OAuth/CLI tests passed (`81 passed`). TRIANGULATE: existing structural, state/session, expiry, consumed-transaction, redaction, and CLI tests remain green; compileall and diff checks passed. No live authorization retry, browser, socket, network/provider call, keyring mutation, commit, or push was performed.

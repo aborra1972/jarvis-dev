@@ -49,6 +49,7 @@ APPROVED_SPOTIFY_SCOPES = frozenset({
     "user-modify-playback-state",
 })
 LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+SPOTIFY_ISSUER = "https://accounts.spotify.com"
 SPOTIFY_LIVE_TIMEOUT_DEFAULT_S = 120.0
 SPOTIFY_LIVE_TIMEOUT_MAX_S = 120.0
 
@@ -67,7 +68,7 @@ class OAuthCallbackCode(str, Enum):
 
 
 _CALLBACK_DIAGNOSTIC_KEYS = frozenset({
-    "code", "state", "scope", "error", "error_description", "error_uri",
+    "code", "state", "iss", "scope", "error", "error_description", "error_uri",
 })
 _CALLBACK_DIAGNOSTIC_MAX_KEYS = 6
 
@@ -128,14 +129,20 @@ def parse_pkce_callback(
     if parsed.query and any(not part for part in parsed.query.split("&")):
         return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    if {key for key, _ in query_pairs} != {"code", "state"}:
+    keys = {key for key, _ in query_pairs}
+    if keys not in ({"code", "state"}, {"code", "state", "iss"}):
         return OAuthCallbackResult(
             OAuthCallbackCode.INVALID_QUERY_KEYS,
             diagnostic=_callback_key_diagnostic(query_pairs),
         )
-    if len(query_pairs) != 2 or any(not value for _, value in query_pairs):
+    if len(query_pairs) != len(keys) or any(not value for _, value in query_pairs):
         return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
     query = dict(query_pairs)
+    if "iss" in query and query["iss"] != SPOTIFY_ISSUER:
+        return OAuthCallbackResult(
+            OAuthCallbackCode.INVALID_QUERY_KEYS,
+            diagnostic=_callback_key_diagnostic(query_pairs),
+        )
     if transaction._consumed:
         return OAuthCallbackResult(OAuthCallbackCode.ALREADY_CONSUMED)
     if session_id != transaction.session_id:

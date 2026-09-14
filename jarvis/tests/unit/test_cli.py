@@ -101,14 +101,15 @@ def test_spotify_live_mode_reports_sanitized_query_key_diagnostic(monkeypatch, c
             OAuthErrorCode.INVALID_RESPONSE,
             "unsafe callback URL and values",
             callback_code=OAuthCallbackCode.INVALID_QUERY_KEYS,
-            callback_diagnostic="keys:code,state,unknown",
+            callback_diagnostic="keys:code,state,iss,unknown",
         ),
     )
 
     assert cli.main(["spotify", "authorize", "--live"]) == 1
     error = capsys.readouterr().err
-    assert error.strip() == "invalid_response: keys:code,state,unknown"
+    assert error.strip() == "invalid_response: keys:code,state,iss,unknown"
     assert "unsafe callback URL" not in error
+    assert "https://accounts.spotify.com" not in error
     assert "unknown-attacker-key" not in error
 
 

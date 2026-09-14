@@ -51,6 +51,33 @@ def test_callback_accepts_exact_loopback_shape_and_consumes_transaction() -> Non
     assert not tx.valid_for("session-1", now=101.0)
 
 
+def test_callback_accepts_spotify_issuer_without_exposing_it() -> None:
+    tx = create_pkce_transaction("session-1", now=100.0, ttl_s=60.0,
+                                 token_factory=lambda: "state")
+    result = parse_pkce_callback(
+        "http://127.0.0.1:8888/callback?code=auth-code&state=state"
+        "&iss=https%3A%2F%2Faccounts.spotify.com",
+        transaction=tx, session_id="session-1", now=101.0,
+    )
+    assert result.code is OAuthCallbackCode.OK
+    assert result.authorization_code == "auth-code"
+    assert "accounts.spotify.com" not in repr(result)
+
+
+@pytest.mark.parametrize(("callback", "expected"), [
+    ("http://127.0.0.1:8888/callback?code=c&state=s&iss=", OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY),
+    ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Faccounts.spotify.com.evil", OAuthCallbackCode.INVALID_QUERY_KEYS),
+    ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Fexample.com", OAuthCallbackCode.INVALID_QUERY_KEYS),
+    ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Faccounts.spotify.com&iss=https%3A%2F%2Faccounts.spotify.com", OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY),
+    ])
+def test_callback_issuer_is_optional_but_exact_when_present(callback, expected) -> None:
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
+    result = parse_pkce_callback(callback, transaction=tx, session_id="session-1", now=101.0)
+    assert result.code is expected
+    assert result.authorization_code is None
+    assert tx.valid_for("session-1", now=101.0)
+
+
 @pytest.mark.parametrize(("callback", "expected"), [
     ("http://127.0.0.1:8888/not-callback?code=c&state=s", OAuthCallbackCode.INVALID_PATH),
     ("http://127.0.0.1:8889/callback?code=c&state=s", OAuthCallbackCode.INVALID_PATH),
@@ -72,13 +99,13 @@ def test_callback_reports_bounded_structural_category(callback, expected) -> Non
 def test_callback_reports_sanitized_query_key_summary_without_values_or_url() -> None:
     tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
     result = parse_pkce_callback(
-        "http://127.0.0.1:8888/callback?code=code-secret&state=s&scope=scope-secret&evil=attacker-secret",
+        "http://127.0.0.1:8888/callback?code=code-secret&state=s&iss=https%3A%2F%2Faccounts.spotify.com&evil=attacker-secret",
         transaction=tx, session_id="session-1", now=101.0,
     )
     assert result.code is OAuthCallbackCode.INVALID_QUERY_KEYS
-    assert result.diagnostic == "keys:code,state,scope,unknown"
+    assert result.diagnostic == "keys:code,state,iss,unknown"
     assert "code-secret" not in result.diagnostic
-    assert "scope-secret" not in result.diagnostic
+    assert "accounts.spotify.com" not in result.diagnostic
     assert "evil" not in result.diagnostic
     assert "http://127.0.0.1:8888/callback" not in result.diagnostic
 

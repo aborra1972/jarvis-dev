@@ -1,9 +1,15 @@
 from dataclasses import dataclass
 
+import pytest
+
 from jarvis.services.spotify import (
+    CatalogBridgeCode,
     CatalogCode,
     CatalogClient,
     CatalogOperation,
+    OAuthErrorCode,
+    OAuthResult,
+    SpotifyCatalogBridge,
 )
 
 
@@ -147,3 +153,91 @@ def test_catalog_operation_is_bounded_and_cancellation_does_not_store_results():
 
     assert result.code is CatalogCode.CANCELLED
     assert client.pending_count == 0
+
+
+def bridge_response(items, status=200):
+    return type("Response", (), {
+        "status_code": status,
+        "json": lambda self: {"artists": {"items": items}},
+    })()
+
+
+class FakeOAuth:
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def access_token(self):
+        self.calls += 1
+        return self.result
+
+
+def test_bridge_gets_token_and_uses_bounded_bearer_search_transport():
+    calls = []
+    oauth = FakeOAuth(OAuthResult(OAuthErrorCode.OK, "", access_token="secret-token"))
+
+    def transport(method, url, params, headers, timeout):
+        calls.append((method, url, params, headers, timeout))
+        return bridge_response([item()])
+
+    bridge = SpotifyCatalogBridge(oauth=oauth, transport=transport, timeout_s=2.0)
+    result = bridge.search("artist", "  Björk  ", session_id="s1", limit=99)
+
+    assert result.code is CatalogBridgeCode.OK
+    assert result.catalog is not None and result.catalog.code is CatalogCode.SINGLE
+    assert calls == [("GET", "https://api.spotify.com/v1/search",
+                      {"q": "Björk", "type": "artist", "limit": 10},
+                      {"Authorization": "Bearer secret-token"}, 2.0)]
+    assert "secret-token" not in repr(result)
+
+
+def test_bridge_rejects_unsupported_and_does_not_call_transport():
+    calls = []
+    bridge = SpotifyCatalogBridge(
+        oauth=FakeOAuth(OAuthResult(OAuthErrorCode.OK, "", access_token="token")),
+        transport=lambda *args: calls.append(args),
+    )
+    result = bridge.search("track", "x", session_id="s1")
+    assert result.code is CatalogBridgeCode.UNSUPPORTED
+    assert calls == []
+
+
+@pytest.mark.parametrize(("oauth_code", "bridge_code"), [
+    (OAuthErrorCode.DISABLED, CatalogBridgeCode.DISABLED),
+    (OAuthErrorCode.NOT_AUTHORIZED, CatalogBridgeCode.UNAUTHORIZED),
+    (OAuthErrorCode.STORAGE_UNAVAILABLE, CatalogBridgeCode.STORAGE_UNAVAILABLE),
+    (OAuthErrorCode.NETWORK_TIMEOUT, CatalogBridgeCode.TIMEOUT),
+])
+def test_bridge_maps_oauth_failures_without_transport(oauth_code, bridge_code):
+    calls = []
+    bridge = SpotifyCatalogBridge(
+        oauth=FakeOAuth(OAuthResult(oauth_code, "provider detail")),
+        transport=lambda *args: calls.append(args),
+    )
+    result = bridge.search("artist", "query", session_id="s1")
+    assert result.code is bridge_code
+    assert calls == []
+    assert "provider detail" not in repr(result)
+
+
+def test_bridge_maps_401_timeout_and_provider_failure_without_leaking_payload():
+    for response_or_error, expected in [
+        (bridge_response([], status=401), CatalogBridgeCode.API_UNAUTHORIZED),
+        (TimeoutError("token secret query"), CatalogBridgeCode.TIMEOUT),
+        (RuntimeError("raw provider payload"), CatalogBridgeCode.PROVIDER_ERROR),
+    ]:
+        def transport(*args, value=response_or_error):
+            if isinstance(value, BaseException):
+                raise value
+            return value
+
+        bridge = SpotifyCatalogBridge(
+            oauth=FakeOAuth(OAuthResult(OAuthErrorCode.OK, "", access_token="secret")),
+            transport=transport,
+        )
+        result = bridge.search("artist", "private query", session_id="s1")
+        assert result.code is expected
+        assert result.catalog is None
+        assert "secret" not in repr(result)
+        assert "private query" not in repr(result)
+        assert "raw provider payload" not in repr(result)

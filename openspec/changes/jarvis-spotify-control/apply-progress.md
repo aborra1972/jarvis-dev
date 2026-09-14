@@ -513,3 +513,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Verification:** latest control slice passed focused `139` and full `1156` tests with `3` E2E deselected; compileall and diff check passed. Keyring dependency is installed in the project venv; the configured Client ID is stored only in the system keyring.
 - **Known limitation:** album search/API wiring and the full OAuth browser/callback integration remain unfinished. Live smoke was not run. Native SDD attempt metadata remains stale and is intentionally not edited; `.atl` changes remain excluded.
 - **Resume next session:** implement the smallest injected OAuth/catalog integration slice, then wire a non-voice authorization/test entrypoint before any live smoke. Keep Stage 1 Desktop playback and Stage 2 fail-closed boundaries intact.
+
+## Authorized offline OAuth-to-catalog bridge slice
+
+- **Status:** completed as a bounded injected-only bridge; broad OAuth/catalog rows remain unchecked.
+- **Scope:** `SpotifyCatalogBridge` obtains a token through the existing `OAuthClient` seam, delegates normalization to `CatalogClient`, and permits only bounded GET `/v1/search` album/artist requests through an injected transport with Bearer header and timeout. Typed safe outcomes cover disabled, unauthorized, storage unavailable, timeout, API 401, and provider failure. No browser, socket, live network, playback, token/payload logging, or provider details were added.
+- **TDD:** RED focused bridge tests failed at collection because the bridge exports were absent. GREEN added the minimal adapter; OAuth/catalog tests passed (`56 passed`). TRIANGULATE covered exact method/endpoint/params/header/timeout, unsupported kinds, no transport on OAuth failures, 401/timeout/provider failures, normalization, and redaction. REFACTOR kept the bridge in the existing Spotify service seam and left Stage 1 controls, `open_app`, intents, registry, lifecycle, voice, and playback behavior unchanged.
+- **Limitations:** offline/injected evidence only; no live provider or browser smoke test. No broad OAuth/catalog task checkbox was marked complete. No commit or push was performed.

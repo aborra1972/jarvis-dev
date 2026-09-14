@@ -1048,6 +1048,113 @@ class CatalogClient:
         return CatalogCandidate(secrets.token_urlsafe(9), kind, name, uri)
 
 
+class CatalogBridgeCode(str, Enum):
+    OK = "ok"
+    DISABLED = "disabled"
+    UNAUTHORIZED = "unauthorized"
+    STORAGE_UNAVAILABLE = "storage_unavailable"
+    TIMEOUT = "timeout"
+    API_UNAUTHORIZED = "api_unauthorized"
+    PROVIDER_ERROR = "provider_error"
+    UNSUPPORTED = "unsupported"
+    INVALID_REQUEST = "invalid_request"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True, repr=False)
+class CatalogBridgeResult:
+    code: CatalogBridgeCode
+    catalog: CatalogResult | None = field(default=None, repr=False)
+
+
+class SpotifyCatalogBridge:
+    """Injectable OAuth-to-catalog boundary; it never creates a live transport."""
+
+    def __init__(self, *, oauth: OAuthClient, transport: Callable[..., Any],
+                 clock: Callable[[], float] = time.time, ttl_s: float = 120.0,
+                 timeout_s: float = CatalogClient.DEFAULT_TIMEOUT_S) -> None:
+        if not callable(getattr(oauth, "access_token", None)) or not callable(transport):
+            raise ValueError("invalid catalog bridge boundary")
+        if not 0.1 <= timeout_s <= 30.0:
+            raise ValueError("invalid catalog bridge timeout")
+        self._oauth = oauth
+        self._transport = transport
+        self._failure: CatalogBridgeCode | None = None
+        self._access_token: str | None = None
+        self._catalog = CatalogClient(provider=self._provider, clock=clock,
+                                      ttl_s=ttl_s, timeout_s=timeout_s)
+
+    def search(self, kind: str, query: str, *, session_id: str,
+               limit: int = CatalogClient.MAX_RESULTS,
+               operation: Any | None = None) -> CatalogBridgeResult:
+        if kind not in {"album", "artist"}:
+            return CatalogBridgeResult(CatalogBridgeCode.UNSUPPORTED)
+        if not isinstance(query, str) or not session_id or not query.strip():
+            return CatalogBridgeResult(CatalogBridgeCode.INVALID_REQUEST)
+        token = self._oauth.access_token()
+        if not token.ok:
+            return CatalogBridgeResult(self._oauth_code(token.code))
+        if not isinstance(token.access_token, str) or not token.access_token:
+            return CatalogBridgeResult(CatalogBridgeCode.UNAUTHORIZED)
+        self._failure = None
+        self._access_token = token.access_token
+        result = self._catalog.search(kind, query, session_id=session_id,
+                                      limit=limit, operation=operation)
+        if self._failure is not None:
+            self._access_token = None
+            return CatalogBridgeResult(self._failure)
+        self._access_token = None
+        return CatalogBridgeResult(self._catalog_code(result.code), result)
+
+    def _provider(self, method: str, url: str, params: dict[str, Any], timeout: float) -> Any:
+        try:
+            response = self._transport(method, url, params,
+                                       {"Authorization": f"Bearer {self._access_token}"},
+                                       timeout)
+        except (TimeoutError, OSError):
+            self._failure = CatalogBridgeCode.TIMEOUT
+            raise
+        except Exception:
+            self._failure = CatalogBridgeCode.PROVIDER_ERROR
+            raise
+        status = getattr(response, "status_code", None)
+        if status == 401:
+            self._failure = CatalogBridgeCode.API_UNAUTHORIZED
+            raise ValueError("unauthorized response")
+        if not isinstance(status, int) or status < 200 or status >= 300:
+            self._failure = CatalogBridgeCode.PROVIDER_ERROR
+            raise ValueError("provider response")
+        try:
+            payload = response.json() if callable(getattr(response, "json", None)) else response
+        except Exception:
+            self._failure = CatalogBridgeCode.PROVIDER_ERROR
+            raise ValueError("invalid response")
+        if not isinstance(payload, dict):
+            self._failure = CatalogBridgeCode.PROVIDER_ERROR
+            raise ValueError("invalid response")
+        return payload
+
+    @staticmethod
+    def _oauth_code(code: OAuthErrorCode) -> CatalogBridgeCode:
+        return {OAuthErrorCode.DISABLED: CatalogBridgeCode.DISABLED,
+                OAuthErrorCode.NOT_AUTHORIZED: CatalogBridgeCode.UNAUTHORIZED,
+                OAuthErrorCode.STORAGE_UNAVAILABLE: CatalogBridgeCode.STORAGE_UNAVAILABLE,
+                OAuthErrorCode.NETWORK_TIMEOUT: CatalogBridgeCode.TIMEOUT,
+                }.get(code, CatalogBridgeCode.PROVIDER_ERROR)
+
+    @staticmethod
+    def _catalog_code(code: CatalogCode) -> CatalogBridgeCode:
+        if code is CatalogCode.CANCELLED:
+            return CatalogBridgeCode.CANCELLED
+        if code is CatalogCode.INVALID_REQUEST:
+            return CatalogBridgeCode.INVALID_REQUEST
+        if code is CatalogCode.UNSUPPORTED:
+            return CatalogBridgeCode.UNSUPPORTED
+        if code is CatalogCode.PROVIDER_ERROR:
+            return CatalogBridgeCode.PROVIDER_ERROR
+        return CatalogBridgeCode.OK
+
+
 class SpotifyService:
     """Dedicated dispatch boundary for the validated local Spotify intents."""
 

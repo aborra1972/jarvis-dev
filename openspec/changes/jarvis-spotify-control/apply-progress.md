@@ -572,3 +572,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** the live CLI prints only the safe callback category (for example `state_mismatch`, `invalid_path`, `invalid_query_keys`, `duplicate_or_empty_query`, `fragment_present`, `expired`, or `already_consumed`) for callback validation failures. Callback URL, authorization code, state, verifier, token, and provider payload values are not included.
 - **TDD evidence:** RED: focused OAuth/CLI tests failed before the structural categories existed. GREEN: focused OAuth/CLI tests passed (`73 passed`). TRIANGULATE: parametrized path/query/duplicate/empty/fragment cases preserve the unconsumed transaction; CLI sentinel tests confirm only the category is printed. REFACTOR: parsing uses bounded query pairs while retaining the exact redirect and state checks.
 - **Validation:** `jarvis/.venv/bin/python -m compileall -q jarvis/src` passed; `git diff --check` passed. No live authorization retry, browser open, network/provider call, keyring mutation, commit, or push was performed.
+
+## OAuth invalid-query key summary correction
+
+- **Status:** completed as a bounded diagnostics-only correction.
+- **Behavior:** invalid query-key failures now expose only `keys:` followed by at most six names. Only `code`, `state`, `scope`, `error`, `error_description`, and `error_uri` are emitted; every other key is rendered as `unknown`. Query values and callback URLs remain excluded, and callback validation remains fail-closed.
+- **TDD evidence:** RED: new OAuth/CLI tests failed because callback results had no sanitized diagnostic field and CLI results had no diagnostic transport. GREEN: focused OAuth/CLI tests passed (`76 passed`). TRIANGULATE: tests cover known-key summaries, attacker-key redaction/bounding, CLI output, and unchanged callback categories. REFACTOR: diagnostics remain separate from typed callback categories and hidden from result representations.
+- **Validation:** compileall and `git diff --check` passed. No live authorization retry, browser open, network/provider call, keyring mutation, commit, or push was performed.

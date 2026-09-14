@@ -66,10 +66,24 @@ class OAuthCallbackCode(str, Enum):
     ALREADY_CONSUMED = "already_consumed"
 
 
+_CALLBACK_DIAGNOSTIC_KEYS = frozenset({
+    "code", "state", "scope", "error", "error_description", "error_uri",
+})
+_CALLBACK_DIAGNOSTIC_MAX_KEYS = 6
+
+
+def _callback_key_diagnostic(query_pairs: list[tuple[str, str]]) -> str:
+    names: list[str] = []
+    for key, _ in query_pairs[:_CALLBACK_DIAGNOSTIC_MAX_KEYS]:
+        names.append(key if key in _CALLBACK_DIAGNOSTIC_KEYS else "unknown")
+    return "keys:" + ",".join(names)
+
+
 @dataclass(frozen=True, repr=False)
 class OAuthCallbackResult:
     code: OAuthCallbackCode
     authorization_code: str | None = field(default=None, repr=False)
+    diagnostic: str | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -115,7 +129,10 @@ def parse_pkce_callback(
         return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     if {key for key, _ in query_pairs} != {"code", "state"}:
-        return OAuthCallbackResult(OAuthCallbackCode.INVALID_QUERY_KEYS)
+        return OAuthCallbackResult(
+            OAuthCallbackCode.INVALID_QUERY_KEYS,
+            diagnostic=_callback_key_diagnostic(query_pairs),
+        )
     if len(query_pairs) != 2 or any(not value for _, value in query_pairs):
         return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
     query = dict(query_pairs)
@@ -349,6 +366,7 @@ class OAuthResult:
     access_token: str | None = field(default=None, repr=False)
     payload: object | None = field(default=None, repr=False)
     callback_code: OAuthCallbackCode | None = field(default=None, repr=False)
+    callback_diagnostic: str | None = field(default=None, repr=False)
 
     @property
     def ok(self) -> bool:
@@ -581,11 +599,14 @@ class OAuthClient:
         return self._result(code)
 
     @staticmethod
-    def _callback_result(callback_code: OAuthCallbackCode) -> OAuthResult:
+    def _callback_result(
+        callback_code: OAuthCallbackCode, diagnostic: str | None = None,
+    ) -> OAuthResult:
         return OAuthResult(
             OAuthErrorCode.INVALID_RESPONSE,
             callback_code.value,
             callback_code=callback_code,
+            callback_diagnostic=diagnostic,
         )
 
     @staticmethod
@@ -609,7 +630,7 @@ def authorize_spotify_callback(
     parsed = parse_pkce_callback(callback_url, transaction=transaction,
                                  session_id=session_id, now=now)
     if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
-        return OAuthClient._callback_result(parsed.code)
+        return OAuthClient._callback_result(parsed.code, parsed.diagnostic)
     return client.exchange_code(transaction, parsed.authorization_code,
                                 session_id=session_id, callback_validated=True)
 
@@ -724,7 +745,7 @@ def run_spotify_live_authorization(
         if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
             if "error=access_denied" in callback_url:
                 return OAuthClient._result(OAuthErrorCode.NOT_AUTHORIZED)
-            return OAuthClient._callback_result(parsed.code)
+            return OAuthClient._callback_result(parsed.code, parsed.diagnostic)
         client = create_spotify_oauth_client(
             configuration, store=store, transport=transport, clock=clock,
             # The callback window is longer, but token transport remains bounded.

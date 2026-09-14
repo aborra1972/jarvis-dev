@@ -69,13 +69,29 @@ def test_callback_reports_bounded_structural_category(callback, expected) -> Non
     assert tx.valid_for("session-1", now=101.0)
 
 
-def test_callback_reports_invalid_query_keys_for_missing_required_key() -> None:
+def test_callback_reports_sanitized_query_key_summary_without_values_or_url() -> None:
     tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
     result = parse_pkce_callback(
-        "http://127.0.0.1:8888/callback?state=s",
+        "http://127.0.0.1:8888/callback?code=code-secret&state=s&scope=scope-secret&evil=attacker-secret",
         transaction=tx, session_id="session-1", now=101.0,
     )
     assert result.code is OAuthCallbackCode.INVALID_QUERY_KEYS
+    assert result.diagnostic == "keys:code,state,scope,unknown"
+    assert "code-secret" not in result.diagnostic
+    assert "scope-secret" not in result.diagnostic
+    assert "evil" not in result.diagnostic
+    assert "http://127.0.0.1:8888/callback" not in result.diagnostic
+
+
+def test_callback_query_key_diagnostic_is_bounded_and_allowlisted() -> None:
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
+    result = parse_pkce_callback(
+        "http://127.0.0.1:8888/callback?attacker-1=x&attacker-2=y&error=e&error_description=d&error_uri=u",
+        transaction=tx, session_id="session-1", now=101.0,
+    )
+    assert result.code is OAuthCallbackCode.INVALID_QUERY_KEYS
+    assert result.diagnostic == "keys:unknown,unknown,error,error_description,error_uri"
+    assert len(result.diagnostic) <= 64
 
 
 def test_callback_rejects_state_session_and_expiry_without_consuming() -> None:

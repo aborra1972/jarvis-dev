@@ -91,6 +91,27 @@ def test_spotify_live_mode_reports_only_safe_callback_category(monkeypatch, caps
     ))
 
 
+def test_spotify_live_mode_reports_sanitized_query_key_diagnostic(monkeypatch, capsys):
+    from jarvis.services.spotify import OAuthCallbackCode, OAuthErrorCode, OAuthResult
+
+    monkeypatch.setattr(
+        cli,
+        "run_spotify_live_authorization",
+        lambda *args, **kwargs: OAuthResult(
+            OAuthErrorCode.INVALID_RESPONSE,
+            "unsafe callback URL and values",
+            callback_code=OAuthCallbackCode.INVALID_QUERY_KEYS,
+            callback_diagnostic="keys:code,state,unknown",
+        ),
+    )
+
+    assert cli.main(["spotify", "authorize", "--live"]) == 1
+    error = capsys.readouterr().err
+    assert error.strip() == "invalid_response: keys:code,state,unknown"
+    assert "unsafe callback URL" not in error
+    assert "unknown-attacker-key" not in error
+
+
 def test_spotify_live_mode_passes_bounded_cli_timeout(monkeypatch):
     from jarvis.services.spotify import OAuthErrorCode, OAuthResult
 

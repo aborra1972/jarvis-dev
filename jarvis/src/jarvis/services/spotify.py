@@ -371,6 +371,14 @@ class OAuthErrorCode(str, Enum):
     INVALID_RESPONSE = "invalid_response"
 
 
+def _token_http_category(status: Any) -> str:
+    if status == 400:
+        return "token_http_400"
+    if status == 401:
+        return "token_http_401"
+    return "token_http_other"
+
+
 @dataclass(frozen=True, repr=False)
 class OAuthResult:
     code: OAuthErrorCode
@@ -379,6 +387,7 @@ class OAuthResult:
     payload: object | None = field(default=None, repr=False)
     callback_code: OAuthCallbackCode | None = field(default=None, repr=False)
     callback_diagnostic: str | None = field(default=None, repr=False)
+    diagnostic: str | None = field(default=None, repr=False)
 
     @property
     def ok(self) -> bool:
@@ -547,7 +556,8 @@ class OAuthClient:
         if status in {400, 401} and isinstance(payload, dict) and payload.get("error") == "invalid_grant":
             return self._cleanup(OAuthErrorCode.INVALID_GRANT)
         if status != 200 or not isinstance(payload, dict):
-            return self._result(OAuthErrorCode.PROVIDER_ERROR)
+            diagnostic = _token_http_category(status) if status != 200 else None
+            return self._result(OAuthErrorCode.PROVIDER_ERROR, diagnostic=diagnostic)
         access = payload.get("access_token")
         expires = payload.get("expires_in")
         refresh = payload.get("refresh_token") or old_refresh_token
@@ -622,7 +632,7 @@ class OAuthClient:
         )
 
     @staticmethod
-    def _result(code: OAuthErrorCode) -> OAuthResult:
+    def _result(code: OAuthErrorCode, *, diagnostic: str | None = None) -> OAuthResult:
         messages = {
             OAuthErrorCode.DISABLED: "Spotify está deshabilitado.",
             OAuthErrorCode.NOT_AUTHORIZED: "Spotify requiere autorización.",
@@ -631,7 +641,10 @@ class OAuthClient:
             OAuthErrorCode.INVALID_GRANT: "La autorización de Spotify venció; debe autorizarse nuevamente.",
             OAuthErrorCode.UNAUTHORIZED: "La autorización de Spotify ya no es válida.",
         }
-        return OAuthResult(code, messages.get(code, "No pude completar la autorización de Spotify."))
+        return OAuthResult(
+            code, messages.get(code, "No pude completar la autorización de Spotify."),
+            diagnostic=diagnostic,
+        )
 
 
 def authorize_spotify_callback(

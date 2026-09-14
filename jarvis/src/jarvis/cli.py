@@ -204,7 +204,9 @@ def _handle_spotify_live_authorize(timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAU
     if isinstance(result.callback_code, OAuthCallbackCode):
         message = result.callback_diagnostic or result.callback_code.value
     else:
-        message = result.message
+        message = (result.diagnostic
+                   if result.diagnostic in {"token_http_400", "token_http_401", "token_http_other"}
+                   else result.message)
     print(f"{result.code.value}: {message}", file=sys.stderr)
     return 1
 

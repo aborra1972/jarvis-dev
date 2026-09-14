@@ -42,6 +42,35 @@ def test_spotify_live_mode_is_explicit_and_reports_safe_status(monkeypatch, caps
     assert callable(called["kwargs"]["server_factory"])
 
 
+@pytest.mark.parametrize("diagnostic", [
+    "token_http_400", "token_http_401", "token_http_other",
+])
+def test_spotify_live_mode_reports_only_token_http_category(
+    monkeypatch, capsys, diagnostic,
+):
+    from jarvis.services.spotify import OAuthErrorCode, OAuthResult
+
+    monkeypatch.setattr(
+        cli,
+        "run_spotify_live_authorization",
+        lambda *args, **kwargs: OAuthResult(
+            OAuthErrorCode.PROVIDER_ERROR,
+            "unsafe payload error_description=secret-description client_id=secret-client "
+            "code=secret-code verifier=secret-verifier state=secret-state "
+            "token=secret-token url=https://secret.example/token headers=secret-headers",
+            diagnostic=diagnostic,
+        ),
+    )
+
+    assert cli.main(["spotify", "authorize", "--live"]) == 1
+    error = capsys.readouterr().err
+    assert error.strip() == f"provider_error: {diagnostic}"
+    assert all(secret not in error for secret in (
+        "secret-description", "secret-client", "secret-code", "secret-verifier",
+        "secret-state", "secret-token", "https://secret.example/token", "secret-headers",
+    ))
+
+
 def test_spotify_live_mode_reports_typed_code_without_sensitive_details(monkeypatch, capsys):
     from jarvis.services.spotify import OAuthErrorCode, OAuthResult
 

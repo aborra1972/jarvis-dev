@@ -501,6 +501,50 @@ def test_refresh_is_single_flight_and_rotates_refresh_token() -> None:
     assert store.value["refresh_token"] == "r2"
 
 
+@pytest.mark.parametrize(("status", "expected"), [
+    (400, "token_http_400"),
+    (401, "token_http_401"),
+    (500, "token_http_other"),
+])
+def test_token_http_failure_reports_bounded_status_category_without_payload(
+    status, expected,
+) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    store = _MemoryTokenStore()
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    client = OAuthClient(
+        enabled=True, client_id="client-secret", store=store,
+        transport=lambda *args: _Response(
+            status,
+            {
+                "error": "provider-error-secret",
+                "error_description": "description-secret",
+                "client_id": "client-secret",
+                "code": "code-secret",
+                "verifier": "verifier-secret",
+                "state": "state-secret",
+                "token": "token-secret",
+                "url": "https://secret.example/token",
+                "headers": "headers-secret",
+            },
+        ),
+        clock=lambda: 100.0,
+    )
+
+    result = client.exchange_code(tx, "code-secret", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.PROVIDER_ERROR
+    assert result.diagnostic == expected
+    assert result.message == "No pude completar la autorización de Spotify."
+    assert store.deleted is False
+    assert all(secret not in repr(result) for secret in (
+        "provider-error-secret", "description-secret", "client-secret",
+        "code-secret", "verifier-secret", "state-secret", "token-secret",
+        "https://secret.example/token", "headers-secret",
+    ))
+
+
 def test_expiry_and_invalid_grant_clear_credentials_with_typed_redacted_errors() -> None:
     from jarvis.services.spotify import OAuthClient, OAuthErrorCode
 

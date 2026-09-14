@@ -594,3 +594,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Diagnostics:** `ubi` is recognized by name only in bounded key summaries; callback values and URLs remain excluded from OAuth and CLI output.
 - **TDD evidence:** RED: focused OAuth tests reported four failures before the allowlist/parser update. GREEN: focused OAuth/CLI tests passed (`83 passed`). TRIANGULATE: duplicate/empty `ubi`, combined `iss`/`ubi`, sanitized key diagnostics, and existing callback/CLI safety tests pass. REFACTOR: the optional-key combinations remain explicit and narrowly allowlisted.
 - **Validation:** no live authorization retry, browser open, socket, network/provider call, real keyring mutation, commit, or push was performed.
+
+## OAuth token HTTP status diagnostic correction
+
+- **Status:** completed as a bounded offline OAuth/CLI diagnostics correction.
+- **Behavior:** token-exchange HTTP failures preserve `OAuthErrorCode.PROVIDER_ERROR` and expose only `token_http_400`, `token_http_401`, or `token_http_other`. The CLI allowlists these categories and never prints provider payloads or OAuth material. `invalid_grant` cleanup and fail-closed credential handling remain unchanged.
+- **TDD evidence:** RED: focused OAuth/CLI tests failed in six cases because the typed diagnostic field and CLI category output were absent. GREEN: focused OAuth/CLI tests passed (`89 passed`). TRIANGULATE: parametrized 400/401/other statuses, payload redaction, unchanged provider code, and CLI output allowlisting are covered.
+- **Validation:** `jarvis/.venv/bin/python -m compileall -q jarvis/src` passed; `git diff --check` passed. No live authorization retry, browser open, socket, network/provider call, real keyring mutation, commit, or push was performed.

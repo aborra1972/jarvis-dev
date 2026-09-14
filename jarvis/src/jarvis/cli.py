@@ -23,7 +23,8 @@ from jarvis.services.spotify import (
     ClientIdStatus, KeyringClientIdStore, create_pkce_transaction,
     create_spotify_authorization, redacted_authorization_url,
         run_spotify_live_authorization, _create_loopback_server, _urllib_transport,
-    resolve_spotify_client_id,
+    resolve_spotify_client_id, SPOTIFY_LIVE_TIMEOUT_DEFAULT_S,
+    SPOTIFY_LIVE_TIMEOUT_MAX_S,
 )
 
 COMMANDS = (
@@ -184,7 +185,7 @@ def _handle_spotify_setup() -> int:
     return 0
 
 
-def _handle_spotify_live_authorize() -> int:
+def _handle_spotify_live_authorize(timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAULT_S) -> int:
     """Run the explicit live OAuth flow; all capabilities remain bounded/injected."""
     import webbrowser
     from jarvis import config
@@ -193,7 +194,7 @@ def _handle_spotify_live_authorize() -> int:
     result = run_spotify_live_authorization(
         config.load_spotify_oauth_config(), browser_opener=webbrowser.open,
         server_factory=_create_loopback_server, transport=_urllib_transport,
-        store=KeyringCredentialStore(),
+        store=KeyringCredentialStore(), timeout_s=timeout_s,
     )
     if result.code is OAuthErrorCode.OK:
         print("Spotify autorizado correctamente.")
@@ -282,8 +283,22 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the historical top-level command list stable while accepting the
     # clearer Spotify setup spelling as an equivalent alias.
     effective_argv = list(sys.argv[1:] if argv is None else argv)
-    if effective_argv == ["spotify", "authorize", "--live"]:
-        return _handle_spotify_live_authorize()
+    if effective_argv[:3] == ["spotify", "authorize", "--live"]:
+        timeout_s = SPOTIFY_LIVE_TIMEOUT_DEFAULT_S
+        remaining = effective_argv[3:]
+        if remaining:
+            if len(remaining) != 2 or remaining[0] != "--timeout":
+                print("jarvis spotify authorize: uso: --live [--timeout SECONDS]", file=sys.stderr)
+                return 2
+            try:
+                timeout_s = float(remaining[1])
+            except ValueError:
+                print("jarvis spotify authorize: timeout inválido", file=sys.stderr)
+                return 2
+            if not 0.1 <= timeout_s <= SPOTIFY_LIVE_TIMEOUT_MAX_S:
+                print(f"jarvis spotify authorize: timeout debe estar entre 0.1 y {SPOTIFY_LIVE_TIMEOUT_MAX_S:g} segundos", file=sys.stderr)
+                return 2
+        return _handle_spotify_live_authorize(timeout_s)
     if effective_argv == ["spotify", "authorize"]:
         return _handle_spotify_authorize()
     if effective_argv == ["spotify", "setup"]:

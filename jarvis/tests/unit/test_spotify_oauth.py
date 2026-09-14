@@ -633,6 +633,55 @@ def test_live_authorization_binds_loopback_opens_injected_browser_and_saves_toke
     assert store.value["access_token"] == "access"
 
 
+def test_live_authorization_allows_bounded_120_second_callback_window():
+    from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
+
+    seen = {}
+    tx_holder = {}
+
+    class Server:
+        def serve_once(self):
+            tx = tx_holder["transaction"]
+            return f"http://127.0.0.1:8888/callback?code=c&state={tx.state}"
+        def shutdown(self):
+            seen["closed"] = True
+
+    def server_factory(host, port, callback, timeout):
+        seen["server"] = (host, port, timeout)
+        return Server()
+
+    result = run_spotify_live_authorization(
+        {"enabled": True, "authorized": False, "client_id": "a" * 32},
+        browser_opener=lambda url: None, server_factory=server_factory,
+        transport=lambda *args: _Response(200, {
+            "access_token": "access", "refresh_token": "refresh", "expires_in": 3600,
+            "scope": "user-read-playback-state user-modify-playback-state",
+        }),
+        clock=lambda: 100.0, store=_MemoryTokenStore(), timeout_s=120.0,
+        transaction_factory=lambda session_id, now, ttl_s: tx_holder.setdefault(
+            "transaction", create_pkce_transaction(session_id, now=now, ttl_s=ttl_s,
+                                                    token_factory=lambda: "state")),
+    )
+    assert result.code is OAuthErrorCode.OK
+    assert seen["server"] == ("127.0.0.1", 8888, 120.0)
+    assert seen["closed"]
+
+
+def test_live_authorization_rejects_timeout_above_hard_max():
+    from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
+
+    opened = []
+    result = run_spotify_live_authorization(
+        {"enabled": True, "authorized": True, "client_id": "a" * 32},
+        browser_opener=opened.append,
+        server_factory=lambda *args: pytest.fail("server must not be created"),
+        transport=lambda *args: pytest.fail("transport must not be called"),
+        store=_MemoryTokenStore(), timeout_s=120.1,
+    )
+    assert result.code is OAuthErrorCode.PROVIDER_ERROR
+    assert opened == []
+
+
 def test_live_authorization_fails_closed_on_bind_error_and_does_not_open_browser():
     from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
 

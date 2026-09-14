@@ -42,6 +42,23 @@ def test_spotify_live_mode_is_explicit_and_reports_safe_status(monkeypatch, caps
     assert callable(called["kwargs"]["server_factory"])
 
 
+def test_spotify_live_mode_passes_bounded_cli_timeout(monkeypatch):
+    from jarvis.services.spotify import OAuthErrorCode, OAuthResult
+
+    called = {}
+    monkeypatch.setattr(cli, "run_spotify_live_authorization", lambda *args, **kwargs: (
+        called.update(kwargs=kwargs) or OAuthResult(OAuthErrorCode.NETWORK_TIMEOUT, "timeout")
+    ))
+    assert cli.main(["spotify", "authorize", "--live", "--timeout", "120"]) == 1
+    assert called["kwargs"]["timeout_s"] == 120.0
+
+
+def test_spotify_live_mode_rejects_timeout_above_hard_max(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "run_spotify_live_authorization", pytest.fail)
+    assert cli.main(["spotify", "authorize", "--live", "--timeout", "121"]) == 2
+    assert "120" in capsys.readouterr().err
+
+
 def test_existing_setup_spotify_alias_remains_routed(monkeypatch):
     monkeypatch.setattr(cli, "_handle_spotify_setup", lambda: 7)
     assert cli.main(["spotify", "setup"]) == 7

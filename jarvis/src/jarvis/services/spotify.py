@@ -49,6 +49,8 @@ APPROVED_SPOTIFY_SCOPES = frozenset({
     "user-modify-playback-state",
 })
 LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+SPOTIFY_LIVE_TIMEOUT_DEFAULT_S = 120.0
+SPOTIFY_LIVE_TIMEOUT_MAX_S = 120.0
 
 
 class OAuthCallbackCode(str, Enum):
@@ -652,12 +654,14 @@ def run_spotify_live_authorization(
     clock: Callable[[], float] = time.time,
     store: Any,
     transaction_factory: Callable[..., PKCETransaction] = create_pkce_transaction,
-    timeout_s: float = 30.0,
+    timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAULT_S,
 ) -> OAuthResult:
     """Run one bounded live authorization only through injected capabilities."""
     if not callable(browser_opener) or not callable(server_factory) or not callable(transport):
         return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
-    if not isinstance(timeout_s, (int, float)) or not 0.1 <= timeout_s <= 30.0:
+    if (not isinstance(timeout_s, (int, float))
+            or not math.isfinite(float(timeout_s))
+            or not 0.1 <= timeout_s <= SPOTIFY_LIVE_TIMEOUT_MAX_S):
         return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
     if not isinstance(configuration, dict):
         return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
@@ -702,7 +706,8 @@ def run_spotify_live_authorization(
             return OAuthClient._result(OAuthErrorCode.INVALID_RESPONSE)
         client = create_spotify_oauth_client(
             configuration, store=store, transport=transport, clock=clock,
-            timeout_s=min(float(timeout_s), 30.0),
+            # The callback window is longer, but token transport remains bounded.
+            timeout_s=30.0,
             allow_initial_exchange=True,
         )
         if client is None:

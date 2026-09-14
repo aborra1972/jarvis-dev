@@ -64,6 +64,32 @@ def test_spotify_live_mode_reports_typed_code_without_sensitive_details(monkeypa
     assert "secret-provider-payload" not in error
 
 
+@pytest.mark.parametrize("callback_code", [
+    "state_mismatch", "invalid_callback", "expired", "already_consumed",
+])
+def test_spotify_live_mode_reports_only_safe_callback_category(monkeypatch, capsys, callback_code):
+    from jarvis.services.spotify import OAuthCallbackCode, OAuthErrorCode, OAuthResult
+
+    monkeypatch.setattr(
+        cli,
+        "run_spotify_live_authorization",
+        lambda *args, **kwargs: OAuthResult(
+            OAuthErrorCode.INVALID_RESPONSE,
+            "http://127.0.0.1:8888/callback?code=secret-code&state=secret-state "
+            "verifier=secret-verifier token=secret-token provider=secret-payload",
+            callback_code=OAuthCallbackCode(callback_code),
+        ),
+    )
+
+    assert cli.main(["spotify", "authorize", "--live"]) == 1
+    error = capsys.readouterr().err
+    assert error.strip() == f"invalid_response: {callback_code}"
+    assert all(secret not in error for secret in (
+        "http://127.0.0.1:8888/callback", "secret-code", "secret-state",
+        "secret-verifier", "secret-token", "secret-payload",
+    ))
+
+
 def test_spotify_live_mode_passes_bounded_cli_timeout(monkeypatch):
     from jarvis.services.spotify import OAuthErrorCode, OAuthResult
 

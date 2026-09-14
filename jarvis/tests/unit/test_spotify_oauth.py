@@ -741,6 +741,29 @@ def test_authorization_url_uses_exact_redirect_and_scopes_without_repr_leaks():
     assert "%5Bredacted%5D" in redacted
 
 
+def test_callback_validation_failure_preserves_error_code_and_exposes_safe_category():
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, authorize_spotify_callback
+
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state-secret")
+    client = OAuthClient(
+        enabled=True, client_id="a" * 32, store=_MemoryTokenStore(),
+        transport=lambda *args: pytest.fail("invalid callback must not use transport"),
+        clock=lambda: 100.0,
+    )
+    result = authorize_spotify_callback(
+        client, tx,
+        "http://127.0.0.1:8888/callback?code=code-secret&state=wrong-state",
+        session_id="session-1", now=101.0,
+    )
+
+    assert result.code is OAuthErrorCode.INVALID_RESPONSE
+    assert result.callback_code is OAuthCallbackCode.STATE_MISMATCH
+    assert result.message == OAuthCallbackCode.STATE_MISMATCH.value
+    assert all(secret not in result.message for secret in (
+        "http://127.0.0.1:8888/callback", "code-secret", "wrong-state", "state-secret",
+    ))
+
+
 def test_injected_authorization_callback_exchange_success_and_failures():
     from jarvis.services.spotify import OAuthClient, OAuthErrorCode, authorize_spotify_callback
 

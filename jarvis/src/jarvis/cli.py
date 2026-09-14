@@ -189,7 +189,9 @@ def _handle_spotify_live_authorize(timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAU
     """Run the explicit live OAuth flow; all capabilities remain bounded/injected."""
     import webbrowser
     from jarvis import config
-    from jarvis.services.spotify import KeyringCredentialStore, OAuthErrorCode
+    from jarvis.services.spotify import (
+        KeyringCredentialStore, OAuthCallbackCode, OAuthErrorCode,
+    )
 
     result = run_spotify_live_authorization(
         config.load_spotify_oauth_config(), browser_opener=webbrowser.open,
@@ -199,7 +201,11 @@ def _handle_spotify_live_authorize(timeout_s: float = SPOTIFY_LIVE_TIMEOUT_DEFAU
     if result.code is OAuthErrorCode.OK:
         print("Spotify autorizado correctamente.")
         return 0
-    print(f"{result.code.value}: {result.message}", file=sys.stderr)
+    if isinstance(result.callback_code, OAuthCallbackCode):
+        message = result.callback_code.value
+    else:
+        message = result.message
+    print(f"{result.code.value}: {message}", file=sys.stderr)
     return 1
 
 

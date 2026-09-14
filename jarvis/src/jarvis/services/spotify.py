@@ -336,6 +336,7 @@ class OAuthResult:
     message: str
     access_token: str | None = field(default=None, repr=False)
     payload: object | None = field(default=None, repr=False)
+    callback_code: OAuthCallbackCode | None = field(default=None, repr=False)
 
     @property
     def ok(self) -> bool:
@@ -568,6 +569,14 @@ class OAuthClient:
         return self._result(code)
 
     @staticmethod
+    def _callback_result(callback_code: OAuthCallbackCode) -> OAuthResult:
+        return OAuthResult(
+            OAuthErrorCode.INVALID_RESPONSE,
+            callback_code.value,
+            callback_code=callback_code,
+        )
+
+    @staticmethod
     def _result(code: OAuthErrorCode) -> OAuthResult:
         messages = {
             OAuthErrorCode.DISABLED: "Spotify está deshabilitado.",
@@ -588,7 +597,7 @@ def authorize_spotify_callback(
     parsed = parse_pkce_callback(callback_url, transaction=transaction,
                                  session_id=session_id, now=now)
     if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
-        return OAuthClient._result(OAuthErrorCode.INVALID_RESPONSE)
+        return OAuthClient._callback_result(parsed.code)
     return client.exchange_code(transaction, parsed.authorization_code,
                                 session_id=session_id, callback_validated=True)
 
@@ -703,7 +712,7 @@ def run_spotify_live_authorization(
         if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
             if "error=access_denied" in callback_url:
                 return OAuthClient._result(OAuthErrorCode.NOT_AUTHORIZED)
-            return OAuthClient._result(OAuthErrorCode.INVALID_RESPONSE)
+            return OAuthClient._callback_result(parsed.code)
         client = create_spotify_oauth_client(
             configuration, store=store, transport=transport, clock=clock,
             # The callback window is longer, but token transport remains bounded.

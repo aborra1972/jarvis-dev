@@ -565,3 +565,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** failed `spotify authorize --live` output now includes the existing `OAuthErrorCode.value` alongside the existing safe message. Raw provider payloads, tokens, authorization code, state, verifier, URL, and exceptions remain unprinted.
 - **TDD evidence:** RED: the focused CLI test failed because `provider_error` was absent from stderr. GREEN: focused CLI tests passed (`7 passed`). TRIANGULATE: the test injects token and provider-payload sentinels and confirms neither is printed; existing timeout, bounded-timeout, and explicit-live routing tests remain green.
 - **Validation:** no live retry, browser, socket, network/provider call, or real keyring mutation was performed.
+
+## OAuth callback diagnostic hardening
+
+- **Status:** completed within the authorized OAuth/CLI surfaces. Callback validation failures preserve `OAuthErrorCode.INVALID_RESPONSE` and now carry the typed `OAuthCallbackCode` category for diagnostics.
+- **Behavior:** the live CLI prints only the safe callback category (for example `state_mismatch`, `invalid_callback`, `expired`, or `already_consumed`) for callback validation failures. Callback URL, authorization code, state, verifier, token, and provider payload values are not included.
+- **TDD evidence:** RED: focused OAuth/CLI tests failed before the result field and CLI projection existed (`5 failed`). GREEN: focused OAuth/CLI tests passed (`63 passed`). TRIANGULATE: parametrized category coverage and secret-sentinel assertions passed; non-callback OAuth diagnostics retain their existing message behavior.
+- **Validation:** no live authorization retry, browser open, network/provider call, keyring mutation, commit, or push was performed.

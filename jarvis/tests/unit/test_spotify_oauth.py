@@ -51,17 +51,18 @@ def test_callback_accepts_exact_loopback_shape_and_consumes_transaction() -> Non
     assert not tx.valid_for("session-1", now=101.0)
 
 
-def test_callback_accepts_spotify_issuer_without_exposing_it() -> None:
+def test_callback_accepts_spotify_issuer_and_ubi_without_exposing_optional_values() -> None:
     tx = create_pkce_transaction("session-1", now=100.0, ttl_s=60.0,
                                  token_factory=lambda: "state")
     result = parse_pkce_callback(
         "http://127.0.0.1:8888/callback?code=auth-code&state=state"
-        "&iss=https%3A%2F%2Faccounts.spotify.com",
+        "&iss=https%3A%2F%2Faccounts.spotify.com&ubi=confirmed-user",
         transaction=tx, session_id="session-1", now=101.0,
     )
     assert result.code is OAuthCallbackCode.OK
     assert result.authorization_code == "auth-code"
     assert "accounts.spotify.com" not in repr(result)
+    assert "confirmed-user" not in repr(result)
 
 
 @pytest.mark.parametrize(("callback", "expected"), [
@@ -69,6 +70,8 @@ def test_callback_accepts_spotify_issuer_without_exposing_it() -> None:
     ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Faccounts.spotify.com.evil", OAuthCallbackCode.INVALID_QUERY_KEYS),
     ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Fexample.com", OAuthCallbackCode.INVALID_QUERY_KEYS),
     ("http://127.0.0.1:8888/callback?code=c&state=s&iss=https%3A%2F%2Faccounts.spotify.com&iss=https%3A%2F%2Faccounts.spotify.com", OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY),
+    ("http://127.0.0.1:8888/callback?code=c&state=s&ubi=", OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY),
+    ("http://127.0.0.1:8888/callback?code=c&state=s&ubi=x&ubi=y", OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY),
     ])
 def test_callback_issuer_is_optional_but_exact_when_present(callback, expected) -> None:
     tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
@@ -113,12 +116,13 @@ def test_callback_reports_sanitized_query_key_summary_without_values_or_url() ->
 def test_callback_query_key_diagnostic_is_bounded_and_allowlisted() -> None:
     tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "s")
     result = parse_pkce_callback(
-        "http://127.0.0.1:8888/callback?attacker-1=x&attacker-2=y&error=e&error_description=d&error_uri=u",
+        "http://127.0.0.1:8888/callback?attacker-1=x&ubi=probe&error=e&error_description=d&error_uri=u",
         transaction=tx, session_id="session-1", now=101.0,
     )
     assert result.code is OAuthCallbackCode.INVALID_QUERY_KEYS
-    assert result.diagnostic == "keys:unknown,unknown,error,error_description,error_uri"
+    assert result.diagnostic == "keys:unknown,ubi,error,error_description,error_uri"
     assert len(result.diagnostic) <= 64
+    assert "probe" not in result.diagnostic
 
 
 def test_callback_rejects_state_session_and_expiry_without_consuming() -> None:

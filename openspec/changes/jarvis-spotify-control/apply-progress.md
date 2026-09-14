@@ -586,3 +586,11 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** `iss` is accepted as an optional callback parameter only when it equals exactly `https://accounts.spotify.com`; missing, invalid, empty, duplicate, and arbitrary parameters remain fail-closed. Exactly one non-empty `code` and `state`, exact loopback redirect, fragment rejection, session/state binding, expiry, and one-time consumption are preserved.
 - **Diagnostics:** `iss` is allowlisted by name only; issuer values, codes, state, URLs, and other secrets remain absent from sanitized diagnostics and CLI output.
 - **TDD evidence:** RED: focused OAuth/CLI tests reported four issuer/diagnostic failures. GREEN: focused OAuth/CLI tests passed (`81 passed`). TRIANGULATE: existing structural, state/session, expiry, consumed-transaction, redaction, and CLI tests remain green; compileall and diff checks passed. No live authorization retry, browser, socket, network/provider call, keyring mutation, commit, or push was performed.
+
+## Spotify confirmed `ubi` callback parameter correction
+
+- **Status:** completed as a narrow offline callback-parser and diagnostics correction.
+- **Behavior:** `ubi` is accepted once as an optional non-empty callback parameter; its value is ignored and never included in results or diagnostics. The exact `iss` allowlist remains unchanged. Required `code`/`state`, duplicate/empty checks, extra-key rejection, redirect/fragment, state/session, expiry, and one-time-consumption protections remain fail-closed.
+- **Diagnostics:** `ubi` is recognized by name only in bounded key summaries; callback values and URLs remain excluded from OAuth and CLI output.
+- **TDD evidence:** RED: focused OAuth tests reported four failures before the allowlist/parser update. GREEN: focused OAuth/CLI tests passed (`83 passed`). TRIANGULATE: duplicate/empty `ubi`, combined `iss`/`ubi`, sanitized key diagnostics, and existing callback/CLI safety tests pass. REFACTOR: the optional-key combinations remain explicit and narrowly allowlisted.
+- **Validation:** no live authorization retry, browser open, socket, network/provider call, real keyring mutation, commit, or push was performed.

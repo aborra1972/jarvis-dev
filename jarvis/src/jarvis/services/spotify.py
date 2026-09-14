@@ -68,7 +68,7 @@ class OAuthCallbackCode(str, Enum):
 
 
 _CALLBACK_DIAGNOSTIC_KEYS = frozenset({
-    "code", "state", "iss", "scope", "error", "error_description", "error_uri",
+    "code", "state", "iss", "ubi", "scope", "error", "error_description", "error_uri",
 })
 _CALLBACK_DIAGNOSTIC_MAX_KEYS = 6
 
@@ -130,7 +130,12 @@ def parse_pkce_callback(
         return OAuthCallbackResult(OAuthCallbackCode.DUPLICATE_OR_EMPTY_QUERY)
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     keys = {key for key, _ in query_pairs}
-    if keys not in ({"code", "state"}, {"code", "state", "iss"}):
+    if keys not in (
+        {"code", "state"},
+        {"code", "state", "iss"},
+        {"code", "state", "ubi"},
+        {"code", "state", "iss", "ubi"},
+    ):
         return OAuthCallbackResult(
             OAuthCallbackCode.INVALID_QUERY_KEYS,
             diagnostic=_callback_key_diagnostic(query_pairs),

@@ -320,6 +320,58 @@ def test_keyring_failure_is_storage_unavailable_without_fallback() -> None:
     assert not any("secret" in value for value in store.__dict__.values() if isinstance(value, str))
 
 
+def test_authorization_url_requires_explicit_pending_bootstrap() -> None:
+    from jarvis.services.spotify import create_spotify_authorization
+
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    configuration = {"enabled": True, "authorized": False, "client_id": "a" * 32}
+    assert create_spotify_authorization(configuration, transaction=tx) is None
+    assert create_spotify_authorization(
+        configuration, transaction=tx, allow_pending_authorization=True,
+    ) is not None
+
+
+def test_oauth_factory_requires_explicit_initial_exchange_bootstrap() -> None:
+    from jarvis.services.spotify import create_spotify_oauth_client
+
+    configuration = {"enabled": True, "authorized": False, "client_id": "a" * 32}
+    assert create_spotify_oauth_client(
+        configuration, store=_MemoryTokenStore(), transport=lambda *args: None,
+    ) is None
+    assert create_spotify_oauth_client(
+        configuration, store=_MemoryTokenStore(), transport=lambda *args: None,
+        allow_initial_exchange=True,
+    ) is not None
+
+
+def test_initial_exchange_requires_validated_callback() -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, authorize_spotify_callback
+
+    calls = []
+    store = _MemoryTokenStore()
+    client = OAuthClient(
+        enabled=True, client_id="a" * 32, store=store,
+        transport=lambda *args: calls.append(args) or _Response(
+            200, {"access_token": "access", "refresh_token": "refresh",
+                  "expires_in": 3600,
+                  "scope": "user-read-playback-state user-modify-playback-state"}),
+        clock=lambda: 100.0,
+    )
+    invalid = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    assert authorize_spotify_callback(
+        client, invalid,
+        "http://127.0.0.1:8888/callback?code=code&state=wrong",
+        session_id="session-1", now=101.0,
+    ).code is OAuthErrorCode.INVALID_RESPONSE
+    assert calls == []
+    valid = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    assert authorize_spotify_callback(
+        client, valid,
+        "http://127.0.0.1:8888/callback?code=code&state=state",
+        session_id="session-1", now=101.0,
+    ).code is OAuthErrorCode.OK
+
+
 def test_oauth_factory_fails_closed_without_complete_setup_gate() -> None:
     from jarvis.services.spotify import create_spotify_oauth_client
 
@@ -543,7 +595,88 @@ class _MemoryTokenStore:
         return CredentialResult(CredentialStatus.OK)
 
 
+def test_live_authorization_binds_loopback_opens_injected_browser_and_saves_tokens():
+    from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
+
+    events = []
+    tx_holder = {}
+
+    class Server:
+        def serve_once(self):
+            tx = tx_holder["transaction"]
+            return f"http://127.0.0.1:8888/callback?code=auth-code&state={tx.state}"
+        def shutdown(self):
+            events.append("shutdown")
+
+    def server_factory(host, port, callback, timeout):
+        events.append(("server", host, port, callback, timeout))
+        return Server()
+
+    store = _MemoryTokenStore()
+    result = run_spotify_live_authorization(
+        {"enabled": True, "authorized": False, "client_id": "a" * 32},
+        browser_opener=lambda url: events.append(("browser", url)),
+        server_factory=server_factory,
+        transport=lambda *args: _Response(200, {
+            "access_token": "access", "refresh_token": "refresh", "expires_in": 3600,
+            "scope": "user-read-playback-state user-modify-playback-state",
+        }),
+        clock=lambda: 100.0, store=store,
+        transaction_factory=lambda session_id, now, ttl_s: tx_holder.setdefault(
+            "transaction", create_pkce_transaction(session_id, now=now, ttl_s=ttl_s,
+                                                    token_factory=lambda: "state")),
+    )
+    assert result.code is OAuthErrorCode.OK
+    assert events[0][0] == "server"
+    assert events[1][0] == "browser"
+    assert events[-1] == "shutdown"
+    assert store.value["access_token"] == "access"
+
+
+def test_live_authorization_fails_closed_on_bind_error_and_does_not_open_browser():
+    from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
+
+    opened = []
+    def broken_server(*args):
+        raise OSError("port unavailable")
+
+    result = run_spotify_live_authorization(
+        {"enabled": True, "authorized": True, "client_id": "a" * 32},
+        browser_opener=opened.append, server_factory=broken_server,
+        transport=lambda *args: pytest.fail("transport called"), clock=lambda: 100.0,
+        store=_MemoryTokenStore(),
+    )
+    assert result.code is OAuthErrorCode.PROVIDER_ERROR
+    assert opened == []
+
+
+def test_live_authorization_rejects_invalid_or_declined_callback_without_transport():
+    from jarvis.services.spotify import OAuthErrorCode, run_spotify_live_authorization
+
+    for callback_url, expected in (
+        ("http://127.0.0.1:8888/callback?code=c&state=wrong", OAuthErrorCode.INVALID_RESPONSE),
+        ("http://127.0.0.1:8888/callback?error=access_denied", OAuthErrorCode.NOT_AUTHORIZED),
+    ):
+        calls = []
+        def server_factory(host, port, callback, timeout, value=callback_url):
+            class Server:
+                def serve_once(self):
+                    return value
+                def shutdown(self):
+                    pass
+            return Server()
+        result = run_spotify_live_authorization(
+            {"enabled": True, "authorized": True, "client_id": "a" * 32},
+            browser_opener=lambda url: None, server_factory=server_factory,
+            transport=lambda *args: calls.append(args), clock=lambda: 100.0,
+            store=_MemoryTokenStore(),
+        )
+        assert result.code is expected
+        assert calls == []
+
+
 def test_authorization_url_uses_exact_redirect_and_scopes_without_repr_leaks():
+
     from jarvis.services.spotify import create_spotify_authorization, redacted_authorization_url
 
     tx = create_pkce_transaction("session-1", now=100.0, token_factory=iter(["v" * 43, "state-secret"]).__next__)

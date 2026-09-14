@@ -86,3 +86,4 @@ The 800-line session review budget is likely exceeded by the combined two-stage 
 5. Completion requires the required pytest command, recorded RED/GREEN/TRIANGULATE/REFACTOR evidence for every checkbox, and confirmation that no implementation task weakened existing safety, `open_app`, cancellation, or `off` behavior.
 
 - [x] Replanned safe slice: add a non-voice CLI authorization URL constructor plus injected callback/exchange seam; keep browser, listener, network, provider, and keyring mutation out of runtime tests. The broad OAuth task remains unchecked. <!-- sdd-owner: implementation -->
+- [x] Replanned safe slice: add an explicit live OAuth mode with injected browser/server/transport/clock/keyring seams, fixed loopback callback binding, one-request bounded shutdown, and fail-closed redacted statuses; do not execute live mode or mark the broad OAuth task complete. <!-- sdd-owner: implementation -->

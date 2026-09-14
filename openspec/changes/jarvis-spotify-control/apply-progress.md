@@ -529,3 +529,18 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Safety:** no browser, socket/listener, network/provider call, or keyring mutation is performed by the CLI or tests. Disabled/missing gate, invalid callback/state/session, expiry, storage, timeout, and provider failures remain fail-closed through existing typed seams. Existing setup Spotify alias and generic CLI paths remain unchanged.
 - **TDD evidence:** RED focused tests failed at missing entrypoint exports/routing; GREEN focused CLI/OAuth tests passed (`46 passed`); TRIANGULATE covered exact redirect/scopes, URL redaction, invalid callback no-transport, and injected success; REFACTOR retained the existing OAuth and callback boundaries with no live execution path.
 - **Validation:** focused CLI/OAuth tests passed; compileall and `git diff --check` were run. No overall OAuth completion is claimed; live authorization requires a separate explicit authorization decision.
+
+## Authorized code-only live OAuth slice `spotify-oauth-live-loopback`
+
+- **Status:** implemented as a bounded explicit `spotify authorize --live` mode; the broad OAuth task remains unchecked.
+- **Scope:** injected browser opener, fixed `127.0.0.1:8888` one-request callback server, parser/state/expiry validation, injected token exchange, and existing keyring-only storage. Bind failure, invalid/declined/expired callbacks, timeout, provider/401, and storage failures return safe typed statuses. No live mode was executed.
+- **Safety:** no arbitrary host or fallback port; no token, code, verifier, state, or payload output/logging. Browser, server, transport, clock, transaction, and store seams are deterministic in tests. Existing generic CLI, setup, Stage 1 controls, catalog bridge, and playback remain unchanged.
+- **TDD evidence:** RED: two focused tests failed at the absent live export. GREEN: focused OAuth/CLI tests passed (`50 passed`). TRIANGULATE: invalid/declined callbacks and bind failure make no transport/browser fallback; compileall and diff check passed. REFACTOR: production defaults remain behind the explicit live mode and shutdown is bounded/finally-owned.
+- **Limitation:** this is code-only offline evidence; no browser, socket, network/provider, or real keyring side effect was executed. The broad OAuth task is not marked complete.
+
+## Bootstrap authorization correction
+
+- **Status:** completed as a narrow correction to the live OAuth bootstrap contradiction.
+- **Behavior:** authorization URL construction remains authorized by default and permits pending authorization only with `allow_pending_authorization=True`; the live flow uses that flag before callback validation. The OAuth client factory remains authorized by default and permits the initial post-callback exchange only with `allow_initial_exchange=True`.
+- **TDD:** RED: focused OAuth/CLI tests reported four failures for missing flags and unauthorized live bootstrap. GREEN: focused OAuth/CLI tests passed (`53 passed`). TRIANGULATE: invalid callback/state remains transport-free and the validated callback exchange succeeds; disabled, missing-client, scope, session, and callback gates remain fail-closed. REFACTOR: flags are keyword-only, explicit, and limited to their respective bootstrap boundaries.
+- **Validation:** compileall and `git diff --check` were run after the correction. Live authorization remains unexecuted; no browser, socket, network/provider, or real keyring mutation occurred.

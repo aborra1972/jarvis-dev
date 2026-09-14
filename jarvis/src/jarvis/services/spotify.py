@@ -343,11 +343,15 @@ class OAuthResult:
 SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 
 
-def create_spotify_authorization(configuration: Any, *, transaction: PKCETransaction) -> str | None:
+def create_spotify_authorization(
+    configuration: Any, *, transaction: PKCETransaction,
+    allow_pending_authorization: bool = False,
+) -> str | None:
     """Build an authorization URL after the explicit setup gate passes."""
     if (not isinstance(configuration, dict)
             or configuration.get("enabled") is not True
-            or configuration.get("authorized") is not True
+            or (configuration.get("authorized") is not True
+                and allow_pending_authorization is not True)
             or not KeyringClientIdStore._valid(configuration.get("client_id"))
             or not isinstance(transaction, PKCETransaction)
             or transaction._consumed
@@ -588,6 +592,140 @@ def authorize_spotify_callback(
 
 
 @dataclass(frozen=True)
+class _HTTPResponse:
+    def __init__(self, status_code: int, payload: Any) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> Any:
+        return self._payload
+
+
+def _urllib_transport(method: str, url: str, data: dict[str, str],
+                      headers: dict[str, str], timeout: float) -> _HTTPResponse:
+    """Bounded live transport; only called by the explicit live CLI mode."""
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
+
+    request = Request(url, data=urlencode(data).encode(), headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return _HTTPResponse(response.status, json.loads(response.read()))
+    except HTTPError as error:
+        try:
+            payload = json.loads(error.read())
+        except Exception:
+            payload = None
+        return _HTTPResponse(error.code, payload)
+
+
+def _create_loopback_server(host: str, port: int, callback: Callable[[str], None], timeout: float) -> Any:
+    """Create the one-request, fixed-address production callback listener."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            requested = urlsplit(self.path)
+            callback(urlunsplit(("http", "127.0.0.1:8888", requested.path,
+                                 requested.query, "")))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Authorization response received. You may close this window.")
+
+    if (host, port) != ("127.0.0.1", 8888):
+        raise OSError("invalid loopback binding")
+    server = HTTPServer((host, port), Handler)
+    server.timeout = timeout
+    return server
+
+
+def run_spotify_live_authorization(
+    configuration: Any,
+    *,
+    browser_opener: Callable[[str], Any],
+    server_factory: Callable[[Callable[[str], None], float], Any],
+    transport: Callable[..., Any],
+    clock: Callable[[], float] = time.time,
+    store: Any,
+    transaction_factory: Callable[..., PKCETransaction] = create_pkce_transaction,
+    timeout_s: float = 30.0,
+) -> OAuthResult:
+    """Run one bounded live authorization only through injected capabilities."""
+    if not callable(browser_opener) or not callable(server_factory) or not callable(transport):
+        return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+    if not isinstance(timeout_s, (int, float)) or not 0.1 <= timeout_s <= 30.0:
+        return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+    if not isinstance(configuration, dict):
+        return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+    session_id = secrets.token_urlsafe(16)
+    try:
+        transaction = transaction_factory(
+            session_id, now=clock(),
+            ttl_s=min(float(configuration.get("transaction_ttl_s", 300.0)), float(timeout_s)),
+        )
+        url = create_spotify_authorization(
+            configuration, transaction=transaction,
+            allow_pending_authorization=True,
+        )
+    except (TypeError, ValueError):
+        return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+    if not url:
+        return OAuthClient._result(OAuthErrorCode.DISABLED)
+
+    callback_value: list[str] = []
+    server = None
+    try:
+        try:
+            server = server_factory("127.0.0.1", 8888,
+                                 lambda value: callback_value.append(value), float(timeout_s))
+        except OSError:
+            return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+        browser_opener(url)
+        serve_once = getattr(server, "handle_request", None) or getattr(server, "serve_once", None)
+        if not callable(serve_once):
+            return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+        served = serve_once()
+        if isinstance(served, str):
+            callback_value.append(served)
+        if not callback_value:
+            return OAuthClient._result(OAuthErrorCode.NETWORK_TIMEOUT)
+        callback_url = callback_value[0]
+        parsed = parse_pkce_callback(callback_url, transaction=transaction,
+                                     session_id=session_id, now=clock())
+        if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
+            if "error=access_denied" in callback_url:
+                return OAuthClient._result(OAuthErrorCode.NOT_AUTHORIZED)
+            return OAuthClient._result(OAuthErrorCode.INVALID_RESPONSE)
+        client = create_spotify_oauth_client(
+            configuration, store=store, transport=transport, clock=clock,
+            timeout_s=min(float(timeout_s), 30.0),
+            allow_initial_exchange=True,
+        )
+        if client is None:
+            return OAuthClient._result(OAuthErrorCode.DISABLED)
+        return client.exchange_code(transaction, parsed.authorization_code,
+                                    session_id=session_id, callback_validated=True)
+    except (TimeoutError, OSError):
+        return OAuthClient._result(OAuthErrorCode.NETWORK_TIMEOUT)
+    except Exception:
+        return OAuthClient._result(OAuthErrorCode.PROVIDER_ERROR)
+    finally:
+        if server is not None:
+            for method in ("server_close", "close", "shutdown"):
+                closer = getattr(server, method, None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        pass
+                    break
+
+
+@dataclass(frozen=True)
 class _OAuthTransportFailure:
     code: OAuthErrorCode
 
@@ -603,6 +741,7 @@ def create_spotify_oauth_client(
     transport: Callable[..., Any],
     clock: Callable[[], float] = time.time,
     timeout_s: float = 5.0,
+    allow_initial_exchange: bool = False,
 ) -> OAuthClient | None:
     """Create OAuth only after the explicit offline setup gate passes.
 
@@ -614,7 +753,8 @@ def create_spotify_oauth_client(
         return None
     client_id = configuration.get("client_id")
     if (configuration.get("enabled") is not True
-            or configuration.get("authorized") is not True
+            or (configuration.get("authorized") is not True
+                and allow_initial_exchange is not True)
             or not KeyringClientIdStore._valid(client_id)):
         return None
     return OAuthClient(

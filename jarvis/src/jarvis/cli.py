@@ -22,6 +22,7 @@ from jarvis.orchestrator import loop
 from jarvis.services.spotify import (
     ClientIdStatus, KeyringClientIdStore, create_pkce_transaction,
     create_spotify_authorization, redacted_authorization_url,
+        run_spotify_live_authorization, _create_loopback_server, _urllib_transport,
     resolve_spotify_client_id,
 )
 
@@ -183,6 +184,24 @@ def _handle_spotify_setup() -> int:
     return 0
 
 
+def _handle_spotify_live_authorize() -> int:
+    """Run the explicit live OAuth flow; all capabilities remain bounded/injected."""
+    import webbrowser
+    from jarvis import config
+    from jarvis.services.spotify import KeyringCredentialStore, OAuthErrorCode
+
+    result = run_spotify_live_authorization(
+        config.load_spotify_oauth_config(), browser_opener=webbrowser.open,
+        server_factory=_create_loopback_server, transport=_urllib_transport,
+        store=KeyringCredentialStore(),
+    )
+    if result.code is OAuthErrorCode.OK:
+        print("Spotify autorizado correctamente.")
+        return 0
+    print(result.message, file=sys.stderr)
+    return 1
+
+
 def _handle_spotify_authorize() -> int:
     """Construct, but do not execute, the explicitly gated authorization URL."""
     from jarvis import config
@@ -196,8 +215,10 @@ def _handle_spotify_authorize() -> int:
         )
     except (TypeError, ValueError):
         transaction = None
-    url = (create_spotify_authorization(configuration, transaction=transaction)
-           if transaction is not None else None)
+    url = (create_spotify_authorization(
+        configuration, transaction=transaction,
+        allow_pending_authorization=True,
+    ) if transaction is not None else None)
     if not url:
         print("jarvis spotify authorize: autorización no disponible; revise el gate de Spotify.",
               file=sys.stderr)
@@ -261,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the historical top-level command list stable while accepting the
     # clearer Spotify setup spelling as an equivalent alias.
     effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv == ["spotify", "authorize", "--live"]:
+        return _handle_spotify_live_authorize()
     if effective_argv == ["spotify", "authorize"]:
         return _handle_spotify_authorize()
     if effective_argv == ["spotify", "setup"]:

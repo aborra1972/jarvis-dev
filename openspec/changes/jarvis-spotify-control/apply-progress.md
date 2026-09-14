@@ -601,3 +601,10 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Behavior:** token-exchange HTTP failures preserve `OAuthErrorCode.PROVIDER_ERROR` and expose only `token_http_400`, `token_http_401`, or `token_http_other`. The CLI allowlists these categories and never prints provider payloads or OAuth material. `invalid_grant` cleanup and fail-closed credential handling remain unchanged.
 - **TDD evidence:** RED: focused OAuth/CLI tests failed in six cases because the typed diagnostic field and CLI category output were absent. GREEN: focused OAuth/CLI tests passed (`89 passed`). TRIANGULATE: parametrized 400/401/other statuses, payload redaction, unchanged provider code, and CLI output allowlisting are covered.
 - **Validation:** `jarvis/.venv/bin/python -m compileall -q jarvis/src` passed; `git diff --check` passed. No live authorization retry, browser open, socket, network/provider call, real keyring mutation, commit, or push was performed.
+
+    ## OAuth live transport/save error classification hardening
+
+    - **Status:** completed as a narrow offline OAuth correction.
+    - **Behavior:** malformed JSON/value failures in the live urllib token transport now return a bounded `INVALID_RESPONSE` transport failure instead of falling through to generic `PROVIDER_ERROR`. Unexpected token-store save exceptions now map to `STORAGE_UNAVAILABLE` without exposing exception text, token material, client IDs, or authorization codes. Existing HTTP status categories, `invalid_grant` cleanup, and fail-closed behavior remain unchanged.
+    - **TDD evidence:** RED: two focused regression tests failed (`2 failed, 71 deselected`), showing malformed live JSON became `PROVIDER_ERROR` and save exceptions escaped. GREEN: both focused tests passed (`2 passed, 71 deselected`).
+    - **Validation:** `jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_spotify_oauth.py` → `73 passed`; `jarvis/.venv/bin/python -m compileall -q jarvis/src` → exit 0; `git diff --check` → exit 0. No live retry, browser, socket, network/provider call, real keyring mutation, commit, or push was performed.

@@ -609,7 +609,10 @@ class OAuthClient:
                 and set(scope) == APPROVED_SPOTIFY_SCOPES)
 
     def _save_token(self, result: OAuthResult) -> OAuthResult:
-        saved = self._store.save(json.dumps(result.payload, separators=(",", ":")))
+        try:
+            saved = self._store.save(json.dumps(result.payload, separators=(",", ":")))
+        except Exception:
+            return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
         if saved.status is CredentialStatus.STORAGE_UNAVAILABLE:
             return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
         return OAuthResult(OAuthErrorCode.OK, "", access_token=result.access_token)
@@ -680,7 +683,11 @@ def _urllib_transport(method: str, url: str, data: dict[str, str],
     request = Request(url, data=urlencode(data).encode(), headers=headers, method=method)
     try:
         with urlopen(request, timeout=timeout) as response:
-            return _HTTPResponse(response.status, json.loads(response.read()))
+            try:
+                payload = json.loads(response.read())
+            except (json.JSONDecodeError, ValueError):
+                return _OAuthTransportFailure(OAuthErrorCode.INVALID_RESPONSE)
+            return _HTTPResponse(response.status, payload)
     except HTTPError as error:
         try:
             payload = json.loads(error.read())

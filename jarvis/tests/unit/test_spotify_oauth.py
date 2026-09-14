@@ -462,6 +462,64 @@ def test_oauth_factory_accepts_only_keyring_validated_client_id_and_redacts_setu
     assert "b" * 32 not in repr(client)
 
 
+def test_live_urllib_malformed_token_response_maps_to_invalid_response(monkeypatch) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, _urllib_transport
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response())
+    store = _MemoryTokenStore()
+    client = OAuthClient(
+        enabled=True, client_id="client", store=store,
+        transport=_urllib_transport, clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+
+    result = client.exchange_code(tx, "code", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.INVALID_RESPONSE
+    assert result.message == "No pude completar la autorización de Spotify."
+    assert store.value is None
+    assert "not-json" not in repr(result)
+
+
+def test_unexpected_token_save_failure_maps_to_storage_unavailable_without_redaction_leak() -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode
+
+    class BrokenSaveStore(_MemoryTokenStore):
+        def save(self, value):
+            raise RuntimeError("save-secret-token")
+
+    store = BrokenSaveStore()
+    client = OAuthClient(
+        enabled=True, client_id="client-secret", store=store,
+        transport=lambda *args: _Response(200, {
+            "access_token": "access-secret", "refresh_token": "refresh-secret",
+            "expires_in": 3600, "scope": "user-read-playback-state user-modify-playback-state",
+        }),
+        clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state-secret")
+
+    result = client.exchange_code(tx, "code-secret", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.STORAGE_UNAVAILABLE
+    assert result.message == "El almacenamiento seguro no está disponible."
+    assert all(secret not in repr(result) for secret in (
+        "save-secret-token", "access-secret", "refresh-secret", "client-secret", "code-secret",
+    ))
+
+
 def test_exchange_uses_pkce_scopes_and_bounded_transport() -> None:
     from jarvis.services.spotify import OAuthClient, OAuthErrorCode
 

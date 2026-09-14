@@ -541,3 +541,48 @@ class _MemoryTokenStore:
         from jarvis.services.spotify import CredentialResult, CredentialStatus
         self.disabled = False
         return CredentialResult(CredentialStatus.OK)
+
+
+def test_authorization_url_uses_exact_redirect_and_scopes_without_repr_leaks():
+    from jarvis.services.spotify import create_spotify_authorization, redacted_authorization_url
+
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=iter(["v" * 43, "state-secret"]).__next__)
+    url = create_spotify_authorization(
+        {"enabled": True, "authorized": True, "client_id": "a" * 32}, transaction=tx,
+    )
+    assert "redirect_uri=http%3A%2F%2F127.0.0.1%3A8888%2Fcallback" in url
+    assert "scope=user-modify-playback-state+user-read-playback-state" in url
+    assert "state-secret" in url
+    redacted = redacted_authorization_url(url)
+    assert "state-secret" not in redacted
+    assert tx.verifier not in redacted
+    assert "%5Bredacted%5D" in redacted
+
+
+def test_injected_authorization_callback_exchange_success_and_failures():
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, authorize_spotify_callback
+
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    store = _MemoryTokenStore()
+    calls = []
+    client = OAuthClient(
+        enabled=True, client_id="a" * 32, store=store,
+        transport=lambda *args: calls.append(args) or _Response(
+            200, {"access_token": "access-secret", "refresh_token": "refresh-secret",
+                  "expires_in": 3600, "scope": "user-read-playback-state user-modify-playback-state"}),
+        clock=lambda: 100.0,
+    )
+    result = authorize_spotify_callback(
+        client, tx, "http://127.0.0.1:8888/callback?code=code-secret&state=state",
+        session_id="session-1", now=101.0,
+    )
+    assert result.ok and len(calls) == 1
+    assert "code-secret" not in result.message and "access-secret" not in repr(result)
+
+    bad = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+    failed = authorize_spotify_callback(
+        client, bad, "http://127.0.0.1:8888/callback?code=code&state=wrong",
+        session_id="session-1", now=101.0,
+    )
+    assert failed.code is OAuthErrorCode.INVALID_RESPONSE
+    assert len(calls) == 1

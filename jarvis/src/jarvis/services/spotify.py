@@ -12,7 +12,7 @@ import secrets
 import subprocess
 import threading
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -340,6 +340,36 @@ class OAuthResult:
         return self.code is OAuthErrorCode.OK
 
 
+SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
+
+
+def create_spotify_authorization(configuration: Any, *, transaction: PKCETransaction) -> str | None:
+    """Build an authorization URL after the explicit setup gate passes."""
+    if (not isinstance(configuration, dict)
+            or configuration.get("enabled") is not True
+            or configuration.get("authorized") is not True
+            or not KeyringClientIdStore._valid(configuration.get("client_id"))
+            or not isinstance(transaction, PKCETransaction)
+            or transaction._consumed
+            or set(configuration.get("scopes", APPROVED_SPOTIFY_SCOPES)) != APPROVED_SPOTIFY_SCOPES):
+        return None
+    return SPOTIFY_AUTHORIZE_URL + "?" + urlencode({
+        "response_type": "code", "client_id": configuration["client_id"],
+        "redirect_uri": LOOPBACK_REDIRECT_URI,
+        "scope": " ".join(sorted(APPROVED_SPOTIFY_SCOPES)),
+        "state": transaction.state, "code_challenge": transaction.code_challenge,
+        "code_challenge_method": "S256",
+    })
+
+
+def redacted_authorization_url(url: str) -> str:
+    """Render URL diagnostics without exposing state or PKCE material."""
+    parsed = urlsplit(url)
+    query = [(key, "[redacted]" if key in {"state", "code_challenge"} else value)
+             for key, value in parse_qsl(parsed.query, keep_blank_values=True)]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+
 class OAuthClient:
     """Offline-testable Spotify token lifecycle with a bounded transport seam."""
 
@@ -359,7 +389,8 @@ class OAuthClient:
         self._timeout = float(timeout_s)
         self._refresh_lock = threading.Lock()
 
-    def exchange_code(self, transaction: PKCETransaction, code: str, *, session_id: str) -> OAuthResult:
+    def exchange_code(self, transaction: PKCETransaction, code: str, *, session_id: str,
+                      callback_validated: bool = False) -> OAuthResult:
         if not self._enabled:
             return self._result(OAuthErrorCode.DISABLED)
         stored = self._store.load()
@@ -367,7 +398,8 @@ class OAuthClient:
             return self._result(OAuthErrorCode.DISABLED)
         if stored.status is CredentialStatus.STORAGE_UNAVAILABLE:
             return self._result(OAuthErrorCode.STORAGE_UNAVAILABLE)
-        if not code or not transaction.consume(session_id, now=self._clock()):
+        if not code or (not callback_validated
+                        and not transaction.consume(session_id, now=self._clock())):
             return self._result(OAuthErrorCode.INVALID_RESPONSE)
         response = self._send({
             "grant_type": "authorization_code", "code": code,
@@ -540,6 +572,19 @@ class OAuthClient:
             OAuthErrorCode.UNAUTHORIZED: "La autorización de Spotify ya no es válida.",
         }
         return OAuthResult(code, messages.get(code, "No pude completar la autorización de Spotify."))
+
+
+def authorize_spotify_callback(
+    client: OAuthClient, transaction: PKCETransaction, callback_url: str, *,
+    session_id: str, now: float,
+) -> OAuthResult:
+    """Complete an injected callback; listener/browser ownership stays outside."""
+    parsed = parse_pkce_callback(callback_url, transaction=transaction,
+                                 session_id=session_id, now=now)
+    if parsed.code is not OAuthCallbackCode.OK or not parsed.authorization_code:
+        return OAuthClient._result(OAuthErrorCode.INVALID_RESPONSE)
+    return client.exchange_code(transaction, parsed.authorization_code,
+                                session_id=session_id, callback_validated=True)
 
 
 @dataclass(frozen=True)

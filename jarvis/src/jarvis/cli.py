@@ -14,10 +14,16 @@ import getpass
 import subprocess
 import sys
 import tempfile
+import secrets
+import time
 from pathlib import Path
 
 from jarvis.orchestrator import loop
-from jarvis.services.spotify import ClientIdStatus, KeyringClientIdStore, resolve_spotify_client_id
+from jarvis.services.spotify import (
+    ClientIdStatus, KeyringClientIdStore, create_pkce_transaction,
+    create_spotify_authorization, redacted_authorization_url,
+    resolve_spotify_client_id,
+)
 
 COMMANDS = (
     "start", "stop", "off", "on", "clean", "logs", "say", "ptt", "diagnose",
@@ -177,6 +183,30 @@ def _handle_spotify_setup() -> int:
     return 0
 
 
+def _handle_spotify_authorize() -> int:
+    """Construct, but do not execute, the explicitly gated authorization URL."""
+    from jarvis import config
+
+    configuration = config.load_spotify_oauth_config()
+    session_id = secrets.token_urlsafe(16)
+    try:
+        transaction = create_pkce_transaction(
+            session_id, now=time.time(),
+            ttl_s=float(configuration.get("transaction_ttl_s", 300.0)),
+        )
+    except (TypeError, ValueError):
+        transaction = None
+    url = (create_spotify_authorization(configuration, transaction=transaction)
+           if transaction is not None else None)
+    if not url:
+        print("jarvis spotify authorize: autorización no disponible; revise el gate de Spotify.",
+              file=sys.stderr)
+        return 1
+    print("Spotify authorization URL constructed (not opened):")
+    print(redacted_authorization_url(url))
+    return 0
+
+
 def _handle_setup(args: argparse.Namespace) -> int:
     """``jarvis setup [name]``: wizard to pick the agent/persona or Spotify.
 
@@ -231,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the historical top-level command list stable while accepting the
     # clearer Spotify setup spelling as an equivalent alias.
     effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv == ["spotify", "authorize"]:
+        return _handle_spotify_authorize()
     if effective_argv == ["spotify", "setup"]:
         effective_argv = ["setup", "spotify"]
     args = parser.parse_args(effective_argv)

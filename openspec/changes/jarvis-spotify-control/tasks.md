@@ -84,3 +84,5 @@ The 800-line session review budget is likely exceeded by the combined two-stage 
 3. Obtain the explicit user authorization gate in 2.1 before OAuth secrets, app registration, redirect setup, or external calls.
 4. Apply each stage as a reviewable work unit; if the forecast remains over 800 changed lines, pause for the delivery decision rather than silently taking a size exception.
 5. Completion requires the required pytest command, recorded RED/GREEN/TRIANGULATE/REFACTOR evidence for every checkbox, and confirmation that no implementation task weakened existing safety, `open_app`, cancellation, or `off` behavior.
+
+- [x] Replanned safe slice: add a non-voice CLI authorization URL constructor plus injected callback/exchange seam; keep browser, listener, network, provider, and keyring mutation out of runtime tests. The broad OAuth task remains unchecked. <!-- sdd-owner: implementation -->

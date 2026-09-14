@@ -46,6 +46,17 @@ _SPOTIFY_DEVICE_ID = re.compile(r"[^\s\x00-\x1f\x7f]+\Z")
 _SPOTIFY_FINGERPRINT_DOMAIN = b"jarvis.spotify.device-id.fingerprint.v1\\x00"
 
 
+def spotify_device_type_category(device_type: Any) -> str | None:
+    """Normalize Spotify's documented Desktop device type to the policy category.
+
+    The lowercase spelling is retained only for existing offline fixtures that
+    predate the provider's standard ``Computer`` casing.
+    """
+    if device_type in {"Computer", "computer"}:
+        return "computer"
+    return None
+
+
 def spotify_device_fingerprint(device_id: Any) -> str:
     """Derive a stable, domain-separated fingerprint without exposing the ID."""
     if not isinstance(device_id, str) or not device_id or not _SPOTIFY_DEVICE_ID.fullmatch(device_id):
@@ -507,7 +518,7 @@ class OAuthClient:
             }), old_refresh_token=refresh_token)
             return self._save_token(result) if result.ok else result
 
-    def request(self, method: str, url: str, data: dict[str, str] | None = None) -> OAuthResult:
+    def request(self, method: str, url: str, data: dict[str, Any] | None = None) -> OAuthResult:
         token = self.access_token()
         if not token.ok:
             return token
@@ -518,11 +529,14 @@ class OAuthClient:
             return self._result(OAuthErrorCode.NETWORK_TIMEOUT)
         except Exception:
             return self._result(OAuthErrorCode.PROVIDER_ERROR)
+        if isinstance(response, _OAuthTransportFailure):
+            return self._result(response.code)
         status = getattr(response, "status_code", None)
         if status == 401:
             return self._cleanup(OAuthErrorCode.UNAUTHORIZED)
         if not isinstance(status, int) or status < 200 or status >= 300:
-            return self._result(OAuthErrorCode.PROVIDER_ERROR)
+            diagnostic = "spotify_http_403" if status == 403 else "spotify_http_other"
+            return self._result(OAuthErrorCode.PROVIDER_ERROR, diagnostic=diagnostic)
         try:
             payload = response.json() if callable(getattr(response, "json", None)) else None
         except Exception:
@@ -689,31 +703,52 @@ class _HTTPResponse:
         return self.payload
 
 
-def _urllib_transport(method: str, url: str, data: dict[str, str] | None,
+def _urllib_transport(method: str, url: str, data: dict[str, Any] | None,
                       headers: dict[str, str], timeout: float) -> _HTTPResponse:
-    """Bounded live transport; only called by the explicit live CLI mode."""
+    """Encode only the explicitly supported Spotify request contracts."""
     from urllib.error import HTTPError
-    from urllib.parse import urlencode
+    from urllib.parse import parse_qsl, urlencode
     from urllib.request import Request, urlopen
 
     method = method.upper()
-    if method == "GET":
+    parsed = urlsplit(url)
+    content_type = next((value for key, value in headers.items()
+                         if key.lower() == "content-type"), None)
+    if method == "POST" and url == OAuthClient.TOKEN_URL:
+        if not isinstance(data, dict) or content_type != "application/x-www-form-urlencoded":
+            raise ValueError("unsupported Spotify request contract")
+        body = urlencode(data).encode()
+    elif method == "GET" and urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")) in {
+            PlaybackPolicy.DEVICES_URL, PlaybackPolicy.READBACK_URL, CatalogClient.SEARCH_URL}:
+        if content_type is not None:
+            raise ValueError("unsupported Spotify request contract")
         query = urlencode(data or {})
-        parsed = urlsplit(url)
         existing = parsed.query + ("&" if parsed.query and query else "") + query
         url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, existing, parsed.fragment))
         body = None
+    elif (method == "PUT" and parsed.scheme == "https" and parsed.netloc == "api.spotify.com"
+          and parsed.path == urlsplit(PlaybackPolicy.PLAY_URL).path):
+        query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+        if (content_type is not None and content_type != "application/json"
+                or not isinstance(data, dict) or set(data) != {"context_uri"}
+                or not isinstance(data["context_uri"], str)
+                or len(query_pairs) != 1 or query_pairs[0][0] != "device_id"
+                or not query_pairs[0][1]):
+            raise ValueError("unsupported Spotify request contract")
+        headers = {**headers, "Content-Type": "application/json"}
+        body = json.dumps(data).encode()
     else:
-        body = urlencode(data or {}).encode()
+        raise ValueError("unsupported Spotify request contract")
     request = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(request, timeout=timeout) as response:
+            body = response.read()
+            if not body and response.status == 204:
+                return _HTTPResponse(response.status, {})
             try:
-                payload = json.loads(response.read())
+                payload = json.loads(body)
             except (json.JSONDecodeError, ValueError):
-                if url == OAuthClient.TOKEN_URL:
-                    return _OAuthTransportFailure(OAuthErrorCode.INVALID_RESPONSE)
-                payload = None
+                return _OAuthTransportFailure(OAuthErrorCode.INVALID_RESPONSE)
             return _HTTPResponse(response.status, payload)
     except HTTPError as error:
         try:
@@ -1048,6 +1083,18 @@ class PlaybackResult:
         return self.code is PlaybackCode.OK
 
 
+class SpotifyPlaybackHTTPError(RuntimeError):
+    """Bounded provider status category for playback policy decisions."""
+
+    _ALLOWED_CATEGORIES = frozenset({"spotify_http_403"})
+
+    def __init__(self, category: str) -> None:
+        if category not in self._ALLOWED_CATEGORIES:
+            raise ValueError("unsupported Spotify playback status category")
+        super().__init__(category)
+        self.category = category
+
+
 class PlaybackOperation:
     """Volatile cancellation seam for bounded injected playback calls."""
 
@@ -1064,7 +1111,6 @@ class PlaybackOperation:
 class PlaybackPolicy:
     """Fail-closed policy for one verified local Spotify Desktop target."""
 
-    ACCOUNT_URL = "https://api.spotify.com/v1/me"
     DEVICES_URL = "https://api.spotify.com/v1/me/player/devices"
     PLAY_URL = "https://api.spotify.com/v1/me/player/play"
     READBACK_URL = "https://api.spotify.com/v1/me/player"
@@ -1114,16 +1160,6 @@ class PlaybackPolicy:
         if self._cancelled(operation):
             return PlaybackResult(PlaybackCode.CANCELLED)
         try:
-            account = self._api("GET", self.ACCOUNT_URL, None, self._timeout)
-        except TimeoutError:
-            return PlaybackResult(PlaybackCode.TIMEOUT)
-        except Exception:
-            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
-        if self._cancelled(operation):
-            return PlaybackResult(PlaybackCode.CANCELLED)
-        if not isinstance(account, dict) or account.get("product") != "premium":
-            return PlaybackResult(PlaybackCode.PREMIUM_REQUIRED)
-        try:
             response = self._api("GET", self.DEVICES_URL, None, self._timeout)
         except TimeoutError:
             return PlaybackResult(PlaybackCode.TIMEOUT)
@@ -1143,11 +1179,15 @@ class PlaybackPolicy:
         if self._cancelled(operation):
             return PlaybackResult(PlaybackCode.CANCELLED)
         try:
-            accepted = self._api("PUT", self.PLAY_URL, {
-                "device_id": device_id, "context_uri": candidate.uri,
+            accepted = self._api("PUT", self.PLAY_URL + "?" + urlencode({"device_id": device_id}), {
+                "context_uri": candidate.uri,
             }, self._timeout)
         except TimeoutError:
             return PlaybackResult(PlaybackCode.TIMEOUT)
+        except SpotifyPlaybackHTTPError as error:
+            if error.category == "spotify_http_403":
+                return PlaybackResult(PlaybackCode.PREMIUM_REQUIRED)
+            return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
         except Exception:
             return PlaybackResult(PlaybackCode.PROVIDER_ERROR)
         if self._cancelled(operation):
@@ -1167,7 +1207,8 @@ class PlaybackPolicy:
         return PlaybackResult(PlaybackCode.OK)
 
     def _matches_target(self, device: Any) -> bool:
-        if not (isinstance(device, dict) and device.get("type") == "computer"):
+        if not (isinstance(device, dict)
+                and spotify_device_type_category(device.get("type")) == "computer"):
             return False
         try:
             derived = spotify_device_fingerprint(device.get("id"))
@@ -1183,9 +1224,9 @@ class PlaybackPolicy:
     def _readback_matches(state: Any, device_id: str, uri: str) -> bool:
         if not isinstance(state, dict) or not isinstance(state.get("device"), dict):
             return False
-        item = state.get("item")
-        return (state["device"].get("id") == device_id and isinstance(item, dict)
-                and item.get("uri") == uri)
+        context = state.get("context")
+        return (state["device"].get("id") == device_id and isinstance(context, dict)
+                and context.get("uri") == uri)
 
     @staticmethod
     def _cancelled(operation: Any | None) -> bool:
@@ -1482,17 +1523,19 @@ class SpotifyPlaybackBridge:
         if not callable(getattr(oauth, "request", None)):
             raise ValueError("invalid playback OAuth boundary")
         self._oauth = oauth
-        self._allowed_urls = {PlaybackPolicy.ACCOUNT_URL, PlaybackPolicy.DEVICES_URL,
-                              PlaybackPolicy.PLAY_URL, PlaybackPolicy.READBACK_URL}
+        self._allowed_urls = {PlaybackPolicy.DEVICES_URL, PlaybackPolicy.PLAY_URL,
+                              PlaybackPolicy.READBACK_URL}
 
     def __call__(self, method: str, url: str, payload: dict[str, Any] | None,
                  timeout: float) -> Any:
-        if url not in self._allowed_urls or method.upper() not in {"GET", "PUT"}:
+        if method.upper() not in {"GET", "PUT"} or (method.upper() == "GET" and url not in self._allowed_urls) or (method.upper() == "PUT" and (urlsplit(url).path != urlsplit(PlaybackPolicy.PLAY_URL).path or len(parse_qsl(urlsplit(url).query, keep_blank_values=True)) != 1 or parse_qsl(urlsplit(url).query, keep_blank_values=True)[0][0] != "device_id" or not parse_qsl(urlsplit(url).query, keep_blank_values=True)[0][1] or not isinstance(payload, dict) or set(payload) != {"context_uri"} or not isinstance(payload["context_uri"], str))):
             raise RuntimeError("unsupported Spotify endpoint")
         result = self._oauth.request(method, url, payload)
         if result.code is OAuthErrorCode.NETWORK_TIMEOUT:
             raise TimeoutError
         if not result.ok:
+            if result.code is OAuthErrorCode.PROVIDER_ERROR and result.diagnostic == "spotify_http_403":
+                raise SpotifyPlaybackHTTPError("spotify_http_403")
             raise RuntimeError("Spotify request failed")
         if method.upper() == "PUT":
             return {"accepted": True}

@@ -165,7 +165,7 @@ def test_spotify_target_setup_requires_explicit_confirmation_and_writes_hash_onl
     class Api:
         def __call__(self, method, url, payload, timeout):
             assert method == "GET" and url.endswith("/me/player/devices")
-            return {"devices": [{"id": raw_id, "name": "Desktop", "type": "computer"}]}
+            return {"devices": [{"id": raw_id, "name": "Desktop", "type": "Computer"}]}
     monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), None))
     monkeypatch.setattr(cli, "_spotify_playback_dependencies", lambda: ({}, lambda: ["spotify"]))
     monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *a, **k: object())
@@ -175,6 +175,25 @@ def test_spotify_target_setup_requires_explicit_confirmation_and_writes_hash_onl
     assert written == [spotify_device_fingerprint(raw_id)]
     output = capsys.readouterr().out
     assert raw_id not in output
+
+
+@pytest.mark.parametrize("device_type", ["Smartphone", "Speaker", "COMPUTER", "computerized", "unknown"])
+def test_spotify_target_setup_rejects_non_computer_types(monkeypatch, capsys, device_type):
+    written = []
+
+    class Api:
+        def __call__(self, method, url, payload, timeout):
+            return {"devices": [{"id": "provider-id", "name": "Desktop", "type": device_type}]}
+
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), None))
+    monkeypatch.setattr(cli, "_spotify_playback_dependencies", lambda: ({}, lambda: ["spotify"]))
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "SpotifyPlaybackBridge", lambda **k: Api())
+    monkeypatch.setattr("builtins.input", pytest.fail)
+
+    assert cli._handle_spotify_target_setup(writer=written.append) == 1
+    assert written == []
+    assert "no valid computer target" in capsys.readouterr().err
 
 
 def test_existing_setup_spotify_alias_remains_routed(monkeypatch):

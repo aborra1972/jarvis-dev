@@ -639,3 +639,38 @@ The broad catalog row remains intentionally unchecked, along with the following 
 - **Safety:** invalid, ambiguous, declined, cancelled, malformed, or provider-failure paths perform no configuration write. Device IDs, payloads, and tokens are not printed, logged, or persisted. No live enrollment, playback, browser, network, or real keyring operation was executed.
 - **TDD evidence:** RED: playback focused collection failed because the fingerprint helper was absent. GREEN: focused playback/config/CLI tests passed (`55 passed`). TRIANGULATE: full suite passed (`1276 passed, 3 deselected`), including no-ID-leakage and no-write cancellation coverage; compileall and diff checks passed. REFACTOR: the existing OAuth bridge and trusted `.env` boundary were reused without fallback, transfer, switching, or playback changes.
 - **Validation:** `jarvis/.venv/bin/python -m compileall -q jarvis/src` and `git diff --check` passed. No commit or push was performed.
+
+## Provider device-type mismatch correction
+
+- **Status:** completed as a strict-TDD offline correction within the enrollment/playback surfaces.
+- **Behavior:** Added one shared normalizer mapping Spotify's exact provider value `Computer` to internal `computer`. The legacy lowercase spelling is retained solely for existing offline fixtures; arbitrary case variants, `Smartphone`, `Speaker`, and unknown values remain rejected. Enrollment and `PlaybackPolicy` now use the same normalization before fingerprint comparison; hashing, redaction, confirmation, and all readiness gates remain unchanged.
+- **TDD evidence:** RED: focused tests failed 7 cases, including standard `Computer` acceptance in policy/enrollment and the new non-computer CLI cases. GREEN: focused playback/CLI tests passed (`46 passed`). TRIANGULATE: the focused rejection matrix covers provider non-computer values and case variants; full pytest passed (`1287 passed, 3 deselected`). REFACTOR: normalization is centralized and no target-policy broadening or fallback was introduced.
+- **Validation:** `jarvis/.venv/bin/python -m compileall -q jarvis/src` and `git diff --check` passed. No network/provider/playback/keyring/real-environment mutation, commit, or push was performed.
+
+## Premium false-negative correction
+
+- **Status:** completed for the bounded playback policy and OAuth bridge surfaces.
+- **Behavior:** Removed the account-profile `/v1/me` and `product` gate; approved exact scopes, catalog selection, unique local Spotify MPRIS identity, configured fingerprint, and exact single `Computer` target match remain pre-play gates. Playback stays fixed-target with mandatory readback, without transfer or fallback. Only a bounded Spotify HTTP 403 category maps to `PREMIUM_REQUIRED`; unauthorized and other provider failures remain typed fail-closed, with provider payloads never exposed.
+- **TDD evidence:** RED: focused playback/CLI collection failed because the new bounded playback error type was absent. GREEN: focused playback/CLI/OAuth tests passed (`132 passed`). TRIANGULATE: minimum-scope success/no-account-request, pre-play gate, 403 premium mapping, and 401 fail-closed coverage passed. REFACTOR: reused the existing OAuth result diagnostic seam and retained the uncommitted Computer device-type correction.
+- **Validation:** Full pytest, compileall, and diff checks remain to be run; no live provider/network/playback/browser/keyring operation, commit, or push was performed.
+
+## Spotify 204 empty playback response correction
+
+- **Status:** completed as a strict-TDD offline correction to the production urllib transport and playback bridge boundary.
+- **Behavior:** An empty response body is accepted only with exact HTTP 204 and represented as an empty payload; empty or malformed 200/other JSON responses return bounded `INVALID_RESPONSE`. OAuth token POST semantics and non-success HTTP diagnostics remain unchanged. The playback bridge treats the accepted PUT as an acceptance marker, while `PlaybackPolicy` still requires a matching subsequent readback before returning `OK`.
+- **TDD evidence:** RED: new production-transport tests failed 2 cases because empty 204 became `None` and empty/malformed 200 returned `_HTTPResponse`. GREEN: focused transport/playback tests passed (`4 passed`). TRIANGULATE: existing unknown-readback and bounded-403 tests passed; payload redaction is covered. REFACTOR: the correction is limited to the existing transport failure and response seams.
+- **Validation:** Focused OAuth/playback/CLI tests passed (`134 passed`); full pytest passed (`1292 passed, 3 deselected`); `jarvis/.venv/bin/python -m compileall -q jarvis/src` and `git diff --check` passed. No live provider/network/playback/browser/keyring/env mutation, commit, or push was performed.
+
+## Spotify playback context readback correction
+
+- **Status:** completed as a strict-TDD offline correction to playback readback verification.
+- **Behavior:** Album/artist playback now requires the exact selected context URI in Spotify playback state's `context.uri` and the exact selected device ID. Track `item.uri`, missing context, alternate context, and alternate device never satisfy readback; existing redaction and readiness/fallback gates remain unchanged.
+- **TDD evidence:** RED: focused playback tests failed 2 cases because the implementation compared the track item URI and accepted no context-based match. GREEN: focused playback suite passed (`25 passed`). TRIANGULATE: tests cover artist and album contexts with differing track items plus wrong device, missing context, and alternate context rejection. REFACTOR: changed only the existing readback predicate and focused playback fixtures/tests.
+- **Validation:** `jarvis/.venv/bin/pytest -q jarvis/tests/unit/test_spotify_playback.py` → `25 passed`; `jarvis/.venv/bin/pytest -q` → `1298 passed, 3 deselected`; `jarvis/.venv/bin/python -m compileall -q jarvis/src` → exit 0; `git diff --check` → exit 0.
+
+## Playback request encoding correction
+
+- **Status:** completed as a strict-TDD offline correction to the bounded urllib transport and playback bridge.
+- **Behavior:** OAuth token POST remains form-urlencoded; supported GET requests carry query parameters without a body; the exact Spotify playback PUT carries `device_id` in the query and only `context_uri` as JSON with `application/json`, preserving authorization headers. Unsupported method/URL/content combinations fail closed. Playback still requires HTTP 204 acceptance normalization and matching readback before success.
+- **TDD evidence:** RED: new request-inspection and playback-construction assertions failed because non-GET requests were form-encoded and `device_id` was sent in the JSON payload. GREEN: focused OAuth/playback tests passed after the narrow transport and bridge correction. TRIANGULATE: unsupported combinations, token form encoding, GET query/no-body, PUT JSON/header preservation, and 204/readback paths are covered without exposing identifiers, URIs, or tokens.
+- **Validation:** Full pytest, compileall, and diff checks remain to be run; no live provider/network/playback/browser/keyring/env mutation, commit, or push was performed.

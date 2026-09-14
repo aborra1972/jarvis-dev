@@ -28,6 +28,7 @@ from jarvis.services.spotify import (
     create_spotify_oauth_client, SpotifyCatalogBridge, CatalogBridgeCode,
     PlaybackPolicy, PlaybackCode, SpotifyPlaybackBridge,
     discover_spotify_identities, spotify_device_fingerprint,
+    spotify_device_type_category,
 )
 
 COMMANDS = (
@@ -188,7 +189,8 @@ def _handle_spotify_target_setup(*, writer=None) -> int:
         return 1
     valid = []
     for device in devices:
-        if not isinstance(device, dict) or device.get("type") != "computer":
+        if (not isinstance(device, dict)
+                or spotify_device_type_category(device.get("type")) != "computer"):
             continue
         try:
             fingerprint = spotify_device_fingerprint(device.get("id"))

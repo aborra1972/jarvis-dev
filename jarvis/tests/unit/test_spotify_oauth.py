@@ -747,6 +747,92 @@ def test_refresh_is_single_flight_and_rotates_refresh_token() -> None:
     assert store.value["refresh_token"] == "r2"
 
 
+
+def test_urllib_transport_encodes_token_get_and_playback_requests(monkeypatch):
+    from jarvis.services.spotify import OAuthClient, PlaybackPolicy, _urllib_transport
+
+    captured = []
+
+    class Response:
+        status = 204
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b""
+
+    def inspect(request, timeout):
+        captured.append((request, timeout))
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", inspect)
+    _urllib_transport("POST", OAuthClient.TOKEN_URL, {"grant_type": "refresh_token"},
+                      {"Content-Type": "application/x-www-form-urlencoded"}, 5.0)
+    _urllib_transport("GET", PlaybackPolicy.DEVICES_URL, None,
+                      {"Authorization": "Bearer opaque-token"}, 5.0)
+    _urllib_transport("PUT", PlaybackPolicy.PLAY_URL + "?device_id=opaque-device",
+                      {"context_uri": "spotify:artist:opaque"},
+                      {"Authorization": "Bearer opaque-token"}, 5.0)
+
+    token_request, get_request, play_request = [item[0] for item in captured]
+    assert token_request.data == b"grant_type=refresh_token"
+    assert token_request.headers["Content-type"] == "application/x-www-form-urlencoded"
+    assert get_request.data is None
+    assert get_request.full_url == PlaybackPolicy.DEVICES_URL
+    assert play_request.data == b'{"context_uri": "spotify:artist:opaque"}'
+    assert play_request.headers["Content-type"] == "application/json"
+    assert play_request.headers["Authorization"] == "Bearer opaque-token"
+    assert play_request.full_url == PlaybackPolicy.PLAY_URL + "?device_id=opaque-device"
+
+
+def test_urllib_transport_rejects_unsupported_method_url_content_combinations(monkeypatch):
+    from jarvis.services.spotify import OAuthClient, _urllib_transport
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: pytest.fail("network call"))
+    with pytest.raises(ValueError):
+        _urllib_transport("POST", "https://api.spotify.com/v1/me/player/play", {}, {}, 5.0)
+    with pytest.raises(ValueError):
+        _urllib_transport("PUT", OAuthClient.TOKEN_URL, {}, {}, 5.0)
+    with pytest.raises(ValueError):
+        _urllib_transport("PATCH", "https://api.spotify.com/v1/me/player/play", {}, {}, 5.0)
+
+
+def test_urllib_transport_accepts_only_empty_204_as_empty_payload(monkeypatch):
+    from jarvis.services.spotify import _HTTPResponse, _OAuthTransportFailure, _urllib_transport, OAuthErrorCode
+
+    class Response:
+        def __init__(self, status): self.status = status
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b""
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Response(204))
+    accepted = _urllib_transport("PUT", "https://api.spotify.com/v1/me/player/play?device_id=opaque-device",
+                                 {"context_uri": "spotify:artist:opaque"}, {}, 5.0)
+    assert isinstance(accepted, _HTTPResponse)
+    assert accepted.status_code == 204
+    assert accepted.json() == {}
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Response(200))
+    rejected = _urllib_transport("GET", "https://api.spotify.com/v1/me/player", None, {}, 5.0)
+    assert isinstance(rejected, _OAuthTransportFailure)
+    assert rejected.code is OAuthErrorCode.INVALID_RESPONSE
+
+
+def test_urllib_transport_invalid_response_does_not_leak_body(monkeypatch):
+    from jarvis.services.spotify import _OAuthTransportFailure, _urllib_transport, OAuthErrorCode
+
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b"playback-secret"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Response())
+    result = _urllib_transport("GET", "https://api.spotify.com/v1/me/player", None, {}, 5.0)
+    assert isinstance(result, _OAuthTransportFailure)
+    assert result.code is OAuthErrorCode.INVALID_RESPONSE
+    assert "playback-secret" not in repr(result)
+
+
 @pytest.mark.parametrize(("status", "expected"), [
     (400, "token_http_400"),
     (401, "token_http_401"),

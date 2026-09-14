@@ -325,7 +325,8 @@ class KeyringCredentialStore:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         try:
             self._backend.set_password(self._service, self._username, value)
-            self._backend.delete_password(self._service, self._disabled_username)
+            if self._backend.get_password(self._service, self._disabled_username) is not None:
+                self._backend.delete_password(self._service, self._disabled_username)
         except Exception:
             return CredentialResult(CredentialStatus.STORAGE_UNAVAILABLE)
         return CredentialResult(CredentialStatus.OK)
@@ -665,12 +666,11 @@ def authorize_spotify_callback(
 
 @dataclass(frozen=True)
 class _HTTPResponse:
-    def __init__(self, status_code: int, payload: Any) -> None:
-        self.status_code = status_code
-        self._payload = payload
+    status_code: int
+    payload: Any = field(repr=False)
 
     def json(self) -> Any:
-        return self._payload
+        return self.payload
 
 
 def _urllib_transport(method: str, url: str, data: dict[str, str],

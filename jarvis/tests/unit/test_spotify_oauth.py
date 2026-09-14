@@ -1,5 +1,6 @@
 import base64
 import hashlib
+from urllib.error import HTTPError
 
 import pytest
 
@@ -152,6 +153,64 @@ def test_callback_is_one_time_and_requires_code() -> None:
 
 def test_approved_scopes_are_fixed() -> None:
     assert APPROVED_SPOTIFY_SCOPES == frozenset({"user-read-playback-state", "user-modify-playback-state"})
+
+
+def test_keyring_credential_save_treats_missing_disabled_marker_as_idempotent() -> None:
+    values: dict[tuple[str, str], str] = {}
+
+    class StrictBackend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            if (service, username) not in values:
+                raise KeyError(username)
+            del values[(service, username)]
+
+    store = KeyringCredentialStore(backend=StrictBackend())
+    assert store.save("token").status is CredentialStatus.OK
+    assert store.load().value == "token"
+
+
+def test_keyring_credential_save_clears_present_disabled_marker() -> None:
+    values = {
+        ("jarvis.spotify", "oauth:disabled"): "1",
+    }
+
+    class StrictBackend:
+        def get_password(self, service, username):
+            return values.get((service, username))
+
+        def set_password(self, service, username, value):
+            values[(service, username)] = value
+
+        def delete_password(self, service, username):
+            if (service, username) not in values:
+                raise KeyError(username)
+            del values[(service, username)]
+
+    store = KeyringCredentialStore(backend=StrictBackend())
+    assert store.save("token").status is CredentialStatus.OK
+    assert store.load().status is CredentialStatus.OK
+    assert values == {("jarvis.spotify", "oauth"): "token"}
+
+
+def test_keyring_credential_save_fails_closed_on_marker_delete_failure() -> None:
+    class BrokenBackend:
+        def get_password(self, service, username):
+            return "1" if username == "oauth:disabled" else None
+
+        def set_password(self, service, username, value):
+            pass
+
+        def delete_password(self, service, username):
+            raise RuntimeError("delete failed")
+
+    store = KeyringCredentialStore(backend=BrokenBackend())
+    assert store.save("token").status is CredentialStatus.STORAGE_UNAVAILABLE
 
 
 def test_keyring_store_round_trip_and_delete() -> None:
@@ -460,6 +519,92 @@ def test_oauth_factory_accepts_only_keyring_validated_client_id_and_redacts_setu
     )
     assert client is not None
     assert "b" * 32 not in repr(client)
+
+
+def test_live_urllib_valid_token_response_uses_production_transport_and_saves(monkeypatch) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, _urllib_transport
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"access_token":"access","refresh_token":"refresh","expires_in":3600,"scope":"user-read-playback-state user-modify-playback-state"}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response())
+    store = _MemoryTokenStore()
+    client = OAuthClient(
+        enabled=True, client_id="client", store=store,
+        transport=_urllib_transport, clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+
+    result = client.exchange_code(tx, "code", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.OK
+    assert result.access_token == "access"
+    assert store.value["refresh_token"] == "refresh"
+
+
+def test_live_urllib_http_error_invalid_grant_cleans_up(monkeypatch) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, _urllib_transport
+
+    def raise_http_error(*args, **kwargs):
+        raise HTTPError(
+            "https://accounts.spotify.com/api/token", 400, "bad grant", {},
+            __import__("io").BytesIO(b'{"error":"invalid_grant"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_http_error)
+    store = _MemoryTokenStore()
+    client = OAuthClient(
+        enabled=True, client_id="client", store=store,
+        transport=_urllib_transport, clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+
+    result = client.exchange_code(tx, "code", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.INVALID_GRANT
+    assert store.deleted
+
+
+@pytest.mark.parametrize("status", [401, 500])
+def test_live_urllib_other_http_error_preserves_typed_status_category(monkeypatch, status) -> None:
+    from jarvis.services.spotify import OAuthClient, OAuthErrorCode, _urllib_transport
+
+    def raise_http_error(*args, **kwargs):
+        raise HTTPError(
+            "https://accounts.spotify.com/api/token", status, "provider failure", {},
+            __import__("io").BytesIO(b'{"error":"provider-secret"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_http_error)
+    client = OAuthClient(
+        enabled=True, client_id="client", store=_MemoryTokenStore(),
+        transport=_urllib_transport, clock=lambda: 100.0,
+    )
+    tx = create_pkce_transaction("session-1", now=100.0, token_factory=lambda: "state")
+
+    result = client.exchange_code(tx, "code", session_id="session-1")
+
+    assert result.code is OAuthErrorCode.PROVIDER_ERROR
+    assert result.diagnostic == ("token_http_401" if status == 401 else "token_http_other")
+    assert "provider-secret" not in repr(result)
+
+
+def test_live_http_response_repr_hides_payload() -> None:
+    from jarvis.services.spotify import _HTTPResponse
+
+    response = _HTTPResponse(200, {"access_token": "payload-secret"})
+
+    assert "payload-secret" not in repr(response)
+    assert response.json() == {"access_token": "payload-secret"}
 
 
 def test_live_urllib_malformed_token_response_maps_to_invalid_response(monkeypatch) -> None:

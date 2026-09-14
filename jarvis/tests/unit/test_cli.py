@@ -162,3 +162,26 @@ def test_spotify_live_mode_rejects_timeout_above_hard_max(monkeypatch, capsys):
 def test_existing_setup_spotify_alias_remains_routed(monkeypatch):
     monkeypatch.setattr(cli, "_handle_spotify_setup", lambda: 7)
     assert cli.main(["spotify", "setup"]) == 7
+
+
+def test_spotify_search_cli_routes_safe_candidates_without_playback(monkeypatch, capsys):
+    from jarvis.services.spotify import CatalogBridgeCode, CatalogCandidate, CatalogResult, CatalogCode
+    class FakeBridge:
+        def __init__(self, **kwargs): self.kwargs = kwargs
+        def search(self, kind, query, *, session_id, limit):
+            assert (kind, query, session_id, limit) == ("album", "Björk", "cli", 10)
+            return type("Result", (), {"code": CatalogBridgeCode.OK, "catalog": CatalogResult(CatalogCode.SINGLE, (CatalogCandidate("opaque", "album", "Vespertine", "spotify:album:raw"),))})()
+    monkeypatch.setattr(cli, "SpotifyCatalogBridge", FakeBridge)
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": True, "authorized": True}, object(), lambda *a: None))
+    assert cli.main(["spotify", "search", "--kind", "album", "--query", "Björk"]) == 0
+    output = capsys.readouterr().out
+    assert "Vespertine" in output and "album" in output and "opaque" in output
+    assert "spotify:album:raw" not in output and "Björk" not in output
+
+
+def test_spotify_search_cli_disabled_does_not_construct_or_transport(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_spotify_search_dependencies", lambda: ({"enabled": False, "authorized": False}, object(), pytest.fail))
+    monkeypatch.setattr(cli, "create_spotify_oauth_client", pytest.fail)
+    assert cli.main(["spotify", "search", "--kind", "artist", "--query", "secret-query"]) == 1
+    assert "secret-query" not in capsys.readouterr().err

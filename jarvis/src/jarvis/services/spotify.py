@@ -503,7 +503,7 @@ class OAuthClient:
         if not token.ok:
             return token
         try:
-            response = self._transport(method, url, data or {},
+            response = self._transport(method, url, (None if method.upper() == "GET" else (data or {})),
                                        {"Authorization": f"Bearer {token.access_token}"}, self._timeout)
         except (TimeoutError, OSError):
             return self._result(OAuthErrorCode.NETWORK_TIMEOUT)
@@ -673,14 +673,23 @@ class _HTTPResponse:
         return self.payload
 
 
-def _urllib_transport(method: str, url: str, data: dict[str, str],
+def _urllib_transport(method: str, url: str, data: dict[str, str] | None,
                       headers: dict[str, str], timeout: float) -> _HTTPResponse:
     """Bounded live transport; only called by the explicit live CLI mode."""
     from urllib.error import HTTPError
     from urllib.parse import urlencode
     from urllib.request import Request, urlopen
 
-    request = Request(url, data=urlencode(data).encode(), headers=headers, method=method)
+    method = method.upper()
+    if method == "GET":
+        query = urlencode(data or {})
+        parsed = urlsplit(url)
+        existing = parsed.query + ("&" if parsed.query and query else "") + query
+        url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, existing, parsed.fragment))
+        body = None
+    else:
+        body = urlencode(data or {}).encode()
+    request = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(request, timeout=timeout) as response:
             try:

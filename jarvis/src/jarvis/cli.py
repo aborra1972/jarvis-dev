@@ -22,9 +22,10 @@ from jarvis.orchestrator import loop
 from jarvis.services.spotify import (
     ClientIdStatus, KeyringClientIdStore, create_pkce_transaction,
     create_spotify_authorization, redacted_authorization_url,
-        run_spotify_live_authorization, _create_loopback_server, _urllib_transport,
+    run_spotify_live_authorization, _create_loopback_server, _urllib_transport,
     resolve_spotify_client_id, SPOTIFY_LIVE_TIMEOUT_DEFAULT_S,
-    SPOTIFY_LIVE_TIMEOUT_MAX_S,
+    SPOTIFY_LIVE_TIMEOUT_MAX_S, KeyringCredentialStore,
+    create_spotify_oauth_client, SpotifyCatalogBridge, CatalogBridgeCode,
 )
 
 COMMANDS = (
@@ -285,12 +286,49 @@ def _handle_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _spotify_search_dependencies():
+    from jarvis import config
+    return config.load_spotify_oauth_config(), KeyringCredentialStore(), _urllib_transport
+
+
+def _handle_spotify_search(args: argparse.Namespace) -> int:
+    configuration, store, transport = _spotify_search_dependencies()
+    if configuration.get("enabled") is not True or configuration.get("authorized") is not True:
+        print("jarvis spotify search: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    client = create_spotify_oauth_client(configuration, store=store, transport=transport)
+    if client is None:
+        print("jarvis spotify search: Spotify API disabled or unauthorized.", file=sys.stderr)
+        return 1
+    bridge = SpotifyCatalogBridge(oauth=client, transport=transport)
+    result = bridge.search(args.kind, args.query, session_id="cli", limit=args.limit)
+    if result.code is not CatalogBridgeCode.OK or result.catalog is None:
+        print(f"jarvis spotify search: {result.code.value}.", file=sys.stderr)
+        return 1
+    for candidate in result.catalog.candidates:
+        print(f"{candidate.name}\t{candidate.kind}\t{candidate.selection_id}")
+    return 0
+
+
+def _parse_spotify_search(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="jarvis spotify search")
+    parser.add_argument("--kind", choices=("album", "artist"), required=True)
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--limit", type=int, default=10)
+    args = parser.parse_args(argv)
+    if not 1 <= args.limit <= 10:
+        parser.error("--limit must be between 1 and 10")
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns a process exit code."""
     parser = build_parser()
     # Keep the historical top-level command list stable while accepting the
     # clearer Spotify setup spelling as an equivalent alias.
     effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv[:2] == ["spotify", "search"]:
+        return _handle_spotify_search(_parse_spotify_search(effective_argv[2:]))
     if effective_argv[:3] == ["spotify", "authorize", "--live"]:
         timeout_s = SPOTIFY_LIVE_TIMEOUT_DEFAULT_S
         remaining = effective_argv[3:]

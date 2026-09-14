@@ -687,6 +687,49 @@ def test_exchange_uses_pkce_scopes_and_bounded_transport() -> None:
     assert "access" not in repr(result) and "code" not in repr(result)
 
 
+def test_urllib_get_uses_query_string_and_no_body(monkeypatch):
+    from jarvis.services.spotify import _HTTPResponse, _urllib_transport
+    captured = {}
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b"{}"
+    def fake_request(url, data=None, headers=None, method=None):
+        captured.update(url=url, data=data, headers=headers, method=method)
+        return object()
+    monkeypatch.setattr("urllib.request.Request", fake_request)
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Response())
+    response = _urllib_transport("GET", "https://api.spotify.com/v1/search",
+                                 {"q": "Björk", "type": "artist", "limit": 10},
+                                 {"Authorization": "Bearer token"}, 5.0)
+    assert isinstance(response, _HTTPResponse)
+    assert captured["url"] == "https://api.spotify.com/v1/search?q=Bj%C3%B6rk&type=artist&limit=10"
+    assert captured["data"] is None
+    assert captured["method"] == "GET"
+    assert captured["headers"] == {"Authorization": "Bearer token"}
+
+
+def test_urllib_post_keeps_form_body(monkeypatch):
+    from jarvis.services.spotify import _urllib_transport
+    captured = {}
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return b"{}"
+    def fake_request(url, data=None, headers=None, method=None):
+        captured.update(url=url, data=data, headers=headers, method=method)
+        return object()
+    monkeypatch.setattr("urllib.request.Request", fake_request)
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Response())
+    _urllib_transport("POST", "https://accounts.spotify.com/api/token",
+                      {"code": "auth-code"}, {"Content-Type": "application/x-www-form-urlencoded"}, 5.0)
+    assert captured["url"] == "https://accounts.spotify.com/api/token"
+    assert captured["data"] == b"code=auth-code"
+    assert captured["method"] == "POST"
+
+
 def test_refresh_is_single_flight_and_rotates_refresh_token() -> None:
     from jarvis.services.spotify import OAuthClient
 
